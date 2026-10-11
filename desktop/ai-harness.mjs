@@ -1,17 +1,22 @@
-import { LlmAdapter, attributionHeaders, createUserMessage } from '@deepseek-ai/dsh-llm';
+import { LlmAdapter, LlmError, attributionHeaders, createUserMessage } from '@deepseek-ai/dsh-llm';
 import { mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { atomicJson } from './ai-batches.mjs';
 import { proxyRequest } from './ai-proxy.mjs';
 import { HOST_CHAT_PREFIX, isHostChat } from './ai-plugin-tools.mjs';
+import { HARNESS_VERSION } from './harness-version.mjs';
 
 export function wireMessages(options) {
   const messages = options.messages.map(message => {
+    // Harness images are durable attachment references, not URLs or local paths.
+    // This adapter has no attachment service bridge yet; never silently drop one.
+    if (message.content.some(block => block.type === 'image' || block.type === 'file')) throw new LlmError('助手暂不支持附件，请使用文字或插件工具。', 'UNSUPPORTED_CONTENT');
     const content = message.content.filter(block => block.type === 'text').map(block => block.text).join('\n');
     if (message.role === 'assistant') {
       const calls = message.content.filter(block => block.type === 'tool-call').map(block => ({ id: block.id, type: 'function', function: { name: block.name, arguments: block.arguments } }));
-      return { role: 'assistant', content: content || null, ...(calls.length ? { tool_calls: calls } : {}) };
+      const reasoning = message.content.filter(block => block.type === 'reasoning').map(block => block.text).join('\n');
+      return { role: 'assistant', content: content || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(calls.length ? { tool_calls: calls } : {}) };
     }
     if (message.role === 'tool') return { role: 'tool', tool_call_id: message.toolCallId, content };
     return { role: message.role, content };
@@ -19,53 +24,144 @@ export function wireMessages(options) {
   if (options.system) messages.unshift({ role: 'system', content: options.system }); return messages;
 }
 export async function* readSse(response) {
-  const decoder = new TextDecoder(); let pending = '', total = 0;
-  for await (const bytes of response.body ?? []) {
-    total += bytes.length; if (total > 8 * 1024 ** 2) throw new Error('助手响应过大。');
-    pending += decoder.decode(bytes, { stream: true });
-    let end;
-    while ((end = pending.indexOf('\n')) >= 0) {
-      const line = pending.slice(0, end).trim(); pending = pending.slice(end + 1);
-      if (!line.startsWith('data:')) continue;
-      const value = line.slice(5).trim(); if (value === '[DONE]') return;
-      if (value) yield JSON.parse(value);
-    }
+  const decoder = new TextDecoder('utf-8', { fatal: true }); let pending = '', total = 0, data = [];
+  function event() {
+    if (!data.length) return;
+    const value = data.join('\n'); data = [];
+    if (value.trim() === '[DONE]') return { done: true };
+    if (!value.trim()) return;
+    try { return { value: JSON.parse(value) }; } catch { throw new LlmError('助手响应格式无效。', 'PROXY_PROTOCOL'); }
   }
-  if (pending.startsWith('data:') && pending.slice(5).trim() !== '[DONE]') yield JSON.parse(pending.slice(5));
+  function line(value) {
+    if (value === '') return event();
+    if (value.startsWith('data:')) data.push(value.slice(5).replace(/^ /, ''));
+  }
+  function decode(bytes, stream = false) {
+    try { return decoder.decode(bytes, { stream }); } catch { throw new LlmError('助手响应字符编码无效。', 'PROXY_PROTOCOL'); }
+  }
+  function* consume(final = false) {
+    let end;
+    while ((end = pending.search(/[\r\n]/)) >= 0) {
+      if (!final && pending[end] === '\r' && end === pending.length - 1) break;
+      const value = pending.slice(0, end), length = pending[end] === '\r' && pending[end + 1] === '\n' ? 2 : 1;
+      pending = pending.slice(end + length);
+      const parsed = line(value); if (parsed) yield parsed;
+    }
+    if (final) { if (pending) line(pending); pending = ''; const parsed = event(); if (parsed) yield parsed; }
+  }
+  for await (const bytes of response.body ?? []) {
+    total += bytes.byteLength; if (total > 8 * 1024 ** 2) throw new LlmError('助手响应过大。', 'RESPONSE_TOO_LARGE');
+    pending += decode(bytes, true);
+    for (const parsed of consume()) { if (parsed.done) return; yield parsed.value; }
+  }
+  pending += decode();
+  for (const parsed of consume(true)) { if (parsed.done) return; yield parsed.value; }
+}
+const tokenCount = value => Number.isSafeInteger(value) && value >= 0;
+function tokenUsage(value) {
+  if (!value || !tokenCount(value.prompt_tokens) || !tokenCount(value.completion_tokens)) return;
+  const cached = value.prompt_tokens_details?.cached_tokens ?? value.prompt_cache_hit_tokens;
+  if (cached !== undefined && (!tokenCount(cached) || cached > value.prompt_tokens)) return;
+  const usage = { inputTokens: value.prompt_tokens - (cached ?? 0), outputTokens: value.completion_tokens };
+  if (cached !== undefined) usage.cacheReadTokens = cached;
+  const total = value.prompt_tokens + value.completion_tokens;
+  if (tokenCount(total) && (value.total_tokens === undefined || value.total_tokens === total)) usage.totalTokens = total;
+  const reasoning = value.completion_tokens_details?.reasoning_tokens;
+  if (tokenCount(reasoning) && reasoning <= value.completion_tokens) usage.reasoningTokens = reasoning;
+  return usage;
+}
+function finishReason(reason) {
+  if (reason === 'stop') return { kind: 'stop' };
+  if (reason === 'tool_calls') return { kind: 'tool-calls' };
+  if (reason === 'length') return { kind: 'max-tokens' };
+  if (reason === 'content_filter') throw new LlmError('助手响应被模型内容过滤器停止。', 'CONTENT_FILTER');
+  throw new LlmError('助手返回了不受支持的结束原因。', 'PROXY_PROTOCOL');
 }
 export class CliProxyAdapter extends LlmAdapter {
   constructor(invoke, sessions, request = proxyRequest) { super(); this.invoke = invoke; this.sessions = sessions; this.request = request; }
   async listModels() { return (await this.invoke('ai', 'models', {})).map(item => ({ id: item.id, name: item.id })); }
   async *stream(options) {
     const session = [...this.sessions.values()].find(item => item.id === options.sessionId); if (!session) throw new Error('助手会话未授权。');
-    const { base, key } = await this.invoke('ai', 'connection', { owner: session.owner });
-    const calls = new Map(); let text = '', textStarted = false, nextIndex = 0, finished = false;
+    const calls = new Map(), blocks = []; let text = '', textBlock, reasoningBlock, reason, usage;
+    const signal = AbortSignal.any([options.signal || new AbortController().signal, AbortSignal.timeout(120000)]);
     try {
-      const response = await this.request(base, '/v1/chat/completions', { method: 'POST', headers: { ...attributionHeaders(), Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: options.model, messages: wireMessages(options), tools: options.tools?.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })), stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.any([options.signal || new AbortController().signal, AbortSignal.timeout(120000)]) });
-      if (!response.ok) { await response.body?.cancel(); throw new Error('助手模型请求失败（' + response.status + '）。'); }
+      signal.throwIfAborted();
+      const messages = wireMessages(options);
+      const { base, key } = await this.invoke('ai', 'connection', { owner: session.owner });
+      signal.throwIfAborted();
+      const body = {
+        model: options.model, messages,
+        tools: options.tools?.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
+        ...(options.stop !== undefined ? { stop: options.stop } : {}),
+        ...(options.reasoningEffort !== undefined ? { reasoning_effort: options.reasoningEffort } : {}),
+        stream: true, stream_options: { include_usage: true },
+      };
+      const response = await this.request(base, '/v1/chat/completions', { method: 'POST', headers: { ...attributionHeaders(), Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+      if (!response.ok) { await response.body?.cancel(); throw new LlmError('助手模型请求失败（' + response.status + '）。', 'PROXY_HTTP_ERROR', { status: response.status }); }
       let textIndex;
       for await (const event of readSse(response)) {
-        if (event.error) throw new Error('助手模型返回错误。');
-        const choice = event.choices?.[0], delta = choice?.delta;
+        signal.throwIfAborted();
+        if (!event || typeof event !== 'object' || Array.isArray(event)) throw new LlmError('助手响应格式无效。', 'PROXY_PROTOCOL');
+        if (event.error) throw new LlmError('助手模型返回错误。', 'PROXY_ERROR');
+        if (event.usage) usage = tokenUsage(event.usage) ?? usage;
+        if (event.choices !== undefined && !Array.isArray(event.choices)) throw new LlmError('助手响应格式无效。', 'PROXY_PROTOCOL');
+        const choice = event.choices?.find(item => item?.index === 0) ?? event.choices?.[0], delta = choice?.delta;
+        if (reason && (delta?.content || delta?.reasoning_content || delta?.tool_calls?.length)) throw new LlmError('助手结束后仍返回内容。', 'PROXY_PROTOCOL');
+        for (const field of ['content', 'reasoning_content']) if (delta?.[field] != null && typeof delta[field] !== 'string') throw new LlmError('助手响应格式无效。', 'PROXY_PROTOCOL');
+        if (delta?.reasoning_content) {
+          if (!reasoningBlock) { reasoningBlock = { index: blocks.length, type: 'reasoning', text: '' }; blocks.push(reasoningBlock); yield { type: 'block-start', index: reasoningBlock.index, blockType: 'reasoning' }; }
+          reasoningBlock.text += delta.reasoning_content; yield { type: 'reasoning-delta', index: reasoningBlock.index, text: delta.reasoning_content };
+        }
         if (delta?.content) {
-          if (!textStarted) { textStarted = true; textIndex = nextIndex++; yield { type: 'block-start', index: textIndex, blockType: 'text' }; }
+          if (!textBlock) { textBlock = { index: blocks.length, type: 'text', text: '' }; blocks.push(textBlock); textIndex = textBlock.index; yield { type: 'block-start', index: textIndex, blockType: 'text' }; }
+          textBlock.text += delta.content;
           text += delta.content; session.partial = text; yield { type: 'text-delta', index: textIndex, text: delta.content };
           await this.invoke('ai', 'event', { owner: session.owner, event: { type: 'assistant-delta', text: delta.content, partial: text } });
         }
+        if (delta?.tool_calls !== undefined && !Array.isArray(delta.tool_calls)) throw new LlmError('助手工具调用格式无效。', 'PROXY_PROTOCOL');
         for (const deltaCall of delta?.tool_calls || []) {
+          if (!deltaCall || !tokenCount(deltaCall.index)) throw new LlmError('助手工具调用格式无效。', 'PROXY_PROTOCOL');
           let call = calls.get(deltaCall.index);
-          if (!call) { call = { index: nextIndex++, id: deltaCall.id, name: '', arguments: '' }; calls.set(deltaCall.index, call); yield { type: 'block-start', index: call.index, blockType: 'tool-call' }; }
-          if (deltaCall.id) call.id = deltaCall.id;
+          if (!call) { if (calls.size >= 64) throw new LlmError('助手工具调用过多。', 'PROXY_PROTOCOL'); call = { index: blocks.length, type: 'tool-call', id: '', name: '', arguments: '', sentArguments: 0 }; calls.set(deltaCall.index, call); blocks.push(call); yield { type: 'block-start', index: call.index, blockType: 'tool-call' }; }
+          if (deltaCall.id != null) { if (typeof deltaCall.id !== 'string' || !deltaCall.id || call.id && call.id !== deltaCall.id) throw new LlmError('助手工具调用标识无效。', 'PROXY_PROTOCOL'); call.id = deltaCall.id; }
+          for (const field of ['name', 'arguments']) if (deltaCall.function?.[field] != null && typeof deltaCall.function[field] !== 'string') throw new LlmError('助手工具调用格式无效。', 'PROXY_PROTOCOL');
           call.name += deltaCall.function?.name || ''; call.arguments += deltaCall.function?.arguments || '';
-          yield { type: 'tool-call-delta', index: call.index, id: call.id, name: call.name, argumentsDelta: deltaCall.function?.arguments || '' };
+          if (call.id) { yield { type: 'tool-call-delta', index: call.index, id: call.id, name: call.name, argumentsDelta: call.arguments.slice(call.sentArguments) }; call.sentArguments = call.arguments.length; }
         }
-        if (choice?.finish_reason) finished = true;
+        if (choice?.finish_reason != null) { const next = finishReason(choice.finish_reason); if (reason && reason.kind !== next.kind) throw new LlmError('助手结束原因冲突。', 'PROXY_PROTOCOL'); reason = next; }
       }
-      if (!finished) throw new Error('助手响应中断，请手动重试。');
-      if (textStarted) { yield { type: 'block-end', index: textIndex, block: { type: 'text', text } }; session.history.push({ role: 'assistant', text }); session.partial = ''; }
-      for (const call of calls.values()) yield { type: 'block-end', index: call.index, block: { type: 'tool-call', id: call.id, name: call.name, arguments: call.arguments } };
-      yield { type: 'finish', reason: { kind: calls.size ? 'tool-calls' : 'stop' } };
-    } catch (error) { if (session.partial) { session.history.push({ role: 'assistant', text: session.partial }); session.partial = ''; } session.error = options.signal?.aborted ? '助手已停止。' : error.message; yield { type: 'finish', reason: { kind: options.signal?.aborted ? 'aborted' : 'error', failure: { code: options.signal?.aborted ? 'ABORTED' : 'PROXY_ERROR', message: error.message } } }; }
+      signal.throwIfAborted();
+      if (!reason) throw new LlmError('助手响应中断，请手动重试。', 'STREAM_CLOSED');
+      if (!blocks.length && reason.kind === 'stop') throw new LlmError('助手模型未返回内容。', 'EMPTY_RESPONSE');
+      if (reason.kind !== 'max-tokens') {
+        const ids = new Set();
+        for (const call of calls.values()) {
+          let args; try { args = JSON.parse(call.arguments); } catch { }
+          if (!call.id || !call.name || ids.has(call.id) || !args || typeof args !== 'object' || Array.isArray(args)) throw new LlmError('助手工具调用不完整，请手动重试。', 'PROXY_PROTOCOL');
+          ids.add(call.id);
+        }
+        if (reason.kind === 'tool-calls' && !calls.size) throw new LlmError('助手工具调用缺失。', 'PROXY_PROTOCOL');
+      }
+      for (const block of blocks) {
+        if (block.type === 'tool-call') {
+          if (reason.kind !== 'max-tokens') yield { type: 'block-end', index: block.index, block: { type: block.type, id: block.id, name: block.name, arguments: block.arguments } };
+        }
+        else yield { type: 'block-end', index: block.index, block: { type: block.type, text: block.text } };
+      }
+      if (textBlock) { session.history.push({ role: 'assistant', text }); session.partial = ''; }
+      if (reason.kind === 'max-tokens') session.error = '助手回复达到长度上限，请继续对话。';
+      if (usage) yield { type: 'usage', usage };
+      yield { type: 'finish', reason };
+    } catch (error) {
+      if (session.partial) { session.history.push({ role: 'assistant', text: session.partial }); session.partial = ''; }
+      const aborted = options.signal?.aborted, timeout = !aborted && signal.aborted;
+      const message = aborted ? '助手已停止。' : timeout ? '助手请求超时，请手动重试。' : error.message || '助手模型请求失败。';
+      session.error = message;
+      if (usage) yield { type: 'usage', usage };
+      yield { type: 'finish', reason: { kind: aborted ? 'aborted' : 'error', failure: { ...(error instanceof LlmError ? error.failure : {}), code: aborted ? 'ABORTED' : timeout ? 'TIMEOUT' : error.code || 'PROXY_ERROR', message } } };
+    }
   }
 }
 export class HarnessAssistant {
@@ -75,7 +171,7 @@ export class HarnessAssistant {
     try { const records = JSON.parse(await readFile(path.join(this.root, 'sessions.json'), 'utf8')); if (records.schemaVersion !== 1 || !Array.isArray(records.sessions)) throw new Error('助手会话版本不受支持。'); for (const record of records.sessions) { if (record.state === 'running') record.error = '上次对话中断，未完成的插件调用不会自动重发。'; record.state = 'idle'; for (const entry of record.history) if (entry.role === 'tool' && entry.state === 'running') { entry.state = 'interrupted'; entry.text = '执行中断，结果未知；不会自动重发。'; } this.sessions.set(record.owner, record); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
     this.ctx.llm.registerAdapter(['cliproxy'], new CliProxyAdapter(this.invoke, this.sessions));
   }
-  persist() { const value = structuredClone({ schemaVersion: 1, harness: '0.2.1-alpha.1', sessions: [...this.sessions.values()] }); this.writing = this.writing.catch(() => {}).then(() => atomicJson(path.join(this.root, 'sessions.json'), value)); return this.writing; }
+  persist() { const value = structuredClone({ schemaVersion: 1, harness: HARNESS_VERSION, sessions: [...this.sessions.values()] }); this.writing = this.writing.catch(() => {}).then(() => atomicJson(path.join(this.root, 'sessions.json'), value)); return this.writing; }
   async handle(owner) {
     if (this.handles.has(owner)) return this.handles.get(owner);
     if (this.booting.has(owner)) return this.booting.get(owner);

@@ -33,3 +33,9 @@ npm run test:desktop
 ```
 
 候选版本还需用旧 JSONL 会话验证继续对话、取消、工具调用、未确认请求中断恢复和跨插件隔离；先备份 `harness/ai`、`harness/ai-session-logs`、`ai-batches` 与代理配置，再做迁移和安装包验收。升级失败保留旧固定版本及备份。绝不让候选测试访问生产凭据或发起付费生成。
+
+版本来源集中在 `desktop/upstream/harness.json`。`npm run upstream:check` 检查整个直接包族、嵌套包版本、Cordis 依赖范围、平台 Bundle peer、lockfile SRI，以及已审阅的原生加载器与 Electron 组合。`check-upstream` 根据当前 `alpha` 通道查询候选版本，不能用较旧的 `latest` 标签替代当前版本。
+
+`npm run upstream:harness -- prepare --version VERSION --directory output/upstream/harness-candidate` 在独立目录生成包族、Bundle、版本元数据和 lockfile；`validate --directory ...` 安装候选依赖，检查公开接口、Node/Electron 原生加载器、UI 构建与真实 Harness 会话和工具契约。验证使用本地 HTTP 模型响应及已脱敏的旧 JSONL，会话和凭据与实际用户环境分开。完整命令及安装包验收边界见 [整组升级流程](harness-upgrades.md)。
+
+代理适配层现支持按事件解析分片 SSE、推理内容回传、Token 用量、停止词与生成参数，以及区分正常结束、长度上限、过滤、请求失败和取消。长度上限不会执行截断工具调用。图像消息需要接入 Harness 的公开附件服务后才能支持，当前输入仍为文字。

@@ -1,4 +1,5 @@
-export const HARNESS_UI_VERSION = '0.2.1-alpha.1';
+import harness from '../../desktop/upstream/harness.json';
+export const HARNESS_UI_VERSION = harness.version;
 export interface ToolApproval { id: string; pluginId: string; pluginTitle: string; title: string; tool: string; args: Record<string, unknown>; detail?: Record<string, unknown> | null }
 export interface ChatMessage { role: 'user' | 'assistant' | 'tool'; text: string; id?: string; tool?: string; pluginId?: string; args?: Record<string, unknown>; state?: string }
 export interface ChatSession { id: string; title?: string; model?: string; state: 'idle' | 'running'; partial?: string; history: ChatMessage[]; error?: string | null; approvals?: ToolApproval[] }

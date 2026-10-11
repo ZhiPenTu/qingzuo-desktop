@@ -2,6 +2,7 @@ import { _electron, expect } from '@playwright/test';
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import cliProxy from '../desktop/upstream/cli-proxy.json' with { type: 'json' };
 
 const sourceExecutable = path.resolve(process.argv[2] || (process.platform === 'darwin'
   ? 'release/desktop/mac-arm64/Qingzuo.app/Contents/MacOS/Qingzuo'
@@ -39,7 +40,7 @@ try {
   expect(await readdir(resources)).not.toContain('plugins');
   expect(JSON.parse(await readFile(path.join(resources, 'distribution.json'), 'utf8')).preview).toBe(false);
   const proxy = JSON.parse(await readFile(path.join(resources, 'cli-proxy-version.json'), 'utf8'));
-  expect(proxy.version).toBe('8.0.23');
+  expect(proxy.version).toBe(cliProxy.version);
   expect(proxy.target).toBe(process.platform + '-' + process.arch);
   await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();

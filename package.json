@@ -1,7 +1,7 @@
 {
   "name": "qingzuo-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "main": "desktop/main.mjs",
   "workspaces": [
     "packages/*"
@@ -23,7 +23,11 @@
     "build:sandbox": "cargo build --release --manifest-path native/sandbox/Cargo.toml",
     "test:desktop": "playwright test --config tests/electron/playwright.config.mjs",
     "build:harness-native": "node scripts/build-harness-native.mjs",
-    "test:harness-contract": "node --test tests/platform/ai-chat.test.mjs tests/platform/ai.test.mjs && vitest run src/platform/AIChat.test.tsx"
+    "test:harness-contract": "node --test tests/platform/ai-chat.test.mjs tests/platform/ai.test.mjs tests/platform/ai-harness-adapter.test.mjs tests/platform/harness-session-compatibility.test.mjs tests/platform/harness-pending-session.test.mjs && vitest run src/platform/AIChat.test.tsx",
+    "upstream:check": "node scripts/harness-upstream.mjs check && node scripts/update-cli-proxy.mjs --validate-pin",
+    "upstream:cli-proxy": "node scripts/update-cli-proxy.mjs",
+    "upstream:harness": "node scripts/harness-upstream.mjs",
+    "test:cli-proxy-candidate": "node scripts/validate-cli-proxy.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
