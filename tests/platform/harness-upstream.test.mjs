@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, access, symlink } from 'node:f
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { inspectHarnessState, inspectInstalledHarness, readHarnessState, resolveCordisVersions, harnessRelease, isolatedEnvironment, candidateFileAllowed, prepareCandidate, validateCandidate, npmPackument } from '../../scripts/harness-upstream.mjs';
+import { inspectHarnessState, inspectInstalledHarness, readHarnessState, resolveCordisVersions, harnessRelease, isolatedEnvironment, candidateFileAllowed, prepareCandidate, validateCandidate, npmPackument, assertHarnessReportPath, main } from '../../scripts/harness-upstream.mjs';
 
 const integrity = 'sha512-' + Buffer.alloc(64).toString('base64');
 const record = (name, version, extra = {}) => ({ version, resolved: `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${version}.tgz`, integrity, ...extra });
@@ -67,9 +67,9 @@ test('Cordis resolver uses candidate ranges and backtracks independent group ver
 
 test('isolated processes retain required executable paths and omit user profiles, keys and npm config', () => {
   const env = isolatedEnvironment('/candidate', { PATH: '/bin', HOME: '/production', CODEX_HOME: '/codex', OPENAI_API_KEY: 'real-key', DSH_HOME: '/real-harness', npm_config_userconfig: '/real-npmrc', HTTPS_PROXY: 'https://user:secret@example.com' });
-  assert.equal(env.PATH, '/bin'); assert.equal(env.HOME, '/candidate/.validation/home');
+  assert.equal(env.PATH, '/bin'); assert.equal(env.HOME, path.join('/candidate', '.validation', 'home'));
   for (const name of ['CODEX_HOME', 'OPENAI_API_KEY', 'DSH_HOME', 'HTTPS_PROXY']) assert.equal(env[name], undefined);
-  assert.equal(env.npm_config_userconfig, '/candidate/.validation/empty.npmrc');
+  assert.equal(env.npm_config_userconfig, path.join('/candidate', '.validation', 'empty.npmrc'));
   for (const name of ['.env', '.env.local', '.npmrc', 'credentials.json', 'secrets.yaml', 'output/upstream/profile.json', 'resources/generated/secret.json', 'profile.key']) assert.equal(candidateFileAllowed(name), false, name);
   for (const name of ['desktop/credentials.mjs', 'tests/platform/credentials.test.mjs', 'docs/harness-integration.md', 'desktop/upstream/harness.json']) assert.equal(candidateFileAllowed(name), true, name);
 });
@@ -130,6 +130,20 @@ test('validate refuses the live checkout and linked installed dependencies befor
   await mkdir(fixture.directory); await writeFile(path.join(fixture.directory, '.harness-candidate.json'), JSON.stringify({ schemaVersion: 1, source: fixture.source }));
   await symlink(fixture.source, path.join(fixture.directory, 'node_modules'));
   await assert.rejects(validateCandidate({ directory: fixture.directory, runner: async () => assert.fail('No validation commands may run') }), /must not link/);
+});
+
+test('report preflight rejects protected input aliases before an operation or its failure handler can write', async context => {
+  const fixture = await sourceFixture(context), metadata = path.join(fixture.source, 'desktop/upstream/harness.json');
+  const before = await readFile(metadata), alias = path.join(fixture.source, 'report-alias.json');
+  await symlink(metadata, alias);
+  await assert.rejects(assertHarnessReportPath(alias, fixture), /must not overwrite a protected input/);
+  await assert.rejects(main(['unsupported-operation', '--directory', fixture.source, '--report', alias]), /must not overwrite a protected input/);
+  assert.deepEqual(await readFile(metadata), before, 'A rejected alias must never receive a fallback failure report.');
+  for (const input of ['package.json', 'package-lock.json', 'packages/platform-bundle/package.json', 'desktop/upstream/harness.json', '.harness-candidate.json']) {
+    await assert.rejects(assertHarnessReportPath(path.join(fixture.directory, input), fixture), /must not overwrite a protected input/);
+  }
+  const caseAlias = path.join(fixture.source, 'desktop/upstream/HARNESS.JSON');
+  if (await access(caseAlias).then(() => true, () => false)) await assert.rejects(assertHarnessReportPath(caseAlias, fixture), /must not overwrite a protected input/);
 });
 
 test('installed graph audit rejects stale Harness copies and modules resolving outside the candidate', async context => {

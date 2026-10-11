@@ -44,6 +44,8 @@ Cordis 的独立版本号不跟随 dsh 包族版本号。求解会审查 group�
 不继承 API key、Harness HOME、Codex HOME、代理认证或发布签名环境。
 
 准备结果在候选中的 `harness-prepare-report.json`；失败也会写报告。
+报告路径不能与源码或候选的 manifest、lockfile、上游固定版本或候选标记重合；
+大小写和符号链接别名也会在执行前拒绝，失败报告不能覆盖这些输入。
 不要把候选 `node_modules` 链接到当前工作区，这会绕过候选验证。
 
 ## 原生加载器是硬性升级门槛

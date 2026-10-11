@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { prepareAiProxy } from './prepare-ai-proxy.mjs';
-import { readCliProxyManifest } from './update-cli-proxy.mjs';
+import { canonicalOutputPath, readCliProxyManifest } from './update-cli-proxy.mjs';
 import { ProxyRuntime } from '../desktop/ai-proxy.mjs';
 import { verifyMacRuntime } from './verify-macos-runtime.mjs';
 
@@ -83,9 +83,9 @@ async function main() {
     } else throw new Error('Unknown option: ' + args[index]);
   }
   if (!reportFile) throw new Error('--report FILE is required.');
-  const protectedFiles = [fileURLToPath(new URL('../desktop/upstream/cli-proxy.json', import.meta.url)), manifestFile,
-    ...combine].filter(Boolean).map(file => path.resolve(file));
-  assert.ok(!protectedFiles.includes(path.resolve(reportFile)), 'The validation report must not overwrite its manifest or input reports.');
+  const protectedFiles = await Promise.all([fileURLToPath(new URL('../desktop/upstream/cli-proxy.json', import.meta.url)), manifestFile,
+    ...combine].filter(Boolean).map(canonicalOutputPath));
+  assert.ok(!protectedFiles.includes(await canonicalOutputPath(reportFile)), 'The validation report must not overwrite its manifest or input reports.');
   await rm(reportFile, { force: true });
   const manifest = await readCliProxyManifest(manifestFile);
   await mkdir(path.dirname(path.resolve(reportFile)), { recursive: true });

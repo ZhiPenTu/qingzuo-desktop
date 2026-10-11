@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import semver from 'semver';
+import { canonicalOutputPath } from './update-cli-proxy.mjs';
 
 const metadataFile = 'desktop/upstream/harness.json';
 const markerFile = '.harness-candidate.json';
@@ -14,6 +15,16 @@ const exact = value => typeof value === 'string' && semver.valid(value) === valu
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 const save = async (file, value) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, JSON.stringify(value, null, 2) + '\n'); };
 const check = (id, ok, detail) => ({ id, status: ok ? 'passed' : 'failed', detail });
+const protectedInputs = ['package.json', 'package-lock.json', 'packages/platform-bundle/package.json', metadataFile, 'desktop/upstream/cli-proxy.json', markerFile];
+
+export async function assertHarnessReportPath(filename, { source, directory, sources = [] }) {
+  const output = await canonicalOutputPath(filename);
+  for (const root of new Set([source, directory, ...sources].filter(Boolean))) for (const input of protectedInputs) {
+    if (output === await canonicalOutputPath(path.join(root, input))) throw new Error('Harness report must not overwrite a protected input: ' + input);
+  }
+}
+
+const saveReport = async (filename, report, roots) => { await assertHarnessReportPath(filename, roots); await save(filename, report); };
 
 export async function readHarnessState(directory) {
   const [metadata, pkg, lock, bundle] = await Promise.all([
@@ -252,7 +263,7 @@ export async function prepareCandidate({ source, directory, version, getPackumen
   report.operation = 'prepare'; report.directory = path.resolve(directory); report.previousVersion = original.metadata.version;
   report.cordis = resolved; report.createdAt = new Date().toISOString();
   report.metadata = manifests.map(item => ({ name: item.name, version: item.version, integrity: item.dist?.integrity, tarball: item.dist?.tarball }));
-  await save(path.join(directory, 'harness-prepare-report.json'), report);
+  await saveReport(path.join(directory, 'harness-prepare-report.json'), report, { source, directory });
   return report;
 }
 
@@ -334,6 +345,14 @@ export async function main(args = process.argv.slice(2)) {
     else throw new Error('Unknown or incomplete option: ' + flag);
   }
   const source = process.cwd(), directory = path.resolve(options.directory ?? (operation === 'prepare' ? path.join(source, 'output/upstream', 'harness-' + (options.version ?? 'candidate')) : source));
+  const candidateSource = await json(path.join(directory, markerFile)).then(marker => typeof marker.source === 'string' ? marker.source : undefined, () => undefined);
+  const roots = { source, directory, sources: [candidateSource] };
+  // Preflight sits outside the error-report handler: a rejected report path
+  // must never be reused as a destination for the failure report itself.
+  if (options.report) await assertHarnessReportPath(path.resolve(options.report), roots);
+  if (operation === 'validate') await assertHarnessReportPath(path.join(directory, 'harness-validation-report.json'), roots);
+  if (operation === 'prepare') await assertHarnessReportPath(path.join(directory, 'harness-prepare-report.json'), roots);
+  await assertHarnessReportPath(path.join(source, 'output/upstream', 'harness-' + operation + '-failure.json'), roots);
   let report;
   try {
   if (operation === 'check') report = inspectHarnessState(await readHarnessState(directory));
@@ -345,14 +364,14 @@ export async function main(args = process.argv.slice(2)) {
   } else if (operation === 'validate') {
     if (!options.directory) throw new Error('validate requires --directory PATH from prepare.');
     report = await validateCandidate({ directory, offline: !!options.offline });
-    await save(path.join(directory, 'harness-validation-report.json'), report);
+    await saveReport(path.join(directory, 'harness-validation-report.json'), report, roots);
   } else throw new Error('Expected check, check-upstream, prepare --version VERSION, or validate --directory PATH.');
   } catch (error) {
     report = { schemaVersion: 1, component: 'harness', operation, status: 'failed', version: options.version, directory, error: error.message, checks: [] };
     const failureReport = options.report ?? path.join(source, 'output/upstream', 'harness-' + operation + '-failure.json');
-    await save(path.resolve(failureReport), report); report.report = path.resolve(failureReport);
+    await saveReport(path.resolve(failureReport), report, roots); report.report = path.resolve(failureReport);
   }
-  if (options.report) await save(path.resolve(options.report), report);
+  if (options.report) await saveReport(path.resolve(options.report), report, roots);
   console.log(JSON.stringify({ operation, status: report.status, version: report.version, checks: report.checks.length,
     failed: report.checks.filter(item => item.status === 'failed'), error: report.error,
     release: report.release, directory: report.directory, report: options.report ? path.resolve(options.report) : report.report ?? (report.operation === 'prepare' ? path.join(report.directory, 'harness-prepare-report.json') : report.operation === 'validate' ? path.join(report.directory, 'harness-validation-report.json') : undefined), pending: report.pending }, null, 2));

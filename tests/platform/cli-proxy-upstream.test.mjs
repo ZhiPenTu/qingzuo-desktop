@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CLI_PROXY_REPOSITORY, cliProxyAssetUrl, inspectCliProxyRelease, parseCliProxyChecksums, readCliProxyManifest, updateCliProxy, validateCliProxyCompatibility, validateCliProxyManifest, verifiedCliProxyDownload } from '../../scripts/update-cli-proxy.mjs';
+import { CLI_PROXY_REPOSITORY, assertDistinctOutputPaths, canonicalOutputPath, cliProxyAssetUrl, inspectCliProxyRelease, parseCliProxyChecksums, readCliProxyManifest, updateCliProxy, validateCliProxyCompatibility, validateCliProxyManifest, verifiedCliProxyDownload } from '../../scripts/update-cli-proxy.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function releaseFixture(version = '8.0.24') {
@@ -147,6 +147,29 @@ test('custom output paths cannot overwrite the pin or corrupt a staged candidate
     await assert.rejects(updateCliProxy({ ...options, ...change }), /separate files/);
   }
   assert.deepEqual(await readFile(options.manifestPath), before); assert.equal(fixture.calls.length, 0);
+});
+
+test('existing case aliases and case-only future outputs cannot overwrite protected files', async context => {
+  const { root, options, fixture } = await workspace(context), before = await readFile(options.manifestPath);
+  const uppercasePin = path.join(root, 'PIN.JSON');
+  const aliases = await readFile(uppercasePin).then(() => true, () => false);
+  if (!aliases) { context.skip('Filesystem is case sensitive.'); return; }
+  assert.equal(await canonicalOutputPath(options.manifestPath), await canonicalOutputPath(uppercasePin));
+  await assert.rejects(updateCliProxy({ ...options, reportPath: uppercasePin }), /separate files/);
+  await assert.rejects(updateCliProxy({ ...options, mode: 'prepare', candidatePath: path.join(root, 'Future', 'Candidate.json'), reportPath: path.join(root, 'future', 'candidate.JSON') }), /separate files/);
+  assert.deepEqual(await readFile(options.manifestPath), before); assert.equal(fixture.calls.length, 0);
+});
+
+test('symlinked output parents resolve to the protected pin and missing sibling outputs', async context => {
+  const { root, options, fixture } = await workspace(context), before = await readFile(options.manifestPath);
+  const actual = path.join(root, 'actual'), alias = path.join(root, 'alias');
+  await mkdir(actual); await symlink(actual, alias, 'junction');
+  await writeFile(path.join(actual, 'protected.json'), before);
+  assert.equal(await canonicalOutputPath(path.join(actual, 'protected.json')), await canonicalOutputPath(path.join(alias, 'protected.json')));
+  assert.equal(await canonicalOutputPath(path.join(actual, 'new', 'report.json')), await canonicalOutputPath(path.join(alias, 'new', 'report.json')));
+  await assert.rejects(assertDistinctOutputPaths([path.join(actual, 'protected.json'), path.join(alias, 'protected.json')]), /separate files/);
+  await assert.rejects(updateCliProxy({ ...options, manifestPath: path.join(actual, 'protected.json'), reportPath: path.join(alias, 'protected.json') }), /separate files/);
+  assert.deepEqual(await readFile(path.join(actual, 'protected.json')), before); assert.equal(fixture.calls.length, 0);
 });
 
 test('already pinned release cannot be silently republished with different checksum metadata', async context => {
