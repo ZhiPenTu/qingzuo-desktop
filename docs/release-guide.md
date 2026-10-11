@@ -1,12 +1,12 @@
 # 轻作发布与独立插件
 
-底座版本 0.3.1，插件 API / SDK 1.2.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.3.2，插件 API / SDK 1.2.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 底座
 
 Node 24 和 Rust 构建工作台、Harness 适配和系统沙箱。npm run platform:prepare 会清理旧生成目录，禁止携带编辑器、OCR 模型或业务 Python 后端。
 
-Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.3.1 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
+Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.3.2 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
 
 插件市场公钥使用 COMMERCE_MARKET_PUBLIC_KEY；桌面组件继续使用既有 COMMERCE_PLUGIN_PUBLIC_KEY/COMMERCE_PLUGIN_SIGNING_KEY。两种用途在生成资源中分开记录。插件发布者不持有这两种私钥。
 
@@ -25,6 +25,8 @@ sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次�
 ## 市场
 
 qingzuo-market 校验正式发布来源、双平台制品、摘要、清单和 API 后签名并提 PR，合并目录即可上架。市场读取自身 Secrets 中的 Ed25519 私钥。旧 market/catalog.json 保留兼容旧客户端的条目。
+
+插件安装和更新由主进程后台任务执行，短内核请求只确认任务已开始。界面显示下载字节、进度、签名校验、安装和内核同步状态，切换页面不影响任务。同插件更新期间禁止重复提交、启停、恢复、卸载和本地导入；退出时取消下载，等待已进入安装事务的任务完成。下载持续传输时重置 120 秒无响应超时，最长允许 30 分钟；大小、HTTPS、签名、摘要和 API 验证保持有效。安装已提交但同步失败时，重试只补做同步。
 
 即时触发可配置仅授予市场 Actions 写入的 MARKET_TRIGGER_TOKEN；没有该凭据时由市场定时检查正式发布。新目录地址为 https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json。
 

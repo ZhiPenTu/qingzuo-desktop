@@ -13,6 +13,7 @@ import updater from 'electron-updater';
 const { autoUpdater } = updater;
 import {validateCatalog} from './catalog.mjs';
 import { UpdateService, nativeUpdateAdapter } from './update-service.mjs';
+import { PluginInstallService } from './plugin-install-service.mjs';
 import { macUpdateAdapter, previousUpdateError } from './mac-update.mjs';
 import {desktopSigningMode} from './distribution.mjs';
 import { preparePluginMigration } from './plugin-migration.mjs';
@@ -31,11 +32,11 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, quitting = false, hostReady;
+let window, manager, workers, files, credentials, network, host, quitting = false, quitReady = false, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
-let updateService;
+let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
 let batches, proxy, imageEditor, approvals;
@@ -99,6 +100,7 @@ function assertViewEpoch(id,epoch) {if(quitting || (viewEpochs.get(id) ?? 0)!==e
 async function loadView(id, settings, epoch) {
   while (toolSyncPromise) await toolSyncPromise;
   const plugin = await manager.get(id); if (!plugin.enabled || plugin.missing.length) throw new Error('插件已停用或缺少依赖。');
+  pluginInstallService.assertAvailable(id);
   assertViewEpoch(id,epoch);
   if (!views.has(id)) {
     let ses = pluginSessions.get(id);
@@ -120,6 +122,7 @@ async function loadView(id, settings, epoch) {
       ses.on('will-download', async (event, item) => { item.pause(); try { const current = await manager.get(id); if (!current.enabled || !current.permissions.files) { item.cancel(); return; } const result = await dialog.showSaveDialog(window, { defaultPath: path.basename(item.getFilename()) }); if (result.canceled) item.cancel(); else { item.setSavePath(result.filePath); item.resume(); } } catch (error) { console.error('Plugin download failed:', id, error.message); item.cancel(); } });
       pluginSessions.set(id, ses);
     }
+    pluginInstallService.assertAvailable(id);
     assertViewEpoch(id,epoch);
     const view = new WebContentsView({ webPreferences: { session: ses, preload: path.join(root, 'desktop/plugin-preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, spellcheck:false, additionalArguments: ['--commerce-plugin=' + id] } });
     view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
@@ -136,6 +139,7 @@ async function loadView(id, settings, epoch) {
     try { await view.webContents.loadURL('commerce-plugin://' + id + '/' + (settings ? plugin.settings?.entry || plugin.ui : plugin.ui)); }
     catch (e) { await closeView(id); throw e; }
   }
+  pluginInstallService.assertAvailable(id);
   assertViewEpoch(id,epoch);
   const destination = 'commerce-plugin://' + id + '/' + (settings ? plugin.settings?.entry || plugin.ui : plugin.ui);
   if (views.get(id).webContents.getURL() !== destination) await views.get(id).webContents.loadURL(destination);
@@ -147,10 +151,12 @@ function kernelRequest(message) {
 }
 let toolSyncPromise = null;
 async function syncTools() {
-  const current = (async () => {
+  // Reconcile mutates the Harness registry. Different plugin jobs may finish
+  // together, so queue only this operation; ordinary/nested RPC stays concurrent.
+  const current = (toolSyncPromise ?? Promise.resolve()).catch(() => {}).then(async () => {
     for (const p of await manager.list()) if (!p.enabled || p.missing.length) await closeView(p.id);
     return kernelRequest({ type: 'sync', plugins: (await manager.list()).map(({ id, enabled, missing, services }) => ({ id, enabled, missing, services })) });
-  })();
+  });
   toolSyncPromise = current;
   try { return await current; }
   finally { if (toolSyncPromise === current) toolSyncPromise = null; }
@@ -176,10 +182,10 @@ async function startKernel() {
   host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json'), enableAI: true } });
   await hostReady; await syncTools();
 }
-async function catalog() {
+async function catalog(signal) {
   const config = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
   if (!config.url || !config.publicKey) return { items: [], configured: false, message: '插件目录尚未发布。可以导入本地插件包。' };
-  const value = JSON.parse((await boundedDownload(config.url, 1024 * 1024)).toString());
+  const value = JSON.parse((await boundedDownload(config.url, 1024 * 1024, signal)).toString());
   return { items: validateCatalog(value), configured: true };
 }
 async function systemInvoke(service, method, args = {}) {
@@ -218,22 +224,18 @@ async function performPlatform(method, args) {
   if (method === 'plugins.import') {
     const result = await dialog.showOpenDialog(window, { title: '导入插件', properties: ['openFile'], filters: [{ name: '电商工具插件', extensions: ['ecplugin', 'zip'] }] }); if (result.canceled) return;
     const bytes = await readFile(result.filePaths[0]); const manifest=inspectPackage(bytes);
+    pluginInstallService.assertAvailable(manifest.id);
     const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n网络来源：' + (manifest.permissions.network ?? []).join('、') + '\n凭据名称：' + (manifest.permissions.credentials ?? []).join('、') + '\nAI 能力：' + (manifest.permissions.ai ?? []).join('、') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    pluginInstallService.assertAvailable(manifest.id);
     await manager.install(bytes); return;
   }
+  if (['plugins.enable', 'plugins.uninstall', 'plugins.rollback'].includes(method)) pluginInstallService.assertAvailable(args.id);
   if (method === 'plugins.enable') { await manager.setEnabled(args.id, args.enabled); return; }
   if (method === 'plugins.uninstall') { await manager.uninstall(args.id); return; }
   if (method === 'plugins.rollback') { await manager.rollback(args.id); return; }
   if (method === 'market.list') return catalog();
   if (method === 'market.install') {
-    const entry = (await catalog()).items.find(p => p.id === args.id);
-    if (entry && !entry.compatible) throw new Error('请先升级轻作，当前插件 API 不兼容。');
-    const artifact = entry?.artifacts?.[process.platform + '-' + process.arch]; if (!artifact) throw new Error('没有适用当前平台的制品。');
-    const restoring = args.id === 'official.labeledit' && await migration.status(manager);
-    await manager.install(await boundedDownload(artifact.url), { source: 'market', enabled: restoring ? migration.enabled : undefined,
-      record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, platform: process.platform + '-' + process.arch } });
-    if (restoring) await migration.dismiss();
-    return;
+    return pluginInstallService.start(args.id);
   }
   if (method === 'updates.check' || method === 'updates.download') {
     if (localPreview) throw new Error('本地预览版本不连接正式更新，请使用后续经过验收的安装包。');
@@ -261,7 +263,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
   }
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -270,8 +272,10 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'view.bounds') { const view = views.get(visible); if (view) { const {width,height} = window.getContentBounds(); if (['x','y','width','height'].every(k => Number.isFinite(args[k]) && args[k] >= 0) && args.x+args.width <= width+2 && args.y+args.height <= height+2) { view.setBounds(Object.fromEntries(['x','y','width','height'].map(k => [k,Math.floor(args[k])]))); view.setVisible(true); } } return; }
   const service = method.split('.')[0];
   if (!['plugins','market','updates'].includes(service)) throw new Error('平台操作不受支持。');
-  const result = await kernelRequest({type:'call',kind:'system',service,method,args});
-  if (service === 'plugins' || method === 'market.install') {
+  // The catalogue is native HTTP work, not a short kernel request. Installation
+  // still enters the registered market service and only acknowledges a job.
+  const result = method === 'market.list' ? await catalog() : await kernelRequest({type:'call',kind:'system',service,method,args});
+  if (service === 'plugins') {
     await syncTools();
     changed();
   }
@@ -320,6 +324,7 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
 });
 async function shutdownRuntime() {
   quitting = true;
+  await pluginInstallService?.shutdown();
   approvals?.dispose();
   await batches?.shutdown();
   await proxy?.stop();
@@ -385,6 +390,48 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
   },
 });
 await manager.initialize();
+const pluginFinalizations = new Map();
+async function finalizePlugin(id, notify) {
+  const { version, restoring } = pluginFinalizations.get(id);
+  notify({ version, status: 'syncing' });
+  try {
+    if (restoring) await migration.dismiss();
+    await syncTools();
+    pluginFinalizations.delete(id);
+  } catch (error) {
+    throw new Error('插件 v' + version + ' 已安装，但同步未完成：' + error.message + ' 请重试。');
+  }
+}
+pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
+  const finalization = pluginFinalizations.get(id);
+  if (finalization) {
+    const installed = await manager.get(id).catch(() => null);
+    if (installed?.source === 'market' && installed.version === finalization.version) {
+      signal.throwIfAborted();
+      await finalizePlugin(id, notify);
+      return;
+    }
+    pluginFinalizations.delete(id);
+  }
+  const entry = (await catalog(signal)).items.find(item => item.id === id);
+  signal.throwIfAborted();
+  if (entry && !entry.compatible) throw new Error('请先升级轻作，当前插件 API 不兼容。');
+  const artifact = entry?.artifacts?.[process.platform + '-' + process.arch];
+  if (!artifact) throw new Error('没有适用当前平台的制品。');
+  notify({ version: entry.version, status: 'downloading' });
+  const bytes = await boundedDownload(artifact.url, undefined, signal, { onProgress: value => notify({ ...value, progress: value.total ? Math.min(100, value.transferred / value.total * 100) : null }) });
+  signal.throwIfAborted();
+  notify({ status: 'verifying' });
+  const restoring = id === 'official.labeledit' && await migration.status(manager);
+  signal.throwIfAborted();
+  notify({ status: 'installing' });
+  // Cancellation is checked before entering the atomic manager transaction.
+  // Once installation begins, shutdown drains it before disposing the kernel.
+  await manager.install(bytes, { source: 'market', enabled: restoring ? migration.enabled : undefined,
+    record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, platform: process.platform + '-' + process.arch } });
+  pluginFinalizations.set(id, { version: entry.version, restoring });
+  await finalizePlugin(id, notify);
+}, changed);
 window = new BrowserWindow({ title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680, icon: path.join(root, 'desktop/icons/icon.png'), webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -393,14 +440,16 @@ protocol.handle('commerce', async request => { try { const url = new URL(request
 await window.loadURL(process.env.COMMERCE_DEV_URL || 'commerce://shell/index.html');
 void startKernel().catch(error => { kernelError = error.message; changed(); });
 app.on('before-quit', event => {
+  if (quitReady) return;
+  event.preventDefault();
   if (quitting) return;
-  event.preventDefault(); quitting = true;
+  quitting = true;
   const cancelDownload = ['downloading', 'extracting'].includes(updateService.state.status) && updateService.adapter.cancel;
   if (cancelDownload) updateService.adapter.cancel();
   void (async () => {
     if (cancelDownload) await updateService.pending;
     await shutdownRuntime();
-  })().catch(error => console.error('退出清理失败：', error.message)).finally(() => app.quit());
+  })().catch(error => console.error('退出清理失败：', error.message)).finally(() => { quitReady = true; app.quit(); });
 });
 app.on('window-all-closed', () => app.quit());
 
@@ -409,4 +458,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, batches, proxy, imageEditor };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor };
