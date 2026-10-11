@@ -38,6 +38,7 @@ jobs:
       - name: Pure platform checks
         run: |
           npm ci --ignore-scripts
+          npm run upstream:check
           node node_modules/electron/install.js
           npm run build:harness-native
           npm test

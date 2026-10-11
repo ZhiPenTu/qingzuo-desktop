@@ -159,7 +159,7 @@ test('proxy address boundary, external tool verification and OAuth waiting/failu
   assert.equal(requests.at(-1).options.method, 'DELETE');
 });
 
-test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', async context => {
+test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', { timeout: 30000 }, async context => {
   const { root, runtime, token } = await fixture(context);
   const batch = await runtime.create(plugin, input(token, 2)); let round = 0, fail = false; const calls = [];
   const server = createServer(async (request, response) => {
@@ -176,7 +176,10 @@ test('real Harness executes only planning tools, streams errors, rejects concurr
     }
     response.end('data: [DONE]\n\n');
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); context.after(() => new Promise(resolve => server.close(resolve)));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); context.after(() => {
+    server.closeAllConnections();
+    return new Promise(resolve => server.close(resolve));
+  });
   const invoke = async (_service, method, args) => {
     if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture', model: 'fixture-tool-model' };
     if (method === 'batch.revise') { assert.equal(args.owner, plugin.id); return runtime.revise(plugin, args); }

@@ -19,6 +19,7 @@ import { preparePluginMigration } from './plugin-migration.mjs';
 import { ImageEditor } from './ai-images.mjs';
 import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
+import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
@@ -260,7 +261,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
   }
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: '0.2.1-alpha.1', systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "repository": "router-for-me/CLIProxyAPI",
+  "version": "8.0.23",
+  "tag": "v8.0.23",
+  "releaseUrl": "https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.23",
+  "checksums": {
+    "name": "checksums.txt",
+    "sha256": "66e09b2051ab460628e964d1be2228fc1f1522a8d13961560a39cb6b22a87dda"
+  },
+  "artifacts": {
+    "darwin-arm64": {
+      "name": "CLIProxyAPI_8.0.23_darwin_aarch64.tar.gz",
+      "sha256": "3c056b42ec4c80d06a74d3c5abf47ae0adb06285e32f5cf31a29bdd07017feb3"
+    },
+    "win32-x64": {
+      "name": "CLIProxyAPI_8.0.23_windows_amd64.zip",
+      "sha256": "d2839470df9a3698c9b0a93a6f42f8c569be4a0f74099f7110ba9350f62ca6f7"
+    }
+  }
+}

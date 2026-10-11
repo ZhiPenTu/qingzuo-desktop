@@ -6,8 +6,9 @@ import { randomBytes, createHash } from 'node:crypto';
 import { atomicJson } from './ai-batches.mjs';
 import { boundedJson } from './ai-images.mjs';
 import { secureRequest } from './network-transport.mjs';
+import cliProxyManifest from './upstream/cli-proxy.json' with { type: 'json' };
 
-export const PROXY_VERSION = '8.0.23';
+export const PROXY_VERSION = cliProxyManifest.version;
 const oauthPaths = { codex: 'codex-auth-url', claude: 'anthropic-auth-url', antigravity: 'antigravity-auth-url' };
 export function proxyAddress(value) {
   const url = new URL(value);

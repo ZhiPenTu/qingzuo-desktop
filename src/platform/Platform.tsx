@@ -15,11 +15,12 @@ import workspaceArt from '@/assets/workspace.png';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
+import { HARNESS_UI_VERSION } from './harness-client';
 const AIChat = lazy(() => import('./AIChat'));
 type Page = 'home' | 'market' | 'plugins' | 'chat' | 'ai' | 'settings' | 'updates';
 interface Status { version: string; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; tabs: string[]; update: UpdateState; migration?: { id: string; title: string; enabled: boolean } | null }
 const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'ai', title: 'AI 设置', icon: Sparkles }, { id: 'settings', title: '设置', icon: Settings }, { id: 'updates', title: '更新', icon: RefreshCw }] as const;
-const preview: Status = { version, kernel: { ready: false, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins: [], tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
