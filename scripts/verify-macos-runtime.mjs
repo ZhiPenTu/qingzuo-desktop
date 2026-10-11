@@ -6,7 +6,7 @@ import os from 'node:os';
 
 // A bundle Info.plist cannot lower a dylib's actual deployment requirement.
 // Check every shipped Mach-O instead of trusting wheel tags or app metadata.
-export async function verifyMacRuntime(root, maximum = '14.0') {
+export async function verifyMacRuntime(root, maximum = '15.0') {
   let checked = 0;
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'commerce-runtime-'));
   const alias = path.join(temporary, 'runtime');

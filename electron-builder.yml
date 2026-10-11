@@ -22,7 +22,7 @@ mac:
   asarUnpack:
     - node_modules/**/*
   target: [dmg, zip]
-  minimumSystemVersion: '14.0'
+  minimumSystemVersion: '15.0'
   hardenedRuntime: true
   identity: '-'
   notarize: false
