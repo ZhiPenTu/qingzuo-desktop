@@ -1,8 +1,9 @@
-import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess } from 'electron';
+import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { PluginManager, boundedDownload, inspectPackage } from './plugin-manager.mjs';
 import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
@@ -15,12 +16,17 @@ import { UpdateService, nativeUpdateAdapter } from './update-service.mjs';
 import { macUpdateAdapter, previousUpdateError } from './mac-update.mjs';
 import {desktopSigningMode} from './distribution.mjs';
 import { preparePluginMigration } from './plugin-migration.mjs';
+import { ImageEditor } from './ai-images.mjs';
+import { BatchRuntime } from './ai-batches.mjs';
+import { ProxyRuntime } from './ai-proxy.mjs';
+import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
 app.setName('Commerce Tools');
 const establishedUserData = app.getPath('userData');
 app.setName('Qingzuo');
-app.setPath('userData', establishedUserData);
+const previewDistribution = app.isPackaged ? JSON.parse(readFileSync(path.join(process.resourcesPath, 'commerce/distribution.json'), 'utf8')) : null;
+app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwitch('user-data-dir') ? path.join(app.getPath('appData'), 'Qingzuo Local Preview') : establishedUserData);
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -29,10 +35,21 @@ const views = new Map(), owners = new Map(), kernelRequests = new Map(); let ker
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
 let updateService;
+let localPreview = false;
 let migration;
+let batches, proxy, imageEditor, approvals;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function aiChanged(id, event) { if (isHostChat(id)) { if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) }); return; } const view = views.get(id); if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event); }
+async function stopPlugin(id) {
+  approvals?.cancelPlugin(id);
+  const plugin = await manager.get(id).catch(() => null);
+  if (plugin && batches) await batches.stopPlugin(plugin);
+  if (host && systems.length === 7) await kernelRequest({ type: 'call', kind: 'ai', method: 'assistant.dispose', caller: id }).catch(() => {});
+  for (const [token, directory] of files?.directories || []) if (directory.owner === id) files.directories.delete(token);
+  await closeView(id);
+}
 function sanitizePlugin(p) { const { folder, backend, ...publicValue } = p; return { ...publicValue, local: Boolean(backend) }; }
 function assertFrame(event, shellOnly = false) {
   if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('未授权的框架请求。');
@@ -138,6 +155,7 @@ async function syncTools() {
   finally { if (toolSyncPromise === current) toolSyncPromise = null; }
 }
 async function startKernel() {
+  approvals?.dispose();
   kernelError = null; systems = []; const previousHost = host; host = null; previousHost?.kill();
   for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('内核已重新启动。')); } kernelRequests.clear();
   host = utilityProcess.fork(path.join(root, 'desktop/kernel-host.mjs'), [], { serviceName: 'Commerce Harness Kernel', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(app.getPath('userData'), 'harness'), DSH_TELEMETRY_DISABLED: '1' } });
@@ -150,11 +168,11 @@ async function startKernel() {
       if (message.type === 'reply') { const p=kernelRequests.get(message.id); kernelRequests.delete(message.id); if(p) {clearTimeout(p.timer); if(message.error) p.reject(new Error(message.error)); else p.resolve(message.result);} }
       else if (message.type === 'ready') { clearTimeout(timer); systems = message.systems; changed(); resolve(); }
       else if (message.type === 'fatal') { clearTimeout(timer); kernelError = message.error; changed(); reject(new Error(message.error)); }
-      else if (message.type === 'invoke') { try { host.postMessage({ type: 'result', id: message.id, result: await systemInvoke(message.service, message.method, message.args) }); } catch (error) { host.postMessage({ type: 'result', id: message.id, error: error.message }); } }
+      else if (message.type === 'invoke') { try { const result = await systemInvoke(message.service, message.method, message.args); if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, result }); } catch (error) { if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, error: error.message }); } }
     });
     host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('内核进程已退出。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = 'Harness 内核已退出（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
   });
-  host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json') } });
+  host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json'), enableAI: true } });
   await hostReady; await syncTools();
 }
 async function catalog() {
@@ -164,6 +182,24 @@ async function catalog() {
   return { items: validateCatalog(value), configured: true };
 }
 async function systemInvoke(service, method, args = {}) {
+  if (service === 'ai') {
+    if (method === 'models') return proxy.models();
+    if (isHostChat(args.owner)) {
+      if (method === 'connection') return proxy.connection(true);
+      if (method === 'event') { aiChanged(args.owner, args.event); return; }
+      if (method === 'tools.list') return { plugins: pluginToolCatalog(await manager.list()) };
+      if (method === 'tools.call') return approvals.request(args.owner, args);
+      throw new Error('对话工具接口未授权。');
+    }
+    const plugin = await manager.get(args.owner);
+    if (!plugin.enabled || plugin.missing.length || !plugin.permissions.ai?.includes(method.startsWith('batch.') ? 'image-edit' : 'assistant')) throw new Error('AI 内核调用未授权。');
+    if (method === 'connection') return proxy.connection(true);
+    if (method === 'event') { aiChanged(plugin.id, args.event); return; }
+    if (method === 'batch.get') return batches.snapshot(batches.get(plugin, args.id));
+    if (method === 'batch.revise') return batches.revise(plugin, args);
+    if (method === 'batch.cancel') return batches.cancel(plugin, args.id);
+    throw new Error('AI 内核调用无效。');
+  }
   if (service === 'home' && method === 'list') return (await manager.list()).map(sanitizePlugin);
   if (service === 'sandbox' && method === 'call') {
     const caller = await manager.get(args.caller), provider = await manager.get(args.provider);
@@ -181,7 +217,7 @@ async function performPlatform(method, args) {
   if (method === 'plugins.import') {
     const result = await dialog.showOpenDialog(window, { title: '导入插件', properties: ['openFile'], filters: [{ name: '电商工具插件', extensions: ['ecplugin', 'zip'] }] }); if (result.canceled) return;
     const bytes = await readFile(result.filePaths[0]); const manifest=inspectPackage(bytes);
-    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n网络来源：' + (manifest.permissions.network ?? []).join('、') + '\n凭据名称：' + (manifest.permissions.credentials ?? []).join('、') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n网络来源：' + (manifest.permissions.network ?? []).join('、') + '\n凭据名称：' + (manifest.permissions.credentials ?? []).join('、') + '\nAI 能力：' + (manifest.permissions.ai ?? []).join('、') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
     await manager.install(bytes); return;
   }
   if (method === 'plugins.enable') { await manager.setEnabled(args.id, args.enabled); return; }
@@ -199,6 +235,7 @@ async function performPlatform(method, args) {
     return;
   }
   if (method === 'updates.check' || method === 'updates.download') {
+    if (localPreview) throw new Error('本地预览版本不连接正式更新，请使用后续经过验收的安装包。');
     if (!app.isPackaged) throw new Error('开发环境不检查安装包更新。');
     if (method === 'updates.check') updateService.check();
     else updateService.download();
@@ -208,6 +245,21 @@ async function performPlatform(method, args) {
 }
 ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   assertFrame(event, true); validateCall(method, args);
+  if (method.startsWith('ai.')) {
+    if (method.startsWith('ai.chat.')) {
+      const operation = method.slice(3);
+      if (operation === 'chat.tools') return pluginToolCatalog(await manager.list());
+      if (operation === 'chat.approve') { approvals.respond(HOST_CHAT_PREFIX + args.id, args.approvalId, args.approve); return { accepted: true }; }
+      if (operation === 'chat.cancel' || operation === 'chat.delete') approvals.cancelOwner(HOST_CHAT_PREFIX + args.id);
+      if (!['chat.list', 'chat.create', 'chat.status', 'chat.send', 'chat.cancel', 'chat.delete'].includes(operation)) throw new Error('对话接口无效。');
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: operation, args });
+      if (operation === 'chat.status') return { ...value, approvals: approvals.list(HOST_CHAT_PREFIX + args.id) };
+      return value;
+    }
+    const operations = { 'ai.status': () => proxy.status(), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.verify': () => proxy.verify(), 'ai.provider': () => proxy.provider(args), 'ai.accounts': () => proxy.accounts(), 'ai.login': () => proxy.login(args.provider), 'ai.loginStatus': () => proxy.loginStatus(args.state, args.cancel) };
+    if (!operations[method]) throw new Error('AI 设置接口无效。');
+    return operations[method]();
+  }
   if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: '0.2.1-alpha.1', systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
@@ -227,7 +279,23 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
   if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或内核不可用。');
+  if (method.startsWith('ai.')) {
+    const assistant = method.startsWith('ai.assistant.');
+    if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : 'image-edit')) throw new Error('AI 能力未授权。');
+    if (method === 'ai.models') return imageEditor.models(plugin, args);
+    if (assistant) return kernelRequest({ type: 'call', kind: 'ai', method: method.slice(3), args, caller: id });
+    if (method === 'ai.batch.list') return batches.list(plugin);
+    if (method === 'ai.batch.get') return batches.snapshot(batches.get(plugin, args.id));
+    if (method === 'ai.batch.create') return batches.create(plugin, args);
+    if (method === 'ai.batch.revise') return batches.revise(plugin, args);
+    if (method === 'ai.batch.start') { const value = await batches.start(plugin, args); void kernelRequest({ type: 'call', kind: 'ai', method: 'batch.track', caller: id, args: { id: args.id } }).catch(() => {}); return value; }
+    if (method === 'ai.batch.cancel') return batches.cancel(plugin, args.id);
+    if (method === 'ai.batch.preview') return batches.preview(plugin, args);
+    throw new Error('AI 插件接口无效。');
+  }
   if (method === 'files.pick') return files.pick(plugin, args);
+  if (method === 'files.pickMany') return files.pickMany(plugin, args);
+  if (method === 'files.pickDirectory') return files.pickDirectory(plugin);
   if (method === 'files.create') {
     if (!plugin.permissions.files || typeof args.data !== 'string' || args.data.length > 35_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(args.data) || typeof args.filename !== 'string' || args.filename.length > 240 || typeof args.mime !== 'string' || args.mime.length > 100) throw new Error('文件内容无效或未授权。');
     return files.create(plugin, Buffer.from(args.data, 'base64'), args.filename, args.mime);
@@ -251,6 +319,9 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
 });
 async function shutdownRuntime() {
   quitting = true;
+  approvals?.dispose();
+  await batches?.shutdown();
+  await proxy?.stop();
   await Promise.all([...views.keys()].map(closeView));
   await workers.stopAll();
   host?.postMessage({ type: 'shutdown' });
@@ -263,10 +334,38 @@ migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
 credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':'); files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog); network = new NetworkBroker(files, credentials);
 await files.initialize();
+proxy = new ProxyRuntime({ root: path.join(app.getPath('userData'), 'ai-proxy'), binary: path.join(generated, 'cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: url => shell.openExternal(url) }); await proxy.initialize();
+imageEditor = new ImageEditor(credentials, undefined, proxy);
+batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
+approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
+  if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? 'CLIProxyAPI' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的 CLIProxyAPI 图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
+  return null;
+}, execute: async (plugin, tool, args, owner, signal) => {
+  signal.throwIfAborted();
+  if (tool === 'open' || tool === 'settings') { await openView(plugin.id, tool === 'settings'); if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { type: 'navigate', pluginId: plugin.id, chatId: owner.slice(HOST_CHAT_PREFIX.length) }); changed(); return { opened: plugin.id, settings: tool === 'settings' }; }
+  if (plugin.id === 'official.ai-image' && plugin.permissions.ai?.includes('image-edit')) {
+    if (tool === 'list_batches') return { batches: batches.list(plugin) };
+    if (tool === 'get_batch') return batches.snapshot(batches.get(plugin, args.id));
+    if (tool === 'prepare_plan') return batches.revise(plugin, args);
+    if (tool === 'cancel_batch') return batches.cancel(plugin, args.id);
+    if (tool === 'start_batch') { const directory = await files.pickDirectory(plugin); signal.throwIfAborted(); const current = await manager.get(plugin.id); if (!current.enabled || current.missing.length || current.version !== plugin.version) throw new Error('插件已改变，批图未启动。'); if (!directory) return { canceled: true, started: false }; const batch = await batches.start(current, { ...args, directoryToken: directory.token }); void kernelRequest({ type: 'call', kind: 'ai', method: 'batch.track', caller: plugin.id, args: { id: args.id } }).catch(() => {}); return batch; }
+  }
+  const definition = plugin.assistant?.tools.find(value => value.name === tool);
+  if (!definition || !plugin.backend || !(plugin.services?.provides || []).includes(definition.service)) throw new Error('插件工具未授权。');
+  const worker = await workers.start(plugin, owner);
+  const cancel = () => { void workers.stopCaller(plugin.id, owner).catch(() => {}); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    signal.throwIfAborted(); const result = await worker.call(definition.method, args);
+    if ((JSON.stringify(result) || '').length > 1000000) throw new Error('插件结果过大。');
+    return { result };
+  } finally { signal.removeEventListener('abort', cancel); if (signal.aborted) await workers.stopCaller(plugin.id, owner); }
+} });
 workers = new Workers(path.join(app.getPath('userData'), 'jobs'), launcher, process.execPath);
 await workers.recover().catch(error => { workers.recoveryError = error.message; console.error('沙箱任务恢复失败：',error.message); });
 const marketConfig = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
 const distribution = JSON.parse(await readFile(path.join(generated, 'distribution.json'), 'utf8'));
+localPreview = app.isPackaged && distribution.preview === true;
 const signed = desktopSigningMode({ COMMERCE_DESKTOP_SIGNING: distribution.signing }) === 'signed';
 const receipt = path.join(app.getPath('userData'), 'update-error.txt');
 const adapter = process.platform === 'darwin' && !signed
@@ -277,7 +376,7 @@ autoUpdater.on('error', error => updateService.fail(error));
 const previousError = await previousUpdateError(receipt);
 if (previousError) updateService.fail(new Error(previousError));
 manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.join(generated, 'plugins'), {
-  publicKey: marketConfig.publicKey, stop: closeView,
+  publicKey: marketConfig.publicKey, stop: stopPlugin,
   probe: async plugin => { if (plugin.backend) { await workers.start(plugin); await workers.stop(plugin.id); } },
   forget: async plugin => {
     for (const name of plugin.permissions.credentials ?? []) await credentials.clear(plugin.id, name);
@@ -286,6 +385,7 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
 });
 await manager.initialize();
 window = new BrowserWindow({ title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680, icon: path.join(root, 'desktop/icons/icon.png'), webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) event.preventDefault(); });
 protocol.handle('commerce', async request => { try { const url = new URL(request.url); if (url.hostname !== 'shell') return new Response('Forbidden', { status: 403 }); return resourceResponse(await confinedPath(path.join(root, 'dist'), decodeURIComponent(url.pathname.slice(1)))); } catch { return new Response('Not found', { status: 404 }); } });
@@ -308,4 +408,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService };
+export { network, workers, manager, host, updateService, batches, proxy, imageEditor };

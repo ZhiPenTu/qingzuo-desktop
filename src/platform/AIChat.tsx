@@ -1,0 +1,111 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { MessageCircle, MessageCircleMore, Plus, Send, Square, Trash2, Settings, Puzzle, ShieldCheck, CheckCircle2, AlertCircle, History, LayoutGrid, Image, ChevronRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
+import { HarnessActivity, HarnessMessage, HarnessParameters } from './HarnessPresentation';
+import { chatInvoke, HARNESS_UI_VERSION, type ChatSession, type ChatSummary, type ChatPlugin } from './harness-client';
+
+export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () => void; onOpenPlugin: (id: string) => void }) {
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [session, setSession] = useState<ChatSession | null>(null);
+  const [plugins, setPlugins] = useState<ChatPlugin[]>([]);
+  const [ready, setReady] = useState(false);
+  const [model, setModel] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [stream, setStream] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const selected = useRef('');
+  const operation = useRef(false);
+  const transcript = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  const refreshList = useCallback(async () => setChats(await chatInvoke<ChatSummary[]>('list')), []);
+  const load = useCallback(async (id: string) => {
+    selected.current = id; setStream(''); setError(''); follow.current = true;
+    const value = await chatInvoke<ChatSession>('status', { id });
+    if (selected.current === id) { setSession(value); setStream(value.partial || ''); }
+  }, []);
+  useEffect(() => {
+    if (!window.commerceDesktop) return;
+    let active = true;
+    void Promise.all([chatInvoke<ChatSummary[]>('list'), chatInvoke<ChatPlugin[]>('tools'), window.commerceDesktop?.invoke<{ model: string; verified: string[] }>('ai.status')]).then(async ([items, tools, status]) => {
+      if (!active) return; setChats(items); setPlugins(tools); setModel(status?.model || ''); setReady(Boolean(status?.model && status.verified.includes(status.model)));
+      const remembered = localStorage.getItem('qingzuo.ai-chat.selected.v1');
+      const id = items.find(item => item.id === remembered)?.id || items[0]?.id;
+      if (id) await load(id);
+    }).catch(reason => { if (active) setError(reason.message); });
+    const dispose = window.commerceDesktop?.onAI?.(event => {
+      if (event.type === 'navigate') { onOpenPlugin(event.pluginId); return; }
+      if (event.chatId !== selected.current) { if (event.type === 'assistant') void refreshList().catch(() => {}); return; }
+      if (event.type === 'assistant-delta') setStream(value => event.partial ?? value + event.text);
+      if (event.type === 'assistant') { setSession(value => ({ ...event.session, approvals: value?.approvals || [] })); setStream(event.session.partial || ''); void refreshList().catch(() => {}); }
+      if (event.type === 'approvals') setSession(value => value ? { ...value, approvals: event.approvals } : value);
+    });
+    return () => { active = false; dispose?.(); };
+  }, [load, onOpenPlugin, refreshList]);
+  useEffect(() => { if (session?.id) localStorage.setItem('qingzuo.ai-chat.selected.v1', session.id); }, [session?.id]);
+  useEffect(() => { if (follow.current && (session?.history.length || session?.approvals?.length || stream)) end.current?.scrollIntoView?.({ block: 'end' }); }, [session?.history.length, session?.approvals?.length, stream]);
+  useEffect(() => {
+    if (!session || session.state !== 'running') return;
+    const id = session.id;
+    const timer = window.setInterval(() => { void chatInvoke<ChatSession>('status', { id }).then(value => { if (selected.current === id) { setSession(value); if (value.state === 'idle') setStream(''); } }).catch(reason => setError(reason.message)); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [session?.id, session?.state]);
+  async function action(work: () => Promise<void>) {
+    if (operation.current) return; operation.current = true; setBusy(true); setError('');
+    try { await work(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { operation.current = false; setBusy(false); }
+  }
+  async function create() { const value = await chatInvoke<ChatSession>('create'); selected.current = value.id; setSession(value); setStream(''); setText(''); setHistoryOpen(false); await refreshList(); }
+  async function send() {
+    const draft = text.trim(); if (!draft || !ready || session?.state === 'running') return;
+    await action(async () => {
+      let id = session?.id;
+      if (!id) { const value = await chatInvoke<ChatSession>('create'); id = value.id; selected.current = id; setSession(value); }
+      follow.current = true; setStream('');
+      const value = await chatInvoke<ChatSession>('send', { id, text: draft });
+      setText(''); if (selected.current === id) setSession(current => current?.state === 'running' ? current : value); await refreshList();
+    });
+  }
+  const running = session?.state === 'running';
+  const hasMessages = Boolean(session?.history.length || stream || session?.approvals?.length);
+  function suggest(prompt: string) { setText(prompt); input.current?.focus(); }
+  return <div className="ai-chat-layout harness-theme">
+    <header className="ai-chat-toolbar">
+      <div className="ai-chat-heading"><div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : '助手待配置'} /></div><p title={session?.model || model}>{session?.model || model || '默认助手模型'}</p></div>
+      <div className="ai-chat-toolbar-actions">
+        <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+          <SheetTrigger render={<Button variant="ghost" aria-label="历史对话" title="历史对话" />}><History data-icon="inline-start" /><span>历史对话</span></SheetTrigger>
+          <SheetContent className="ai-chat-panel">
+            <SheetHeader><SheetTitle>历史对话</SheetTitle><SheetDescription>会话保存在本机，选择一个继续。</SheetDescription></SheetHeader>
+            <nav className="ai-chat-history" aria-label="历史对话">{chats.map(chat => <Button key={chat.id} variant={session?.id === chat.id ? 'secondary' : 'ghost'} disabled={busy} onClick={() => void action(async () => { await load(chat.id); setHistoryOpen(false); })}><MessageCircle data-icon="inline-start" /><span className="truncate">{chat.title}</span>{chat.state === 'running' ? <span className="connection-dot connected" aria-label="处理中" /> : null}</Button>)}{!chats.length ? <p>还没有历史对话。发送第一条消息后，会在这里保存。</p> : null}</nav>
+            <div className="ai-chat-panel-footer"><Button variant="outline" disabled={busy} onClick={() => void action(create)}><Plus data-icon="inline-start" />新建对话</Button>{session ? <Button variant="ghost" disabled={busy || running} onClick={() => { if (window.confirm('删除此对话列表记录？Harness 会话日志仍保留在本机用于恢复审计。')) void action(async () => { await chatInvoke('delete', { id: session.id }); selected.current = ''; setSession(null); setStream(''); await refreshList(); }); }}><Trash2 data-icon="inline-start" />删除当前对话</Button> : null}</div>
+          </SheetContent>
+        </Sheet>
+        <Button variant="ghost" aria-label="新建对话" title="新建对话" disabled={busy} onClick={() => void action(create)}><Plus data-icon="inline-start" /><span>新建对话</span></Button>
+        <Button variant="ghost" aria-label="AI 设置" title="AI 设置" onClick={onSettings}><Settings data-icon="inline-start" /><span>AI 设置</span></Button>
+      </div>
+    </header>
+    <section className="ai-chat-workspace" aria-label="AI 对话">
+      {!ready ? <Alert><AlertDescription>先接入文本账户，选择模型并验证工具调用。对话请求可能按提供商规则计费。<Button variant="outline" size="sm" onClick={onSettings}>配置文本助手</Button></AlertDescription></Alert> : null}
+      {error || session?.error ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{error || session?.error}<Button variant="ghost" size="sm" onClick={onSettings}>检查 AI 设置</Button></AlertDescription></Alert> : null}
+      <div ref={transcript} className={cn('ai-transcript', !hasMessages && 'ai-transcript-empty')} role="log" aria-label="对话内容" onScroll={() => { const element = transcript.current; if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
+        {!hasMessages ? <div className="ai-chat-empty"><MessageCircleMore /><h2>今天，想让工作轻一点？</h2><p>描述你的想法，让 AI 和插件一起完成。</p><div className="ai-chat-suggestions"><Button variant="outline" onClick={() => suggest('我有哪些插件可以用？')}><LayoutGrid data-icon="inline-start" />发现可用工具</Button><Button variant="outline" onClick={() => suggest('打开 AI 批图，帮我规划白底商品图')}><Image data-icon="inline-start" />规划商品图</Button></div><Button variant="ghost" size="sm" onClick={() => setToolsOpen(true)}>可调用 {plugins.length} 个插件<ChevronRight data-icon="inline-end" /></Button></div> : null}
+        <div className="ai-transcript-content">
+        {session?.history.map((message, index) => message.role === 'tool' ? <div className="ai-tool-record" key={message.id || index}><div>{message.state === 'succeeded' ? <CheckCircle2 /> : message.state === 'running' ? <Puzzle /> : <AlertCircle />}<strong>{message.tool === 'list_plugins' ? '发现已启用插件' : (plugins.find(plugin => plugin.id === message.pluginId)?.title || message.pluginId || '插件') + ' · ' + String(message.args?.tool || '工具调用')}</strong><span>{message.state === 'running' ? '等待确认 / 执行中' : message.state === 'succeeded' ? '已完成' : message.state === 'interrupted' ? '中断，结果未知' : '未完成'}</span></div>{message.text ? <details><summary>查看调用结果</summary><pre>{message.text}</pre></details> : null}</div> : <article key={index} className={'ai-message ai-message-' + message.role}><span>{message.role === 'user' ? '你' : 'AI'}</span><div>{message.role === 'assistant' ? <HarnessMessage text={message.text} /> : <p>{message.text}</p>}</div></article>)}
+        {stream ? <article className="ai-message ai-message-assistant"><span>AI</span><div><HarnessMessage text={stream} streaming /></div></article> : null}
+        {session?.approvals?.map(approval => <section className="ai-tool-approval" key={approval.id} aria-label={'确认调用 ' + approval.pluginTitle}><div><ShieldCheck /><strong>等待确认</strong></div><h3>{approval.pluginTitle} · {approval.title}</h3><HarnessParameters data={approval.detail ? { parameters: approval.args, batch: approval.detail } : approval.args} label="插件调用参数" /><p>只授权这一次调用，不授予 AI 任意文件、密钥或其他插件权限。</p><div className="ai-actions flex"><Button disabled={busy} onClick={() => void action(async () => { await chatInvoke('approve', { id: session.id, approvalId: approval.id, approve: true }); setSession(value => value ? { ...value, approvals: value.approvals?.filter(entry => entry.id !== approval.id) } : value); })}>确认调用</Button><Button variant="outline" disabled={busy} onClick={() => void action(async () => { await chatInvoke('approve', { id: session.id, approvalId: approval.id, approve: false }); setSession(value => value ? { ...value, approvals: value.approvals?.filter(entry => entry.id !== approval.id) } : value); })}>拒绝</Button></div></section>)}
+        {running ? <div className="ai-chat-activity" role="status"><HarnessActivity /></div> : null}<div ref={end} />
+        </div>
+      </div>
+      <div className="ai-composer-dock"><form onSubmit={event => { event.preventDefault(); void send(); }}><InputGroup className="ai-composer"><InputGroupTextarea ref={input} aria-label="消息" placeholder="告诉我你想完成什么…" maxLength={16000} disabled={busy} value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><InputGroupAddon align="block-end" className="ai-composer-actions"><div className="ai-composer-privacy"><small><ShieldCheck />插件调用需你确认</small>{hasMessages ? <Button variant="ghost" size="icon-sm" aria-label="可调用插件" title="可调用插件" onClick={() => setToolsOpen(true)}><Puzzle /></Button> : null}</div>{running ? <Button type="button" variant="outline" size="icon-lg" aria-label="停止" title="停止生成" disabled={busy} onClick={() => void action(async () => { const value = await chatInvoke<ChatSession>('cancel', { id: session.id }); setSession(value); setStream(''); await refreshList(); })}><Square /></Button> : <Button type="submit" size="icon-lg" aria-label="发送" title="发送" disabled={busy || !ready || !text.trim()}><Send /></Button>}</InputGroupAddon></InputGroup></form><div className="ai-composer-meta"><span>Enter 发送 · Shift + Enter 换行</span><span title={'DeepSeek Harness ' + HARNESS_UI_VERSION}>由 DeepSeek Harness 驱动</span></div></div>
+    </section>
+    <Sheet open={toolsOpen} onOpenChange={setToolsOpen}><SheetContent className="ai-chat-panel"><SheetHeader><SheetTitle>可调用插件</SheetTitle><SheetDescription>只提供已启用的能力。每次调用都需要你确认。</SheetDescription></SheetHeader><div className="ai-chat-plugin-list">{plugins.map(plugin => <section key={plugin.id}><div><Puzzle /><h3>{plugin.title}</h3></div>{plugin.description ? <p>{plugin.description}</p> : null}<ul>{plugin.tools.map(tool => <li key={tool.name}>{tool.title}</li>)}</ul></section>)}{!plugins.length ? <p>安装并启用插件后，助手才能调用。</p> : null}</div></SheetContent></Sheet>
+  </div>;
+}

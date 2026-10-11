@@ -67,5 +67,9 @@ export class Workers {
     for (const [key] of entries) this.workers.delete(key);
     await Promise.all(entries.map(async ([,pending]) => {const worker=await pending.catch(() => null);if(worker){await worker.stop();await worker.cleaned;}}));
   }
+  async stopCaller(id, caller) {
+    const key = id + ':' + caller, pending = this.workers.get(key); this.workers.delete(key);
+    const worker = await pending?.catch(() => null); if (worker) { await worker.stop(); await worker.cleaned; }
+  }
   async stopAll() { await Promise.all([...new Set([...this.workers.keys()].map(key => key.split(':')[0]))].map(id => this.stop(id))); }
 }
