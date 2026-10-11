@@ -92,12 +92,22 @@ export class PluginManager {
         const installationId = Buffer.from(randomUUID().replaceAll('-', ''), 'hex').toString('base64url');
         const relative = 'installed/' + m.id + '/' + installationId;
         const folder = path.join(this.root, relative); await mkdir(path.dirname(folder), { recursive: true }); await rename(staged, folder);
-        await this.stop(m.id);
-        this.state.plugins[m.id] = { folder: relative, enabled: enabled ?? installed?.enabled ?? previous?.enabled ?? true, source, previous };
-        try { const item = await this.get(m.id); if (item.enabled && item.missing.length) throw new Error('缺少服务依赖：' + item.missing.join('、')); if (item.enabled) await this.probe(item); await this.persist(); }
-        catch (error) { if (previous) this.state.plugins[m.id] = previous; else delete this.state.plugins[m.id]; await this.stop(m.id); await rm(folder, { recursive: true, force: true }); throw error; }
+        let activated = false;
+        try {
+          await this.stop(m.id);
+          this.state.plugins[m.id] = { folder: relative, enabled: enabled ?? installed?.enabled ?? previous?.enabled ?? true, source, previous };
+          activated = true;
+          const item = await this.get(m.id); if (item.enabled && item.missing.length) throw new Error('缺少服务依赖：' + item.missing.join('、')); if (item.enabled) await this.probe(item); await this.persist();
+        } catch (error) {
+          if (activated) {
+            if (previous) this.state.plugins[m.id] = previous; else delete this.state.plugins[m.id];
+            try { await this.stop(m.id); } catch {}
+          }
+          await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+          throw error;
+        }
         return m;
-      } finally { await rm(staged, { recursive: true, force: true }); }
+      } finally { await rm(staged, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {}); }
     });
   }
   async setEnabled(id, enabled) { return this.transaction(async () => {
@@ -111,19 +121,59 @@ export class PluginManager {
     try {const target=await this.get(id);if(target.missing.length)throw new Error('恢复版本缺少服务依赖。');if(target.enabled)await this.probe(target);await this.persist();}
     catch(error){await this.stop(id);this.state.plugins[id]=row;throw error;} }); }
 }
-export async function boundedDownload(url, limit = MAX_PACKAGE_BYTES, signal) {
+export async function boundedDownload(url, limit = MAX_PACKAGE_BYTES, signal, { onProgress = () => {}, request = fetch, idleTimeoutMs = 120000, totalTimeoutMs = 30 * 60_000 } = {}) {
   const parsed = new URL(url); if (parsed.protocol !== 'https:') throw new Error('下载地址必须使用 HTTPS。');
-  let address=parsed, response;
-  for(let hop=0;hop<6;hop++) {
-    if(address.protocol !== 'https:' || address.username || address.password) throw new Error('下载地址必须使用 HTTPS。');
-    response=await fetch(address,{signal:signal ?? AbortSignal.timeout(120000),redirect:'manual'});
-    if(![301,302,303,307,308].includes(response.status)) break;
-    const location=response.headers.get('location'); await response.body?.cancel(); if(!location || hop===5) throw new Error('下载重定向无效。');
-    address=new URL(location,address);
+  if (![idleTimeoutMs, totalTimeoutMs].every(value => Number.isFinite(value) && value > 0)) throw new Error('下载超时设置无效。');
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  if (signal?.aborted) cancel(); else signal?.addEventListener('abort', cancel, { once: true });
+  let idleTimer, response, reader;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(new Error('下载长时间没有响应，请重试。')), idleTimeoutMs);
+  };
+  const totalTimer = setTimeout(() => controller.abort(new Error('下载超过最长允许时间，请重试。')), totalTimeoutMs);
+  resetIdle();
+  try {
+    let address = parsed;
+    for (let hop = 0; hop < 6; hop++) {
+      controller.signal.throwIfAborted();
+      if (address.protocol !== 'https:' || address.username || address.password) throw new Error('下载地址必须使用 HTTPS。');
+      response = await request(address, { signal: controller.signal, redirect: 'manual' });
+      resetIdle();
+      if (![301,302,303,307,308].includes(response.status)) break;
+      const location = response.headers.get('location'); await response.body?.cancel();
+      if (!location || hop === 5) throw new Error('下载重定向无效。');
+      address = new URL(location, address);
+    }
+    if (!response.ok) throw new Error('下载失败（' + response.status + '）。');
+    const length = Number(response.headers.get('content-length'));
+    if (length > limit) throw new Error('下载内容过大。');
+    const total = Number.isFinite(length) && length > 0 ? length : 0;
+    const chunks = []; let size = 0, lastProgress = Date.now(), lastTransferred = 0;
+    onProgress({ transferred: 0, total });
+    reader = response.body?.getReader();
+    if (reader) while (true) {
+      const { value, done } = await reader.read();
+      controller.signal.throwIfAborted();
+      if (done) break;
+      resetIdle();
+      size += value.length; if (size > limit) throw new Error('下载内容过大。');
+      chunks.push(value);
+      if (lastTransferred === 0 || Date.now() - lastProgress >= 250) {
+        onProgress({ transferred: size, total }); lastProgress = Date.now(); lastTransferred = size;
+      }
+    }
+    controller.signal.throwIfAborted();
+    if (size !== lastTransferred || size === 0) onProgress({ transferred: size, total });
+    return Buffer.concat(chunks);
+  } catch (error) {
+    if (reader) await reader.cancel().catch(() => {});
+    else await response?.body?.cancel().catch(() => {});
+    throw controller.signal.aborted ? controller.signal.reason : error;
+  } finally {
+    clearTimeout(idleTimer); clearTimeout(totalTimer);
+    signal?.removeEventListener('abort', cancel);
+    reader?.releaseLock();
   }
-  if (!response.ok) throw new Error('下载失败（' + response.status + '）。');
-  if (Number(response.headers.get('content-length')) > limit) throw new Error('下载内容过大。');
-  const chunks = []; let size = 0;
-  for await (const chunk of response.body) { size += chunk.length; if (size > limit) {  throw new Error('下载内容过大。'); } chunks.push(chunk); }
-  return Buffer.concat(chunks);
 }
