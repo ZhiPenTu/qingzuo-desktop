@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node --input-type=module -e "import pkg from './packages/plugin-sdk/package.json' with {type:'json'}; if(process.env.GITHUB_REF_NAME!=='sdk-v'+pkg.version) throw new Error('SDK tag mismatch');"
-          gh release create "$GITHUB_REF_NAME" release/sdk/*.tgz --verify-tag --title "Plugin SDK $GITHUB_REF_NAME" --notes "Plugin API 1.1: private file resources, multipart uploads and isolated test host." --latest=false
+          gh release create "$GITHUB_REF_NAME" release/sdk/*.tgz --verify-tag --title "Plugin SDK $GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md" --latest=false
       - uses: actions/upload-artifact@v4
         with:
           name: Plugin-SDK

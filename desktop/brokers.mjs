@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {secureRequest} from './network-transport.mjs';
 import { allowedNetwork } from './security.mjs';
 export class FileBroker {
-  constructor(root, dialog) { this.root = root; this.dialog = dialog; this.tokens = new Map(); this.epochs = new Map(); }
+  constructor(root, dialog) { this.root = root; this.dialog = dialog; this.tokens = new Map(); this.epochs = new Map(); this.directories = new Map(); }
   async initialize() { await rm(this.root, { recursive: true, force: true }); }
   async create(plugin, bytes, name, mime = 'application/octet-stream', epoch = this.epochs.get(plugin.id) ?? 0) {
     if (!plugin.permissions.files) throw new Error('插件没有文件权限。');
@@ -34,6 +34,38 @@ export class FileBroker {
     return this.create(plugin, await readFile(filename), path.basename(filename), ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.pdf': 'application/pdf' })[ext], epoch);
   }
   async read(plugin, token) { const item = await this.get(plugin, token); return { data: (await readFile(item.filename)).toString('base64'), mime: item.mime }; }
+  async pickMany(plugin, options = {}) {
+    if (!plugin.permissions.files) throw new Error('插件没有文件权限。');
+    const epoch = this.epochs.get(plugin.id) ?? 0;
+    const result = await this.dialog.showOpenDialog({ title: plugin.title + ' · 批量选择图片', properties: ['openFile', 'multiSelections'], filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+    if (result.canceled) return [];
+    if (result.filePaths.length > 200) throw new Error('每批最多选择 200 张图片。');
+    const items = [];
+    try {
+      for (const filename of result.filePaths) {
+        const info = await lstat(filename), mime = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' })[path.extname(filename).toLowerCase()];
+        if (!mime || !info.isFile() || info.size > 25 * 1024 ** 2) throw new Error('请选择不超过 25 MB 的 PNG、JPEG 或 WebP 图片。');
+        items.push(await this.create(plugin, await readFile(filename), path.basename(filename), mime, epoch));
+      }
+      return items;
+    } catch (error) { await Promise.allSettled(items.map(item => this.release(plugin, item.token))); throw error; }
+  }
+  async pickDirectory(plugin) {
+    if (!plugin.permissions.files) throw new Error('插件没有文件权限。');
+    const epoch = this.epochs.get(plugin.id) ?? 0;
+    const result = await this.dialog.showOpenDialog({ title: plugin.title + ' · 输出目录', properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled) return null;
+    const filename = await realpath(result.filePaths[0]), info = await lstat(filename);
+    if (!info.isDirectory() || (this.epochs.get(plugin.id) ?? 0) !== epoch) throw new Error('目录授权已失效。');
+    const token = randomUUID();
+    this.directories.set(token, { owner: plugin.id, filename, dev: info.dev, ino: info.ino });
+    return { token, name: path.basename(filename) };
+  }
+  directory(plugin, token) {
+    const item = this.directories.get(token);
+    if (!plugin.permissions.files || item?.owner !== plugin.id) throw new Error('输出目录未授权。');
+    return { ...item };
+  }
   async url(plugin, token) {
     await this.get(plugin, token);
     return 'commerce-plugin://' + plugin.id + '/__files/' + encodeURIComponent(token);

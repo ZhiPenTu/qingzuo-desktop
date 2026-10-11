@@ -1,6 +1,7 @@
 import {createPublicKey} from 'node:crypto';import {readFile} from 'node:fs/promises';
 import {desktopSigningMode} from '../desktop/distribution.mjs';
 const pkg=JSON.parse(await readFile('package.json'));
+if(process.env.QINGZUO_LOCAL_PREVIEW==='1')throw new Error('本地预览配置不能用于发布构建。');
 const version=pkg.version.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
 if(!version || Number(version[1])===0 && Number(version[2])<2)throw new Error('新底座构建版本必须为 0.2.0 或更高的正式版本号。');
 let mode;

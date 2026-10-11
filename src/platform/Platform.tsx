@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,14 +14,18 @@ import brandIcon from '@/assets/qingzuo.png';
 import workspaceArt from '@/assets/workspace.png';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
-type Page = 'home' | 'market' | 'plugins' | 'settings' | 'updates';
+import { AISettings } from './AISettings';
+const AIChat = lazy(() => import('./AIChat'));
+type Page = 'home' | 'market' | 'plugins' | 'chat' | 'ai' | 'settings' | 'updates';
 interface Status { version: string; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; tabs: string[]; update: UpdateState; migration?: { id: string; title: string; enabled: boolean } | null }
-const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }, { id: 'updates', title: '更新', icon: RefreshCw }] as const;
+const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'ai', title: 'AI 设置', icon: Sparkles }, { id: 'settings', title: '设置', icon: Settings }, { id: 'updates', title: '更新', icon: RefreshCw }] as const;
 const preview: Status = { version, kernel: { ready: false, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins: [], tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
   plugins: ['每一件工具，都井井有条。', '管理已安装工具的状态、设置和版本。'],
+  ai: ['AI 设置', '先接入账户，再选择助手模型。图像编辑单独配置。'],
+  chat: ['AI 对话', 'DeepSeek Harness · 用自然语言调用工具。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，查看工作台的运行环境。'],
   updates: ['让轻作，保持新鲜。', '检查工作台更新，了解最新版本的变化。'],
 } as const;
@@ -42,6 +46,8 @@ export default function Platform() {
   const { theme, setTheme } = useTheme();
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { setError(String(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
+  const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
+  useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {
     setBusy(true); setError(null);
     if (args && typeof args === 'object' && 'id' in args && typeof (args as { id: unknown }).id === 'string') {
@@ -87,16 +93,16 @@ export default function Platform() {
   return <div className="commerce-shell">
     <aside className="commerce-sidebar">
       <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-      <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }, index) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', index === 3 && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
+      <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
       <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? 'Harness 内核已连接' : '等待内核启动' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
     </aside>
-    <div className="commerce-main">
-      <header className="commerce-topbar"><div className="commerce-breadcrumb"><span>工作台</span><ChevronRight /><strong>{title}</strong></div><Button variant="outline" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button></header>
+    <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
+      {page !== 'chat' ? <header className="commerce-topbar"><div className="commerce-breadcrumb"><span>工作台</span><ChevronRight /><strong>{title}</strong></div><Button variant="outline" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button></header> : null}
       {status?.tabs.length ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">{status.tabs.map(id => <div key={id} className="commerce-tool-tab"><Button role="tab" aria-selected={page === id} variant={page === id ? 'secondary' : 'ghost'} size="sm" onClick={() => void navigate(id)}>{plugins.find(p => p.id === id)?.title ?? id}</Button><Button variant="ghost" size="icon-sm" aria-label="关闭工具" onClick={() => { void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {}); }}><X /></Button></div>)}</div> : null}
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription>{error}</AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" onClick={() => act('migration.dismiss')}>稍后从市场安装</Button></AlertDescription></Alert> : null}
       {status?.kernel.error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription>{status.kernel.error}<Button variant="outline" size="sm" onClick={() => act('kernel.retry')}>重新启动内核</Button></AlertDescription></Alert> : null}
-      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : shellPage ? <main className="commerce-content"><div className="commerce-content-inner">
+      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className="commerce-content-inner">
         <div className="commerce-heading"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
         {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button></div></section> : null}
         {['home', 'market', 'plugins'].includes(page) ? <>
@@ -109,7 +115,8 @@ export default function Platform() {
           {page === 'home' ? <button className="workspace-discover" onClick={() => void navigate('market')}><span className="discover-icon"><Plus /></span><span><strong>去插件市场，发现更多顺手工具</strong><small>按需扩展你的工作台，工具可以独立安装与更新。</small></span><ArrowRight /></button> : null}
           <div className="commerce-info"><ShieldCheck /><div><strong>{page === 'market' ? '插件签名验证' : '你的工作台，由你掌握'}</strong><p>{page === 'market' ? '从签名目录安装工具，管理你自己的工作台。' : '本地工具在本机处理文件，联网插件按授权访问服务。'}</p></div></div>
         </> : null}
-        {page === 'settings' ? <div className="commerce-settings"><Card><CardHeader><CardTitle role="heading" aria-level={2}>外观</CardTitle><CardDescription>为工作台选择舒适的显示方式。</CardDescription></CardHeader><CardContent><div className="theme-options" role="group" aria-label="主题">{([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</div></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>运行环境</CardTitle><CardDescription>轻作与本地平台服务。</CardDescription></CardHeader><CardContent><dl className="runtime-info"><div><dt>轻作</dt><dd>v{status.version}</dd></div><div><dt>Harness</dt><dd>{status.kernel.version}</dd></div><div><dt>运行状态</dt><dd>{status.kernel.ready ? '内核运行正常' : desktop ? '内核尚未就绪' : '浏览器预览不启动本地内核'}</dd></div></dl><div className="runtime-systems">{status.kernel.systems.map(s => <Badge key={s.id} variant="secondary">{s.title}</Badge>)}</div></CardContent></Card></div> : null}
+        {page === 'ai' ? <AISettings imageAvailable={desktop && plugins.some(plugin => plugin.id === 'official.ai-image' && plugin.enabled && !plugin.missing.length) && status.kernel.ready} onOpenImage={() => void navigate('official.ai-image', true)} onOpenChat={() => void navigate('chat')} /> : null}
+        {page === 'settings' ? <div className="commerce-settings"><Card><CardHeader><CardTitle role="heading" aria-level={2}>AI 模型与账户</CardTitle><CardDescription>图像 API Key、助手服务和 OAuth 登录已集中到独立的 AI 设置页。</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>外观</CardTitle><CardDescription>为工作台选择舒适的显示方式。</CardDescription></CardHeader><CardContent><div className="theme-options" role="group" aria-label="主题">{([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</div></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>运行环境</CardTitle><CardDescription>轻作与本地平台服务。</CardDescription></CardHeader><CardContent><dl className="runtime-info"><div><dt>轻作</dt><dd>v{status.version}</dd></div><div><dt>Harness</dt><dd>{status.kernel.version}</dd></div><div><dt>运行状态</dt><dd>{status.kernel.ready ? '内核运行正常' : desktop ? '内核尚未就绪' : '浏览器预览不启动本地内核'}</dd></div></dl><div className="runtime-systems">{status.kernel.systems.map(s => <Badge key={s.id} variant="secondary">{s.title}</Badge>)}</div></CardContent></Card></div> : null}
         {page === 'updates' ? <UpdateCard version={status.version} update={status.update} disabled={!desktop || busy} onAction={act} /> : null}
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
     </div>

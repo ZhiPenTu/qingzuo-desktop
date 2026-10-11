@@ -1,6 +1,6 @@
 {
   "name": "@commerce/plugin-sdk",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "type": "module",
   "exports": {
     ".": {
@@ -22,6 +22,7 @@
     "index.mjs",
     "index.d.ts",
     "manifest.mjs",
+    "tool-schema-core.mjs",
     "cli.mjs",
     "testing.mjs"
   ],

@@ -37,6 +37,14 @@ try {
   const { readdir } = await import('node:fs/promises');
   const resources = process.platform === 'darwin' ? path.join(installedRoot, 'Contents/Resources/commerce') : path.join(installedRoot, 'resources/commerce');
   expect(await readdir(resources)).not.toContain('plugins');
+  expect(JSON.parse(await readFile(path.join(resources, 'distribution.json'), 'utf8')).preview).toBe(false);
+  const proxy = JSON.parse(await readFile(path.join(resources, 'cli-proxy-version.json'), 'utf8'));
+  expect(proxy.version).toBe('8.0.23');
+  expect(proxy.target).toBe(process.platform + '-' + process.arch);
+  await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'AI 设置', exact: true }).click();
+  await expect(page.getByRole('button', { name: '账户与 API', exact: true })).toBeVisible();
   console.log('Standalone pure platform: seven Harness services, empty tool center and no bundled business plugins passed.');
 } finally {
   if (app) await app.close();
