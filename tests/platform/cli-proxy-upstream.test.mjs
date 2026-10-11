@@ -149,6 +149,28 @@ test('custom output paths cannot overwrite the pin or corrupt a staged candidate
   assert.deepEqual(await readFile(options.manifestPath), before); assert.equal(fixture.calls.length, 0);
 });
 
+test('apply rejects evidence collisions with pin, candidate and report before network or writes', async context => {
+  const { root, options, fixture } = await workspace(context), before = await readFile(options.manifestPath);
+  const inputs = path.join(root, 'inputs'), inputAlias = path.join(root, 'input-alias');
+  await mkdir(inputs); await symlink(inputs, inputAlias, 'junction');
+  const evidenceFile = path.join(inputs, 'evidence.json'), evidenceAlias = path.join(inputAlias, 'evidence.json');
+  await writeFile(evidenceFile, JSON.stringify(fixture.evidence));
+  const originalEvidence = await readFile(evidenceFile);
+  for (const validationReportPath of [evidenceFile, evidenceAlias]) {
+    for (const output of ['manifestPath', 'candidatePath', 'reportPath']) {
+      await assert.rejects(updateCliProxy({ ...options, mode: 'apply', validationReportPath, [output]: evidenceFile }), /separate files/);
+    }
+  }
+  const uppercaseEvidence = path.join(inputs, 'EVIDENCE.JSON');
+  if (await readFile(uppercaseEvidence).then(() => true, () => false)) {
+    await assert.rejects(updateCliProxy({ ...options, mode: 'apply', validationReportPath: uppercaseEvidence, reportPath: evidenceFile }), /separate files/);
+  }
+  assert.deepEqual(await readFile(evidenceFile), originalEvidence); assert.deepEqual(await readFile(options.manifestPath), before);
+  assert.equal(fixture.calls.length, 0);
+  await assert.rejects(stat(options.candidatePath), { code: 'ENOENT' });
+  await assert.rejects(stat(options.reportPath), { code: 'ENOENT' });
+});
+
 test('existing case aliases and case-only future outputs cannot overwrite protected files', async context => {
   const { root, options, fixture } = await workspace(context), before = await readFile(options.manifestPath);
   const uppercasePin = path.join(root, 'PIN.JSON');

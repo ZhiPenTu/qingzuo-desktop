@@ -162,7 +162,7 @@ export function validateCliProxyCompatibility(evidence, manifest) {
 }
 export async function updateCliProxy({ mode = 'check', version, request = fetch, manifestPath = CLI_PROXY_MANIFEST, cacheDirectory = '.cache/cli-proxy', candidatePath = '.cache/upstream/cli-proxy-candidate.json', reportPath = '.cache/upstream/cli-proxy-report.json', validationReportPath, now = () => new Date().toISOString() } = {}) {
   if (!['validate-pin', 'check', 'prepare', 'apply'].includes(mode)) throw new Error('Unknown CLIProxyAPI update mode.');
-  await assertDistinctOutputPaths([manifestPath, candidatePath, reportPath]);
+  await assertDistinctOutputPaths([manifestPath, candidatePath, reportPath, ...(validationReportPath ? [validationReportPath] : [])]);
   const pinned = await readCliProxyManifest(manifestPath);
   if (mode === 'validate-pin') {
     const { PROXY_VERSION } = await import('../desktop/ai-proxy.mjs');

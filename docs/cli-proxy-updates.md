@@ -67,4 +67,4 @@ node scripts/update-cli-proxy.mjs --apply --version 8.0.23 --validation-report .
 }
 ```
 
-此外，在正式发布前运行现有 `test:desktop` 打包应用测试，验证资源路径、子进程启动及平台签名。上游新增提供商、管理端点和消息格式仍需在轻作适配层和对应契约测试中逐项接入。
+此外，在正式发布前运行 `test:desktop` 验证开发目录中的 Electron 应用；完成打包后执行 `node scripts/test-packaged-desktop.mjs`，验证独立应用的资源路径和启动。平台签名按发布流程单独检查。上游新增提供商、管理端点和消息格式仍需在轻作适配层和对应契约测试中逐项接入。
