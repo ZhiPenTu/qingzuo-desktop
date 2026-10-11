@@ -43,7 +43,7 @@ try {
   expect(proxy.target).toBe(process.platform + '-' + process.arch);
   await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'AI 设置', exact: true }).click();
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: 'AI 设置', exact: true }).click();
   await expect(page.getByRole('button', { name: '账户与 API', exact: true })).toBeVisible();
   console.log('Standalone pure platform: seven Harness services, empty tool center and no bundled business plugins passed.');
 } finally {
