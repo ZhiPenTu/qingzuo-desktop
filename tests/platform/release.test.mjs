@@ -73,6 +73,22 @@ test('manual build workflow defaults to unsigned, preserves plugin signing and c
  assert.equal(workflow.jobs.publish.if,"${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");
  assert.equal(workflow.jobs.publish.needs,'package');
  assert.deepEqual(workflow.jobs.publish.permissions,{contents:'write'});
+ for(const name of ['release-commerce.yml','release-sdk.yml','upstream.yml','validate.yml']){
+  const spec=load(await readFile(path.join('.github/workflows',name),'utf8'));
+  for(const job of Object.values(spec.jobs)){
+   for(const step of job.steps){
+    if(!step.uses)continue;
+    assert.doesNotMatch(step.uses,/^actions\/(checkout|setup-node|upload-artifact|download-artifact)@v[1-5]$/,name);
+    if(step.uses.startsWith('actions/upload-artifact@'))assert.equal(step.uses,'actions/upload-artifact@v7',name);
+    if(step.uses.startsWith('actions/download-artifact@'))assert.equal(step.uses,'actions/download-artifact@v8',name);
+    if(step.uses.startsWith('actions/checkout@'))assert.equal(step.uses,'actions/checkout@v7',name);
+    if(step.uses.startsWith('actions/setup-node@')){
+     assert.equal(step.uses,'actions/setup-node@v7',name);
+     assert.equal(step.with?.['node-version'],24,name);
+    }
+   }
+  }
+ }
 });
 
 test('unsigned packaging discards ambient certificates and signed packaging restores native verification',async()=>{

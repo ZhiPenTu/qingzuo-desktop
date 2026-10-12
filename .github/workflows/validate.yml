@@ -26,8 +26,8 @@ jobs:
       COMMERCE_PLUGIN_PUBLIC_KEY: ${{ vars.COMMERCE_PLUGIN_PUBLIC_KEY }}
       COMMERCE_MARKET_PUBLIC_KEY: ${{ vars.COMMERCE_MARKET_PUBLIC_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -55,7 +55,7 @@ jobs:
           if [[ "$RUNNER_OS" == "macOS" ]]; then node scripts/verify-macos-runtime.mjs "release/desktop/mac-arm64/Qingzuo.app"; fi
           node scripts/test-packaged-desktop.mjs
           if [[ "$RUNNER_OS" == "macOS" ]]; then node scripts/test-component-update.mjs; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: Commerce-validation-${{ runner.os }}

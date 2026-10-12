@@ -35,8 +35,8 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -63,7 +63,7 @@ jobs:
           if [[ ("$COMPONENT" == "cli-proxy" || "${{ github.event_name }}" == "pull_request") && -n "$CANDIDATE_VERSION" ]]; then
             node scripts/update-cli-proxy.mjs --prepare --version "$CANDIDATE_VERSION" --candidate output/upstream/cli-proxy-candidate.json --report output/upstream/cli-proxy-prepare.json
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: Upstream-inspection
@@ -77,19 +77,19 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Upstream-inspection
           path: output/upstream
       - run: npm ci --ignore-scripts
       - run: npm run build:harness-native
       - run: node scripts/validate-cli-proxy.mjs --manifest output/upstream/cli-proxy-candidate.json --report output/upstream/cli-proxy-smoke-${{ runner.os }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: CLIProxy-smoke-${{ runner.os }}
@@ -98,23 +98,23 @@ jobs:
     needs: cli-proxy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: CLIProxy-smoke-*
           path: output/upstream
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Upstream-inspection
           path: output/upstream
       - run: node scripts/validate-cli-proxy.mjs --manifest output/upstream/cli-proxy-candidate.json --combine output/upstream/cli-proxy-smoke-macOS.json output/upstream/cli-proxy-smoke-Windows.json --report output/upstream/cli-proxy-validation.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CLIProxy-promotion-evidence
           path: |
@@ -129,8 +129,8 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -144,7 +144,7 @@ jobs:
           fi
           node scripts/harness-upstream.mjs prepare --version "$CANDIDATE_VERSION" --directory output/upstream/harness-candidate --report output/upstream/harness-prepare.json
           node scripts/harness-upstream.mjs validate --directory output/upstream/harness-candidate --report output/upstream/harness-validation.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: Harness-candidate-${{ runner.os }}
