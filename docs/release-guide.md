@@ -1,12 +1,12 @@
 # 轻作发布与独立插件
 
-底座版本 0.3.2，插件 API / SDK 1.2.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.3.3，插件 API / SDK 1.2.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 底座
 
 Node 24 和 Rust 构建工作台、Harness 适配和系统沙箱。npm run platform:prepare 会清理旧生成目录，禁止携带编辑器、OCR 模型或业务 Python 后端。
 
-Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.3.2 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
+Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.3.3 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
 
 插件市场公钥使用 COMMERCE_MARKET_PUBLIC_KEY；桌面组件继续使用既有 COMMERCE_PLUGIN_PUBLIC_KEY/COMMERCE_PLUGIN_SIGNING_KEY。两种用途在生成资源中分开记录。插件发布者不持有这两种私钥。
 
