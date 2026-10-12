@@ -73,7 +73,7 @@ export class ImageEditor {
   async assertSelection(plugin, selection) {
     this.assert(plugin);
     if (selection?.model.source === 'proxy') {
-      if (!this.proxy || (await this.proxy.imageConnection()).id !== selection.connectionId) throw new Error('CLIProxyAPI 连接已改变，请重新准备批次并确认；不会改用其他服务。');
+      if (!this.proxy || (await this.proxy.imageConnection()).id !== selection.connectionId) throw new Error('代理连接已改变，请重新准备批次并确认；不会改用其他服务。');
     }
   }
   async edit(plugin, { modelId, parameters, prompt, bytes, mime, signal, source = 'official', selection }) {
@@ -88,7 +88,7 @@ export class ImageEditor {
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000 || bytes.length > 25 * 1024 ** 2 || imageMime(bytes) !== mime) throw new Error('原图或提示词无效。');
     signal?.throwIfAborted();
     const connection = proxied ? await this.proxy.imageConnection() : null;
-    if (proxied && connection.id !== selection.connectionId) throw new Error('CLIProxyAPI 连接已改变，请重新准备批次并确认。');
+    if (proxied && connection.id !== selection.connectionId) throw new Error('代理图像服务连接已改变，请重新准备批次并确认。');
     const secret = connection?.key || await this.credentials.get(plugin.id, credential); if (!secret) throw new Error('请先配置 ' + model.provider + ' 图像 API Key。');
     let url, body, headers;
     if (model.provider === 'google') {
@@ -104,7 +104,7 @@ export class ImageEditor {
     const request = { method: 'POST', headers, body, redirect: 'error', signal };
     signal?.throwIfAborted();
     const response = proxied ? await this.proxy.request(connection.base, url, request) : await this.request(url, request);
-    if (!response.ok) { await response.body?.cancel(); throw new Error(({ 401: proxied ? 'CLIProxyAPI 访问密钥无效，请检查轻作 AI 设置。' : 'API Key 无效。', 403: '账号无权使用此型号。', 404: proxied ? '代理未启用此图像接口，请检查 CLIProxyAPI 版本与图像配置。' : '图像接口或型号不存在。', 400: proxied ? '代理拒绝此图片模型或参数，请检查图像路由配置；未改用其他型号。' : '图像服务拒绝此型号或参数。', 429: '请求限流或额度不足，请稍后手动重试。' })[response.status] || '图像服务请求失败（' + response.status + '）。'); }
+    if (!response.ok) { await response.body?.cancel(); throw new Error(({ 401: proxied ? '代理访问密钥无效，请检查轻作 AI 设置。' : 'API Key 无效。', 403: '账号无权使用此型号。', 404: proxied ? '代理未启用此图像接口，请检查代理服务的版本与图像配置。' : '图像接口或型号不存在。', 400: proxied ? '代理拒绝此图片模型或参数，请检查图像路由配置；未改用其他型号。' : '图像服务拒绝此型号或参数。', 429: '请求限流或额度不足，请稍后手动重试。' })[response.status] || '图像服务请求失败（' + response.status + '）。'); }
     const data = await boundedJson(response);
     const part = model.provider === 'google' ? data.candidates?.[0]?.content?.parts?.find(item => item.inlineData || item.inline_data) : null;
     const encoded = model.provider === 'google' ? (part?.inlineData || part?.inline_data)?.data : data.data?.[0]?.b64_json;

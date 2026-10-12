@@ -33,7 +33,7 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回不透明令牌和名称，不返回路径。`ai.batch.create/get/list/revise/start/cancel/preview` 用于宿主持有的批图任务，`ai.assistant.send/status/cancel` 与 `ai.onEvent()` 用于共享文本助手。类型定义见 SDK `index.d.ts`。
 
-清单声明 `permissions.ai: ['assistant', 'image-edit']`，批次还需文件权限。官方图像编辑需声明服务 network origin 和插件隔离凭据 `google-image` / `openai-image`。`ai.models({ source: 'proxy' })` 读取共享 CLIProxyAPI 图片目录，`ai.batch.create({ source: 'proxy', ... })` 固定图片来源、型号与参数；无 source 的旧调用仍使用官方 API。代理图片支持 GPT Image 的 `/v1/images/edits`、Gemini 的 `/v1beta/models/{id}:generateContent` 和目录中 `type: openai-image` 的兼容别名。未知能力不展示推测参数，目录缺失型号不会回退；外部代理兼容模型需配置 `image: true`。切换代理地址/模式后旧批次禁止改投新来源，但已生成结果仍可重新保存。凭据不会返回插件；上传和大响应由可信适配器处理，不放宽通用网络接口限制。模型发现只是读取目录，不验证账户图像权限，也不发送付费生成请求。外部 CLIProxyAPI 的上游重试策略由其管理端配置，轻作本身不重发图片请求。
+清单声明 `permissions.ai: ['assistant', 'image-edit']`，批次还需文件权限。官方图像编辑需声明服务 network origin 和插件隔离凭据 `google-image` / `openai-image`。`ai.models({ source: 'proxy' })` 读取共享代理图片目录，`ai.batch.create({ source: 'proxy', ... })` 固定图片来源、型号与参数；无 source 的旧调用仍使用官方 API。代理图片支持 GPT Image 的 `/v1/images/edits`、Gemini 的 `/v1beta/models/{id}:generateContent` 和目录中 `type: openai-image` 的兼容别名。未知能力不展示推测参数，目录缺失型号不会回退；外部代理兼容模型需配置 `image: true`。切换代理地址后旧批次禁止改投新来源，但已生成结果仍可重新保存。凭据不会返回插件；上传和大响应由可信适配器处理，不放宽通用网络接口限制。模型发现只是读取目录，不验证账户图像权限，也不发送付费生成请求。外部代理的上游重试策略由其管理端配置，轻作本身不重发图片请求。
 
 `batch.create` 固定输入副本和有效提示词，创建草稿而非提交请求。`revise` 使用 revision 检查；`start` 必须携带用户选定的 directoryToken 和当前 revision。重复 start 不重复生成；恢复不重发 unknown 项。`retryFailed: true` 仅显式重试 failed 项，对 save-failed 项只重新保存。关闭工具视图不取消批次，停用和卸载才取消所属任务。
 
