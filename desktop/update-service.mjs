@@ -8,7 +8,12 @@ export class UpdateService {
   release = null;
   constructor(adapter, changed) { this.adapter = adapter; this.changed = changed; }
   set(value) { Object.assign(this.state, value); this.changed(); }
-  fail(error) { this.set({ status: 'error', error: error.message || String(error) }); }
+  fail(error) {
+    // A failed download must not leave component/delta progress in the public
+    // state. Keep the checked release version so the renderer can retry, but
+    // clear transient transfer details from the failed attempt.
+    this.set({ status: 'error', error: error.message || String(error), progress: 0, transferred: 0, total: 0, mode: null, fallbackReason: null, reusedBytes: 0 });
+  }
   start(task) {
     this.pending = Promise.resolve().then(task).catch(error => this.fail(error)).finally(() => { this.pending = null; });
   }

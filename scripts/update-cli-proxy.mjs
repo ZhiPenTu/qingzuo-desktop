@@ -89,10 +89,12 @@ export function verifyCliProxyArtifact(bytes, artifact) {
   if (hash(bytes) !== artifact.sha256) throw new Error(`CLIProxyAPI SHA-256 mismatch: ${artifact.name}.`);
   return bytes;
 }
-async function download(url, { request, limit, headers = {} }) {
+async function download(url, { request, limit, headers = {}, onProgress = () => {} }) {
   const response = await request(url, { headers, signal: AbortSignal.timeout(120000), redirect: 'follow' });
   if (!response.ok) { await response.body?.cancel(); throw new Error(`CLIProxyAPI upstream request failed (${response.status}): ${url}`); }
   const length = response.headers.get('content-length');
+  const total = length !== null && Number.isSafeInteger(Number(length)) ? Number(length) : 0;
+  onProgress({ transferred: 0, total });
   if (length !== null && Number(length) > limit) { await response.body?.cancel(); throw new Error('CLIProxyAPI upstream response exceeds the download limit.'); }
   const reader = response.body?.getReader();
   if (!reader) throw new Error('CLIProxyAPI upstream response is empty.');
@@ -102,6 +104,7 @@ async function download(url, { request, limit, headers = {} }) {
       const chunk = await reader.read(); if (chunk.done) break;
       size += chunk.value.length;
       if (size > limit) { await reader.cancel(); throw new Error('CLIProxyAPI upstream response exceeds the download limit.'); }
+      onProgress({ transferred: size, total });
       chunks.push(Buffer.from(chunk.value));
     }
   } finally { reader.releaseLock(); }
@@ -138,7 +141,7 @@ async function atomicJson(filename, value) {
   try { await writeFile(temporary, JSON.stringify(value, null, 2) + '\n'); await rename(temporary, destination); }
   finally { await rm(temporary, { force: true }); }
 }
-export async function verifiedCliProxyDownload(manifest, target, { request = fetch, cacheDirectory = '.cache/cli-proxy' } = {}) {
+export async function verifiedCliProxyDownload(manifest, target, { request = fetch, cacheDirectory = '.cache/cli-proxy', onProgress = () => {} } = {}) {
   validateCliProxyManifest(manifest);
   const artifact = manifest.artifacts[target];
   if (!artifact) throw new Error(`CLIProxyAPI does not support target ${target}.`);
@@ -146,8 +149,8 @@ export async function verifiedCliProxyDownload(manifest, target, { request = fet
   let bytes;
   try { bytes = await readFile(filename); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (bytes) return { bytes: verifyCliProxyArtifact(bytes, artifact), filename, cached: true };
-  bytes = verifyCliProxyArtifact(await download(cliProxyAssetUrl(manifest.version, artifact.name), { request, limit: 128 * 1024 ** 2 }), artifact);
+  if (bytes) { onProgress({ transferred: bytes.length, total: bytes.length }); return { bytes: verifyCliProxyArtifact(bytes, artifact), filename, cached: true }; }
+  bytes = verifyCliProxyArtifact(await download(cliProxyAssetUrl(manifest.version, artifact.name), { request, limit: 128 * 1024 ** 2, onProgress }), artifact);
   await mkdir(path.dirname(filename), { recursive: true });
   await writeFile(filename, bytes);
   return { bytes, filename, cached: false };

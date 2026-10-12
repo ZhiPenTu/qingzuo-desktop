@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload, Download, Sparkles, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,11 +18,23 @@ import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
+import cliProxyManifest from '../../desktop/upstream/cli-proxy.json';
 const AIChat = lazy(() => import('./AIChat'));
 type Page = 'home' | 'market' | 'plugins' | 'chat' | 'ai' | 'settings' | 'updates';
-interface Status { version: string; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; update: UpdateState; migration?: { id: string; title: string; enabled: boolean } | null }
+interface ComponentUpdateState {
+  status: string;
+  currentVersion?: string;
+  candidateVersion?: string | null;
+  /** Older/experimental main-process builds use `version` for the candidate. */
+  version?: string | null;
+  updateAvailable?: boolean;
+  canUpdate?: boolean;
+  compatibility?: string;
+  error?: string | null;
+}
+interface Status { version: string; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; update: UpdateState; cliProxy?: ComponentUpdateState; componentUpdates?: { cliProxy?: ComponentUpdateState; harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
 const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'ai', title: 'AI 设置', icon: Sparkles }, { id: 'settings', title: '设置', icon: Settings }, { id: 'updates', title: '更新', icon: RefreshCw }] as const;
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], cliProxy: { status: 'idle', currentVersion: cliProxyManifest.version, candidateVersion: null, updateAvailable: false, error: null }, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
@@ -69,6 +81,7 @@ export default function Platform() {
       setPage(next); setQuery(''); setCategory('all');
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
+  const checkHarnessUpdate = () => { void navigate('updates').then(() => act('updates.check')); };
   useEffect(() => {
     if (page !== 'market') return;
     let active = true;
@@ -88,6 +101,21 @@ export default function Platform() {
     return () => observer.disconnect();
   }, [page]);
   const plugins = status?.plugins ?? [];
+  const cliProxyState = status?.cliProxy ?? status?.componentUpdates?.cliProxy ?? preview.cliProxy!;
+  const cliProxyCurrentVersion = cliProxyState.currentVersion ?? cliProxyManifest.version;
+  const cliProxyCandidate = cliProxyState.candidateVersion ?? (cliProxyState.currentVersion ? cliProxyState.version : null);
+  const cliProxyChecking = ['checking', 'downloading', 'installing', 'stopping', 'starting', 'rolling-back'].includes(cliProxyState.status);
+  const cliProxyResult = cliProxyState.error
+    ? cliProxyState.error
+    : cliProxyState.updateAvailable || cliProxyState.status === 'available'
+      ? cliProxyState.canUpdate === true
+        ? `检测到候选版本 v${cliProxyCandidate ?? '最新版本'}，已通过兼容性验证。`
+        : `检测到候选版本 v${cliProxyCandidate ?? '最新版本'}，请先完成兼容性验证后再更新。`
+      : cliProxyState.status === 'current'
+        ? '当前已是最新版本。'
+        : cliProxyState.status === 'ready'
+          ? `已切换到 v${cliProxyCurrentVersion}，模型需要重新验证。`
+        : '只检查官方候选版本，不会替换正在运行的代理。';
   const installFor = (id: string): PluginInstallState | undefined => startingPluginId === id ? { id, version: null, status: 'checking', progress: null, transferred: 0, total: 0, error: null } : status?.pluginInstalls?.find(job => job.id === id);
   const migrationInstall = status?.migration ? installFor(status.migration.id) : undefined;
   const migrationRunning = pluginInstallActive(migrationInstall);
@@ -133,7 +161,7 @@ export default function Platform() {
           <div className="commerce-info"><ShieldCheck /><div><strong>{page === 'market' ? '插件签名验证' : '你的工作台，由你掌握'}</strong><p>{page === 'market' ? '从签名目录安装工具，管理你自己的工作台。' : '本地工具在本机处理文件，联网插件按授权访问服务。'}</p></div></div>
         </> : null}
         {page === 'ai' ? <AISettings imageAvailable={desktop && plugins.some(plugin => plugin.id === 'official.ai-image' && plugin.enabled && !plugin.missing.length) && status.kernel.ready} onOpenImage={() => void navigate('official.ai-image', true)} onOpenChat={() => void navigate('chat')} /> : null}
-        {page === 'settings' ? <div className="commerce-settings"><Card><CardHeader><CardTitle role="heading" aria-level={2}>AI 模型与账户</CardTitle><CardDescription>图像 API Key、助手服务和 OAuth 登录已集中到独立的 AI 设置页。</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>外观</CardTitle><CardDescription>为工作台选择舒适的显示方式。</CardDescription></CardHeader><CardContent><div className="theme-options" role="group" aria-label="主题">{([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</div></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>运行环境</CardTitle><CardDescription>轻作与本地平台服务。</CardDescription></CardHeader><CardContent><dl className="runtime-info"><div><dt>轻作</dt><dd>v{status.version}</dd></div><div><dt>Harness</dt><dd>{status.kernel.version}</dd></div><div><dt>运行状态</dt><dd>{status.kernel.ready ? '内核运行正常' : desktop ? '内核尚未就绪' : '浏览器预览不启动本地内核'}</dd></div></dl><div className="runtime-systems">{status.kernel.systems.map(s => <Badge key={s.id} variant="secondary">{s.title}</Badge>)}</div></CardContent></Card></div> : null}
+        {page === 'settings' ? <div className="commerce-settings"><Card><CardHeader><CardTitle role="heading" aria-level={2}>AI 模型与账户</CardTitle><CardDescription>图像 API Key、助手服务和 OAuth 登录已集中到独立的 AI 设置页。</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>外观</CardTitle><CardDescription>为工作台选择舒适的显示方式。</CardDescription></CardHeader><CardContent><div className="theme-options" role="group" aria-label="主题">{([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</div></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>运行环境</CardTitle><CardDescription>轻作与本地平台服务。</CardDescription></CardHeader><CardContent><dl className="runtime-info"><div><dt>轻作</dt><dd>v{status.version}</dd></div><div><dt>Harness / DeepSeek 内核</dt><dd>v{status.kernel.version}</dd></div><div><dt>CLIProxyAPI</dt><dd>v{cliProxyCurrentVersion}</dd></div><div><dt>运行状态</dt><dd>{status.kernel.ready ? '内核运行正常' : desktop ? '内核尚未就绪' : '浏览器预览不启动本地内核'}</dd></div></dl><div className="runtime-systems">{status.kernel.systems.map(s => <Badge key={s.id} variant="secondary">{s.title}</Badge>)}</div><div className="runtime-components" aria-label="内核更新"><div className="runtime-component"><div><strong>CLIProxyAPI v{cliProxyCurrentVersion}</strong><p className="runtime-component-description">{cliProxyResult}</p>{cliProxyCandidate ? <p className="runtime-component-candidate">候选版本 v{cliProxyCandidate}</p> : null}</div><div className="runtime-component-actions"><Button variant="outline" size="sm" disabled={!desktop || busy || cliProxyChecking} onClick={() => act('cliProxy.check')}>{cliProxyChecking ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查 CLIProxyAPI 更新</Button>{cliProxyState.updateAvailable && cliProxyState.canUpdate === true ? <Button size="sm" disabled={!desktop || busy || cliProxyChecking} onClick={() => act('cliProxy.update')}><Download data-icon="inline-start" />立即更新</Button> : null}</div></div><div className="runtime-component"><div><strong>Harness v{status.kernel.version}</strong><p className="runtime-component-description">DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。</p></div><Button variant="outline" size="sm" disabled={!desktop || busy} onClick={checkHarnessUpdate}><RefreshCw data-icon="inline-start" />检查轻作更新</Button></div></div></CardContent></Card></div> : null}
         {page === 'updates' ? <UpdateCard version={status.version} update={status.update} disabled={!desktop || busy} onAction={act} /> : null}
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
     </div>

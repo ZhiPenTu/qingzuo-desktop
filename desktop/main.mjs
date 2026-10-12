@@ -20,6 +20,7 @@ import { preparePluginMigration } from './plugin-migration.mjs';
 import { ImageEditor } from './ai-images.mjs';
 import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
+import { CliProxyUpdateService } from './cli-proxy-update.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 // Resolve the established profile before changing the display name. This also
@@ -39,7 +40,7 @@ const viewQueues = new Map(), viewEpochs = new Map();
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, approvals;
+let batches, proxy, imageEditor, approvals, cliProxyUpdater;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -263,7 +264,9 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
   }
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'cliProxy.check') { cliProxyUpdater.check(); return { accepted: true }; }
+  if (method === 'cliProxy.update') { cliProxyUpdater.update(); return { accepted: true }; }
+  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, cliProxy: cliProxyUpdater?.state, componentUpdates: { cliProxy: cliProxyUpdater?.state, harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -325,6 +328,8 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
 async function shutdownRuntime() {
   quitting = true;
   await pluginInstallService?.shutdown();
+  cliProxyUpdater?.cancel();
+  await cliProxyUpdater?.pending?.catch(() => {});
   approvals?.dispose();
   await batches?.shutdown();
   await proxy?.stop();
@@ -340,7 +345,10 @@ migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
 credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':'); files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog); network = new NetworkBroker(files, credentials);
 await files.initialize();
-proxy = new ProxyRuntime({ root: path.join(app.getPath('userData'), 'ai-proxy'), binary: path.join(generated, 'cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: url => shell.openExternal(url) }); await proxy.initialize();
+const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
+proxy = new ProxyRuntime({ root: proxyRoot, binary: path.join(generated, 'cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: url => shell.openExternal(url) }); await proxy.initialize();
+cliProxyUpdater = new CliProxyUpdateService({ proxy, root: proxyRoot, changed });
+await cliProxyUpdater.initialize().catch(error => cliProxyUpdater.fail(error));
 imageEditor = new ImageEditor(credentials, undefined, proxy);
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
 approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
@@ -458,4 +466,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater };

@@ -26,6 +26,7 @@ async function availablePort() {
 export class ProxyRuntime {
   constructor({ root, binary, credentials, openExternal, request = proxyRequest }) {
     Object.assign(this, { root, binary, credentials, openExternal, request });
+    this.version = PROXY_VERSION;
     this.settings = { schemaVersion: 1, mode: 'builtin', address: 'http://127.0.0.1:8317', model: '', verified: [] };
     this.child = null; this.starting = null; this.oauth = new Map(); this.error = null; this.epoch = 0;
   }
@@ -33,7 +34,17 @@ export class ProxyRuntime {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     try { const value = JSON.parse(await readFile(path.join(this.root, 'settings.json'), 'utf8')); if (value.schemaVersion !== 1) throw new Error('AI 配置版本不受支持。'); this.settings = { ...this.settings, ...value, address: proxyAddress(value.address), verified: Array.isArray(value.verified) ? value.verified : [] }; } catch (error) { if (error.code !== 'ENOENT') this.error = 'AI 配置读取失败，请重新设置。'; }
   }
-  status() { return { ...this.settings, version: PROXY_VERSION, running: Boolean(this.child && this.child.exitCode === null), error: this.error }; }
+  status() { return { ...this.settings, version: this.version, running: Boolean(this.child && this.child.exitCode === null), error: this.error }; }
+  async setBinary(binary, version, { resetVerification = true } = {}) {
+    if (typeof binary !== 'string' || !binary || typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('CLIProxyAPI 运行文件无效。');
+    if (this.child && this.child.exitCode === null) throw new Error('CLIProxyAPI 运行中，不能切换版本。');
+    this.binary = binary; this.version = version;
+    // A newly installed proxy binary must prove tool-calling compatibility
+    // again. Restoring the same active version after a restart preserves it.
+    if (resetVerification) this.settings.verified = [];
+    await atomicJson(path.join(this.root, 'settings.json'), this.settings);
+    return this.status();
+  }
   async configure(options) {
     if (!['builtin', 'external'].includes(options.mode) || typeof options.model !== 'string' || options.model.length > 160) throw new Error('AI 配置无效。');
     const address = proxyAddress(options.address || this.settings.address);

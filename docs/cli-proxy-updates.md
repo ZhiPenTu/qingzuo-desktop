@@ -68,3 +68,16 @@ node scripts/update-cli-proxy.mjs --apply --version 8.0.23 --validation-report .
 ```
 
 此外，在正式发布前运行 `test:desktop` 验证开发目录中的 Electron 应用；完成打包后执行 `node scripts/test-packaged-desktop.mjs`，验证独立应用的资源路径和启动。平台签名按发布流程单独检查。上游新增提供商、管理端点和消息格式仍需在轻作适配层和对应契约测试中逐项接入。
+
+## 应用内检查与运行时更新
+
+设置页的“检查 CLIProxyAPI 更新”只读取官方稳定 Release 清单，并显示当前版本、候选版本
+和兼容性状态。它不会覆盖安装包 `Resources/commerce` 中的文件。用户态更新器使用
+`userData/ai-proxy/versions/<version>` 和原子 `active.json` 指针，下载后校验制品哈希，停止
+当前代理，启动候选并通过 `/v1/models` 健康检查；启动失败时恢复旧指针和旧二进制。
+
+运行时完整性校验不等于项目兼容性验收。只有受信任的双平台 smoke、代理契约和安装包验收报告
+通过后，候选才会被标记为 `compatibility=passed` 并允许显示“立即更新”。当前应用没有已发布的
+候选验收报告，因此设置页只显示检查按钮；`cliProxy.update` 保留为后台任务接口并拒绝未验收候选。
+外部 CLIProxyAPI 配置不受此更新器影响，配置、账户和 OAuth 凭据也不会被删除；切换版本后需
+重新验证已选模型的工具调用能力。

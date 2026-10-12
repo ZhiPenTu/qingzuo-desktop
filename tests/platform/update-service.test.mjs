@@ -31,12 +31,30 @@ test('download returns immediately, prevents overlapping operations, and automat
 test('failed downloads never install, retain the checked version for retry and reset stale progress', async () => {
   let attempts = 0, installs = 0;
   const service = new UpdateService({ check: async () => available,
-    download: async (_release, notify) => { attempts++; if (attempts === 1) { notify({ progress: 45 }); throw new Error('网络中断'); } assert.equal(service.state.progress, 0); },
+    download: async (_release, notify) => {
+      attempts++;
+      if (attempts === 1) {
+        notify({ mode: 'components', progress: 45, transferred: 45, total: 100, reusedBytes: 10, fallbackReason: '组件更新暂不可用。' });
+        throw new Error('网络中断');
+      }
+      assert.equal(service.state.progress, 0);
+      assert.equal(service.state.mode, null);
+      assert.equal(service.state.transferred, 0);
+      assert.equal(service.state.total, 0);
+      assert.equal(service.state.reusedBytes, 0);
+      assert.equal(service.state.fallbackReason, null);
+    },
     install: async () => { installs++; },
   }, () => {});
   service.check(); await service.pending;
   service.download(); await service.pending;
   assert.equal(installs, 0); assert.equal(service.state.status, 'error'); assert.equal(service.state.version, '0.2.4');
+  assert.equal(service.state.progress, 0);
+  assert.equal(service.state.mode, null);
+  assert.equal(service.state.transferred, 0);
+  assert.equal(service.state.total, 0);
+  assert.equal(service.state.reusedBytes, 0);
+  assert.equal(service.state.fallbackReason, null);
   service.download(); await service.pending;
   assert.equal(installs, 1); assert.equal(service.state.error, null);
 });
