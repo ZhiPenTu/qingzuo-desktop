@@ -12,32 +12,75 @@ export function verifyArtifact(bytes, record, publicKey) {
   if (key.asymmetricKeyType !== 'ed25519') throw new Error('市场签名必须使用 Ed25519。');
   if (!verify(null, bytes, key, Buffer.from(record.signature, 'base64'))) throw new Error('插件签名无效。');
 }
+const INVALID_PACKAGE_MESSAGE = '插件包格式无效或文件未下载完整，请重新下载或选择有效的 .ecplugin / .zip 插件包。';
+function openPackageZip(bytes) {
+  const buffer = Buffer.isBuffer(bytes) ? bytes : bytes instanceof Uint8Array ? Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength) : null;
+  if (!buffer || buffer.length === 0) throw new Error(INVALID_PACKAGE_MESSAGE);
+  if (buffer.length > MAX_PACKAGE_BYTES) throw new Error('插件包过大。');
+  try { return new AdmZip(buffer, { trailingSpace: true }); }
+  catch { throw new Error(INVALID_PACKAGE_MESSAGE); }
+}
+function readZipEntry(entry) {
+  try { return entry.getData(); }
+  catch { throw new Error(INVALID_PACKAGE_MESSAGE); }
+}
+function parseManifestJson(text) {
+  try { return JSON.parse(text); }
+  catch { throw new Error('插件标识或清单格式无效。'); }
+}
+function resolvePackagePrefix(zip) {
+  if (zip.getEntry('package.json')) return '';
+  let entries;
+  try { entries = zip.getEntries(); }
+  catch { throw new Error(INVALID_PACKAGE_MESSAGE); }
+  const roots = new Set();
+  for (const entry of entries) {
+    const trimmed = entry.entryName.replace(/\/$/, '');
+    if (!trimmed) continue;
+    roots.add(trimmed.split('/')[0]);
+    if (roots.size > 1) return '';
+  }
+  const [root] = [...roots];
+  if (!root || !zip.getEntry(root + '/package.json')) return '';
+  safeRelative(root);
+  return root + '/';
+}
 export function inspectPackage(bytes) {
-  if(bytes.length>MAX_PACKAGE_BYTES)throw new Error('插件包过大。');
-  const entry=new AdmZip(bytes).getEntry('package.json');if(!entry || entry.header.size>65536)throw new Error('插件清单缺失或过大。');
-  return validateManifest(JSON.parse(entry.getData().toString('utf8')));
+  const zip = openPackageZip(bytes), prefix = resolvePackagePrefix(zip);
+  const entry = zip.getEntry(prefix + 'package.json');
+  if (!entry || entry.header.size > 65536) throw new Error('插件清单缺失或过大。');
+  return validateManifest(parseManifestJson(readZipEntry(entry).toString('utf8')));
 }
 export async function unpackPackage(bytes, destination) {
-  if (bytes.length > MAX_PACKAGE_BYTES) throw new Error('插件包过大。');
-  inspectPackage(bytes);
-  const zip = new AdmZip(bytes), entries = zip.getEntries(), seen = new Set();
+  const zip = openPackageZip(bytes), prefix = resolvePackagePrefix(zip);
+  const manifestEntry = zip.getEntry(prefix + 'package.json');
+  if (!manifestEntry || manifestEntry.header.size > 65536) throw new Error('插件清单缺失或过大。');
+  validateManifest(parseManifestJson(readZipEntry(manifestEntry).toString('utf8')));
+  let entries;
+  try { entries = zip.getEntries(); }
+  catch { throw new Error(INVALID_PACKAGE_MESSAGE); }
+  const seen = new Set(), items = [];
   if (entries.length > 20000) throw new Error('插件包文件过多。');
   let total = 0;
   for (const e of entries) {
-    const name = e.entryName.replace(/\/$/, ''); safeRelative(name);
+    const rawName = e.entryName.replace(/\/$/, ''); safeRelative(rawName);
+    if (prefix && e.isDirectory && rawName === prefix.slice(0, -1)) continue;
+    const relativeEntryName = prefix ? e.entryName.slice(prefix.length) : e.entryName;
+    const name = relativeEntryName.replace(/\/$/, ''); safeRelative(name);
     const normalized = name.toLowerCase();
     if (seen.has(normalized)) throw new Error('插件包包含重复路径。'); seen.add(normalized);
     const mode = e.header.attr >>> 16;
     if ((mode & 0xf000) === 0xa000 || (mode & 0xf000) !== 0 && ![0x8000, 0x4000].includes(mode & 0xf000)) throw new Error('插件包含不支持的文件类型。');
     total += e.header.size; if (total > 2 * 1024 ** 3) throw new Error('插件包展开后过大。');
+    items.push({ entry: e, relativeEntryName });
   }
   await mkdir(destination, { recursive: true, mode: 0o700 });
-  for (const e of entries) {
-    const file = path.join(destination, e.entryName);
+  for (const { entry: e, relativeEntryName } of items) {
+    const file = path.join(destination, relativeEntryName);
     if (e.isDirectory) await mkdir(file, { recursive: true, mode: 0o700 });
-    else { await mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); await writeFile(file, e.getData(), { mode: (e.header.attr >>> 16) & 0o111 ? 0o700 : 0o600 }); }
+    else { await mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); await writeFile(file, readZipEntry(e), { mode: (e.header.attr >>> 16) & 0o111 ? 0o700 : 0o600 }); }
   }
-  const pkg = JSON.parse(await readFile(path.join(destination, 'package.json'), 'utf8'));
+  const pkg = parseManifestJson(await readFile(path.join(destination, 'package.json'), 'utf8'));
   const manifest = validateManifest(pkg);
   await confinedPath(destination, manifest.ui);
   if (manifest.settings) await confinedPath(destination, manifest.settings.entry);
@@ -165,12 +208,15 @@ export async function boundedDownload(url, limit = MAX_PACKAGE_BYTES, signal, { 
       }
     }
     controller.signal.throwIfAborted();
+    if (total > 0 && size !== total) throw new Error('下载文件不完整，请重试。');
     if (size !== lastTransferred || size === 0) onProgress({ transferred: size, total });
     return Buffer.concat(chunks);
   } catch (error) {
     if (reader) await reader.cancel().catch(() => {});
     else await response?.body?.cancel().catch(() => {});
-    throw controller.signal.aborted ? controller.signal.reason : error;
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (error instanceof TypeError && /terminated/i.test(error.message)) throw new Error('下载文件不完整，请重试。', { cause: error });
+    throw error;
   } finally {
     clearTimeout(idleTimer); clearTimeout(totalTimer);
     signal?.removeEventListener('abort', cancel);

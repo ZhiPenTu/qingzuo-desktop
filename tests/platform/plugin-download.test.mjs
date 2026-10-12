@@ -89,3 +89,14 @@ test('redirects preserve HTTPS, reject URL credentials and have a finite hop lim
   await assert.rejects(boundedDownload('https://fixture.example/loop', 100, undefined, options), /重定向无效/);
   assert.equal(options.requests.filter(address => address.endsWith('/loop')).length, 6);
 });
+
+test('truncated downloads that close before declared content-length fail explicitly', async t => {
+  const options = await fixture(t, (_req, res) => {
+    res.writeHead(200, { 'content-length': 100 });
+    res.write('partial-body', () => res.socket.destroy());
+  });
+  await assert.rejects(boundedDownload('https://fixture.example/truncated', 1000, undefined, options), /下载文件不完整/);
+  await assert.rejects(boundedDownload('https://fixture.example/short-body', 1000, undefined, {
+    request: async () => new Response('partial-body', { headers: { 'content-length': '100' } }),
+  }), /下载文件不完整/);
+});

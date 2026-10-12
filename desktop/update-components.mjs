@@ -148,8 +148,11 @@ async function installedMatches(bundle, file) {
 async function unpackComponent(archive, files, destination, signal) {
   return withNoAsar(async () => {
     const expected = new Map(files.filter(f => f.type === 'file').map(f => [f.sha256, f.size]));
-    const zip = new AdmZip(archive), seen = new Set();
-    for (const entry of zip.getEntries()) {
+    let zip, entries;
+    try { zip = new AdmZip(archive, { trailingSpace: true }); entries = zip.getEntries(); }
+    catch { throw new Error('组件压缩包格式无效或已损坏。'); }
+    const seen = new Set();
+    for (const entry of entries) {
       signal?.throwIfAborted();
       const type = (entry.header.attr >>> 16) & 0xf000;
       if (seen.has(entry.entryName) || !expected.has(entry.entryName) || entry.isDirectory || ![0, 0x8000].includes(type)
@@ -160,7 +163,10 @@ async function unpackComponent(archive, files, destination, signal) {
     for (const file of files.filter(f => f.type === 'file')) {
       signal?.throwIfAborted();
       const filename = path.join(destination, file.path);
-      await writeFile(filename, zip.getEntry(file.sha256).getData(), { mode: file.mode, flag: 'wx' });
+      let data;
+      try { data = zip.getEntry(file.sha256).getData(); }
+      catch { throw new Error('组件压缩包格式无效或已损坏。'); }
+      await writeFile(filename, data, { mode: file.mode, flag: 'wx' });
       await chmod(filename, file.mode);
       if (!await matchesArtifact(filename, file)) throw new Error('组件文件完整性校验失败。');
     }

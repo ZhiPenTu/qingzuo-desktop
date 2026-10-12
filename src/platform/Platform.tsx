@@ -59,7 +59,11 @@ export default function Platform() {
   const [marketRevision, setMarketRevision] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
-  const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { setError(String(e)); } }, []);
+  const formatError = (reason: unknown) => {
+    const cleaned = (reason instanceof Error ? reason.message : String(reason)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '').replace(/^Error:\s*/, '');
+    return /^ADM-ZIP:/i.test(cleaned) ? '插件包格式无效或文件未下载完整，请重新下载或选择有效的 .ecplugin / .zip 插件包。' : cleaned;
+  };
+  const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
@@ -69,7 +73,7 @@ export default function Platform() {
     if (installId) { pendingInstalls.current.add(installId); setStartingPluginId(installId); }
     setBusy(true); setError(null);
     try { const value = await window.commerceDesktop?.invoke(method, args); await refresh(); return value; }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); throw e; }
+    catch (e) { setError(formatError(e)); throw e; }
     finally { setBusy(false); if (installId) { pendingInstalls.current.delete(installId); setStartingPluginId(null); } }
   };
   const act = (method: string, args?: unknown) => { void run(method, args).catch(() => {}); };
@@ -78,7 +82,7 @@ export default function Platform() {
       if (navigation.some(item => item.id === next)) await window.commerceDesktop?.invoke('view.hide');
       else await run('view.open', { id: next, settings });
       setPage(next); setQuery(''); setCategory('all');
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(formatError(e)); }
   }
   useEffect(() => {
     if (page !== 'market') return;
@@ -88,7 +92,7 @@ export default function Platform() {
     window.commerceDesktop.invoke<{ items: ToolEntry[]; message?: string }>('market.list').then(value => {
       if (!active) return;
       setMarket(value.items); setMarketMessage(value.message || ''); setMarketState(value.message ? 'unavailable' : 'ready');
-    }).catch(e => { if (active) { setMarketMessage(e instanceof Error ? e.message : String(e)); setMarketState('error'); } });
+    }).catch(e => { if (active) { setMarketMessage(formatError(e)); setMarketState('error'); } });
     return () => { active = false; };
   }, [page, marketRevision]);
   useEffect(() => {

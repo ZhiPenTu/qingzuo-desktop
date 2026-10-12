@@ -146,9 +146,9 @@ async function loadView(id, settings, epoch) {
   if (views.get(id).webContents.getURL() !== destination) await views.get(id).webContents.loadURL(destination);
   hideViews(); visible = id; return sanitizePlugin(plugin);
 }
-function kernelRequest(message) {
+function kernelRequest(message, timeout = 30000) {
   if (!host || systems.length !== 7) return Promise.reject(new Error('Harness 内核不可用，请重新启动。'));
-  return new Promise((resolve,reject) => { const id = ++kernelCounter; const timer = setTimeout(() => { kernelRequests.delete(id); reject(new Error('内核请求超时。')); }, 30000); kernelRequests.set(id,{resolve,reject,timer}); host.postMessage({...message,id}); });
+  return new Promise((resolve,reject) => { const id = ++kernelCounter; const timer = timeout > 0 ? setTimeout(() => { kernelRequests.delete(id); reject(new Error('内核请求超时。')); }, timeout) : null; kernelRequests.set(id,{resolve,reject,timer}); host.postMessage({...message,id}); });
 }
 let toolSyncPromise = null;
 async function syncTools() {
@@ -223,7 +223,7 @@ async function systemInvoke(service, method, args = {}) {
 }
 async function performPlatform(method, args) {
   if (method === 'plugins.import') {
-    const result = await dialog.showOpenDialog(window, { title: '导入插件', properties: ['openFile'], filters: [{ name: '电商工具插件', extensions: ['ecplugin', 'zip'] }] }); if (result.canceled) return;
+    const result = await dialog.showOpenDialog(window, { title: '导入插件', properties: ['openFile'], filters: [{ name: '电商工具插件', extensions: ['ecplugin', 'zip'] }] }); if (result.canceled || !result.filePaths?.length) return;
     const bytes = await readFile(result.filePaths[0]); const manifest=inspectPackage(bytes);
     pluginInstallService.assertAvailable(manifest.id);
     const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n网络来源：' + (manifest.permissions.network ?? []).join('、') + '\n凭据名称：' + (manifest.permissions.credentials ?? []).join('、') + '\nAI 能力：' + (manifest.permissions.ai ?? []).join('、') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
@@ -277,7 +277,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (!['plugins','market','updates'].includes(service)) throw new Error('平台操作不受支持。');
   // The catalogue is native HTTP work, not a short kernel request. Installation
   // still enters the registered market service and only acknowledges a job.
-  const result = method === 'market.list' ? await catalog() : await kernelRequest({type:'call',kind:'system',service,method,args});
+  const result = method === 'market.list' ? await catalog() : await kernelRequest({type:'call',kind:'system',service,method,args}, method === 'plugins.import' ? 0 : 30000);
   if (service === 'plugins') {
     await syncTools();
     changed();

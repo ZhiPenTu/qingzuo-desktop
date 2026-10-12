@@ -60,10 +60,15 @@ export async function extractCliProxyArchive(bytes, target, destination, { extra
   try {
     const unpack = extractor ?? (async (output) => {
       if (target === 'win32-x64') {
-        const zip = new AdmZip(bytes);
-        for (const entry of zip.getEntries()) {
+        let zip, entries;
+        try { zip = new AdmZip(bytes, { trailingSpace: true }); entries = zip.getEntries(); }
+        catch { throw new Error('CLIProxyAPI 制品格式无效或压缩包已损坏。'); }
+        for (const entry of entries) {
           archiveMember(entry.entryName);
-          if (!entry.isDirectory) zip.extractEntryTo(entry, output, true, true);
+          if (!entry.isDirectory) {
+            try { zip.extractEntryTo(entry, output, true, true); }
+            catch { throw new Error('CLIProxyAPI 制品格式无效或压缩包已损坏。'); }
+          }
         }
       } else {
         const archive = path.join(output, 'archive.tar.gz');

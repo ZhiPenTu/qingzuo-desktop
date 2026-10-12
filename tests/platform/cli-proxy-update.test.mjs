@@ -76,3 +76,12 @@ test('archive extraction rejects a missing executable and accepts only the expec
   assert.equal(installed.sha256, digest(Buffer.from('binary'))); assert.equal(await readFile(installed.binary, 'utf8'), 'binary');
 });
 
+
+test('win32 archive extraction translates corrupted zip errors into a clean Chinese message', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-cli-proxy-win32-bad-')); context.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(extractCliProxyArchive(Buffer.from('PK\x03\x04truncated'), 'win32-x64', path.join(root, 'bad')), err => {
+    assert.match(err.message, /CLIProxyAPI 制品格式无效或压缩包已损坏/);
+    assert.doesNotMatch(err.message, /ADM-ZIP/i);
+    return true;
+  });
+});

@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
-import { PluginManager, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
+import { PluginManager, inspectPackage, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
 import { validateManifest, TARGET } from '../../desktop/security.mjs';
 function archive(version = '0.1.0', overrides = {}) {
   const zip = new AdmZip(); zip.addFile('package.json', Buffer.from(JSON.stringify({ name: 'fixture', version, commerce: { manifestVersion: 1, id: 'local.fixture', title: 'Fixture', description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {}, ...overrides } }))); zip.addFile('ui/index.html', Buffer.from('<h1>Fixture</h1>')); return zip.toBuffer();
@@ -122,4 +122,32 @@ test('uninstalling and reinstalling a plugin with services restores its descript
     assert.equal((await manager.list()).length, 1);
     assert.deepEqual((await manager.get('local.fixture')).services?.provides, ['fixture.echo']);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('truncated or invalid zip packages fail with a clean Chinese message and support trailing padding and single-folder zip wrappers', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-zip-format-'));
+  try {
+    const valid = archive();
+    const truncated = valid.subarray(0, valid.length - 10);
+    for (const bad of [Buffer.alloc(0), Buffer.from('not a zip'), truncated]) {
+      assert.throws(() => inspectPackage(bad), err => {
+        assert.match(err.message, /插件包格式无效或文件未下载完整/);
+        assert.doesNotMatch(err.message, /ADM-ZIP/i);
+        return true;
+      });
+      await assert.rejects(unpackPackage(bad, path.join(root, 'bad')), /插件包格式无效或文件未下载完整/);
+    }
+    const padded = Buffer.concat([valid, Buffer.from('   \r\n')]);
+    assert.equal(inspectPackage(new Uint8Array(padded)).id, 'local.fixture');
+    const wrapped = new AdmZip();
+    wrapped.addFile('fixture-folder/', Buffer.alloc(0));
+    wrapped.addFile('fixture-folder/package.json', Buffer.from(JSON.stringify({ name: 'fixture', version: '0.1.0', commerce: { manifestVersion: 1, id: 'local.fixture', title: 'Fixture', description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {} } })));
+    wrapped.addFile('fixture-folder/ui/index.html', Buffer.from('<h1>Wrapped</h1>'));
+    assert.equal(inspectPackage(wrapped.toBuffer()).id, 'local.fixture');
+    const unpacked = await unpackPackage(wrapped.toBuffer(), path.join(root, 'wrapped'));
+    assert.equal(unpacked.id, 'local.fixture');
+    assert.equal(await readFile(path.join(root, 'wrapped/ui/index.html'), 'utf8'), '<h1>Wrapped</h1>');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -142,3 +142,18 @@ it('shows runtime component versions, checks CLIProxyAPI candidates, and routes 
   fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.check')).toHaveLength(1));
 });
+
+it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import errors', async () => {
+  const { invoke } = fixture();
+  const baseImpl = invoke.getMockImplementation()!;
+  invoke.mockImplementation(async (method: string) => {
+    if (method === 'plugins.import') throw new Error("Error invoking remote method 'commerce:platform': Error: ADM-ZIP: Invalid or unsupported zip format. No END header found");
+    return baseImpl(method);
+  });
+  render(<Platform />);
+  fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('插件包格式无效或文件未下载完整');
+  expect(alert.textContent).not.toContain('Error invoking remote method');
+  expect(alert.textContent).not.toContain('ADM-ZIP');
+});
