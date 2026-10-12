@@ -7,6 +7,7 @@ import path from 'node:path';
 import { CliProxyUpdateService, extractCliProxyArchive } from '../../desktop/cli-proxy-update.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
+const testBinaryName = process.platform === 'win32' ? 'cli-proxy-api.exe' : 'cli-proxy-api';
 function manifest(version = '8.0.24') {
   const darwin = Buffer.from('darwin archive'), windows = Buffer.from('windows archive');
   return { schemaVersion: 1, repository: 'router-for-me/CLIProxyAPI', version, tag: `v${version}`,
@@ -29,7 +30,7 @@ async function fixture(context, { failStart = false } = {}) {
   const service = new CliProxyUpdateService({ proxy, root: path.join(root, 'profile'), request: async () => { throw new Error('network not expected'); },
     inspect: async ({ version } = {}) => version ? candidate : candidate,
     download: async () => ({ bytes: Buffer.from('candidate archive') }),
-    extract: async (_bytes, _target, destination) => { const binary = path.join(destination, 'cli-proxy-api'); await writeFile(binary, 'candidate'); return { binary, sha256: digest(Buffer.from('candidate')) }; },
+    extract: async (_bytes, _target, destination) => { const binary = path.join(destination, testBinaryName); await writeFile(binary, 'candidate'); return { binary, sha256: digest(Buffer.from('candidate')) }; },
   });
   return { root, proxy, service, candidate, packaged };
 }
@@ -48,7 +49,7 @@ test('CLIProxy update stages a versioned user-data binary, switches atomically a
   assert.equal(state.status, 'ready'); assert.equal(state.currentVersion, '8.0.24'); assert.equal(proxy.version, '8.0.24');
   assert.deepEqual(proxy.settings.verified, []); assert.equal(proxy.running, false);
   const active = JSON.parse(await readFile(path.join(root, 'profile', 'active.json'), 'utf8'));
-  assert.equal(active.version, '8.0.24'); assert.equal(active.binary, 'versions/8.0.24/cli-proxy-api');
+  assert.equal(active.version, '8.0.24'); assert.equal(active.binary, `versions/8.0.24/${testBinaryName}`);
   assert.equal(await readFile(path.join(root, 'profile', active.binary), 'utf8'), 'candidate');
 });
 
@@ -64,7 +65,8 @@ test('active user-data version is restored before the next runtime starts', asyn
   const { root, service, proxy } = await fixture(context);
   await service.check(); service.approveCandidate({ schemaVersion: 1, component: 'CLIProxyAPI', version: '8.0.24', artifacts: { 'darwin-arm64': service.candidate.artifacts['darwin-arm64'].sha256, 'win32-x64': service.candidate.artifacts['win32-x64'].sha256 }, checks: { proxyContracts: 'passed', 'darwin-arm64': 'passed', 'win32-x64': 'passed' } }); await service.update(); await proxy.stop();
   const second = new CliProxyUpdateService({ proxy, root: path.join(root, 'profile'), extract: service.extract, inspect: service.inspect, download: service.download });
-  await second.initialize(); assert.equal(proxy.version, '8.0.24'); assert.match(proxy.binary, /versions[\\/]8\.0\.24[\\/]cli-proxy-api$/);
+  await second.initialize(); assert.equal(proxy.version, '8.0.24');
+  assert.equal(path.normalize(proxy.binary).endsWith(path.join('versions', '8.0.24', testBinaryName)), true);
 });
 
 test('archive extraction rejects a missing executable and accepts only the expected regular file', async context => {
