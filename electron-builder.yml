@@ -6,6 +6,9 @@ directories:
 files:
   - dist/**/*
   - desktop/**/*
+  # The packaged desktop updater imports this shared validation/download module
+  # at runtime; keep it in app.asar alongside the desktop sources.
+  - scripts/update-cli-proxy.mjs
   - packages/platform-bundle/**/*
   - packages/plugin-sdk/**/*
   - package.json
