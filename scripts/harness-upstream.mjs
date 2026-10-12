@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import semver from 'semver';
-import { canonicalOutputPath } from './update-cli-proxy.mjs';
+import { canonicalOutputPath } from './output-paths.mjs';
 
 const metadataFile = 'desktop/upstream/harness.json';
 const markerFile = '.harness-candidate.json';
@@ -15,7 +15,7 @@ const exact = value => typeof value === 'string' && semver.valid(value) === valu
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 const save = async (file, value) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, JSON.stringify(value, null, 2) + '\n'); };
 const check = (id, ok, detail) => ({ id, status: ok ? 'passed' : 'failed', detail });
-const protectedInputs = ['package.json', 'package-lock.json', 'packages/platform-bundle/package.json', metadataFile, 'desktop/upstream/cli-proxy.json', markerFile];
+const protectedInputs = ['package.json', 'package-lock.json', 'packages/platform-bundle/package.json', metadataFile, markerFile];
 
 export async function assertHarnessReportPath(filename, { source, directory, sources = [] }) {
   const output = await canonicalOutputPath(filename);

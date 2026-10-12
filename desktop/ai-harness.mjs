@@ -77,7 +77,7 @@ function finishReason(reason) {
   if (reason === 'content_filter') throw new LlmError('助手响应被模型内容过滤器停止。', 'CONTENT_FILTER');
   throw new LlmError('助手返回了不受支持的结束原因。', 'PROXY_PROTOCOL');
 }
-export class CliProxyAdapter extends LlmAdapter {
+export class ExternalProxyAdapter extends LlmAdapter {
   constructor(invoke, sessions, request = proxyRequest) { super(); this.invoke = invoke; this.sessions = sessions; this.request = request; }
   async listModels() { return (await this.invoke('ai', 'models', {})).map(item => ({ id: item.id, name: item.id })); }
   async *stream(options) {
@@ -169,7 +169,7 @@ export class HarnessAssistant {
   async initialize() {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     try { const records = JSON.parse(await readFile(path.join(this.root, 'sessions.json'), 'utf8')); if (records.schemaVersion !== 1 || !Array.isArray(records.sessions)) throw new Error('助手会话版本不受支持。'); for (const record of records.sessions) { if (record.state === 'running') record.error = '上次对话中断，未完成的插件调用不会自动重发。'; record.state = 'idle'; for (const entry of record.history) if (entry.role === 'tool' && entry.state === 'running') { entry.state = 'interrupted'; entry.text = '执行中断，结果未知；不会自动重发。'; } this.sessions.set(record.owner, record); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    this.ctx.llm.registerAdapter(['cliproxy'], new CliProxyAdapter(this.invoke, this.sessions));
+    this.ctx.llm.registerAdapter(['proxy'], new ExternalProxyAdapter(this.invoke, this.sessions));
   }
   persist() { const value = structuredClone({ schemaVersion: 1, harness: HARNESS_VERSION, sessions: [...this.sessions.values()] }); this.writing = this.writing.catch(() => {}).then(() => atomicJson(path.join(this.root, 'sessions.json'), value)); return this.writing; }
   async handle(owner) {
@@ -182,7 +182,7 @@ export class HarnessAssistant {
     let session = this.sessions.get(owner); const resume = Boolean(session && session.started !== false);
     if (!session) { session = { owner, id: randomUUID(), model: connection.model, state: 'idle', history: [] }; this.sessions.set(owner, session); }
     session.model = connection.model;
-    const options = { sessionId: session.id, agentOptions: { provider: 'cliproxy', model: connection.model }, setup: (child, agent) => {
+    const options = { sessionId: session.id, agentOptions: { provider: 'proxy', model: connection.model }, setup: (child, agent) => {
       child.on('agent/pre-step', (_payload, next) => { if (++session.steps > 12) throw new Error('本轮助手已达到步骤上限。'); return next(); });
       child.on('agent/error', ({ error }) => { session.error = error.message || '助手执行失败。'; });
       const definitions = isHostChat(owner) ? [

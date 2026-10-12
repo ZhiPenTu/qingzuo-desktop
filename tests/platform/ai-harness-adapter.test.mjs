@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { BlockAssembler, attributionHeaders } from '@deepseek-ai/dsh-llm';
-import { CliProxyAdapter, readSse, wireMessages } from '../../desktop/ai-harness.mjs';
+import { ExternalProxyAdapter, readSse, wireMessages } from '../../desktop/ai-harness.mjs';
 import { HOST_CHAT_PREFIX } from '../../desktop/ai-plugin-tools.mjs';
 import { bootCommerceKernel } from '../../desktop/kernel.mjs';
 
@@ -24,7 +24,7 @@ function fixture(events, changes = {}, request) {
     if (method === 'event') notifications.push(args);
     if (method === 'models') return [{ id: 'fixture-model' }];
   };
-  const adapter = new CliProxyAdapter(invoke, new Map([[session.owner, session]]), async (base, endpoint, options) => {
+  const adapter = new ExternalProxyAdapter(invoke, new Map([[session.owner, session]]), async (base, endpoint, options) => {
     requests.push({ base, endpoint, ...options });
     return request ? request(options) : responseFrom(Buffer.from(sse(events)), 3);
   });

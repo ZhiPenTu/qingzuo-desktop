@@ -20,7 +20,6 @@ import { preparePluginMigration } from './plugin-migration.mjs';
 import { ImageEditor } from './ai-images.mjs';
 import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
-import { CliProxyUpdateService } from './cli-proxy-update.mjs';
 import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
@@ -41,7 +40,7 @@ const viewQueues = new Map(), viewEpochs = new Map();
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, approvals, cliProxyUpdater, downloadSources;
+let batches, proxy, imageEditor, approvals, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -262,17 +261,15 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
       if (operation === 'chat.status') return { ...value, approvals: approvals.list(HOST_CHAT_PREFIX + args.id) };
       return value;
     }
-    const operations = { 'ai.status': () => proxy.status(), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.verify': () => proxy.verify(), 'ai.provider': () => proxy.provider(args), 'ai.accounts': () => proxy.accounts(), 'ai.login': () => proxy.login(args.provider), 'ai.loginStatus': () => proxy.loginStatus(args.state, args.cancel) };
+    const operations = { 'ai.status': () => proxy.status(), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.verify': () => proxy.verify() };
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
   }
-  if (method === 'cliProxy.check') { cliProxyUpdater.check(); return { accepted: true }; }
-  if (method === 'cliProxy.update') { cliProxyUpdater.update(); return { accepted: true }; }
   if (method === 'downloadSource.get') return downloadSources.snapshot();
   if (method === 'downloadSource.set') return downloadSources.setSource(args.source);
   if (method === 'downloadSource.addCustomMirror') return downloadSources.addCustomMirror(args.url);
   if (method === 'downloadSource.removeCustomMirror') return downloadSources.removeCustomMirror(args.url);
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, cliProxy: cliProxyUpdater?.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { cliProxy: cliProxyUpdater?.state, harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -336,8 +333,6 @@ async function shutdownRuntime() {
   quitting = true;
   shutdownPromise = (async () => {
     await pluginInstallService?.shutdown();
-    cliProxyUpdater?.cancel();
-    await cliProxyUpdater?.pending?.catch(() => {});
     approvals?.dispose();
     await batches?.shutdown();
     await proxy?.stop();
@@ -364,13 +359,11 @@ await downloadSources.initialize();
 credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':'); files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog); network = new NetworkBroker(files, credentials);
 await files.initialize();
 const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
-proxy = new ProxyRuntime({ root: proxyRoot, binary: path.join(generated, 'cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: url => shell.openExternal(url) }); await proxy.initialize();
-cliProxyUpdater = new CliProxyUpdateService({ proxy, root: proxyRoot, request: (url, options) => downloadSources.fetch(url, options), changed });
-await cliProxyUpdater.initialize().catch(error => cliProxyUpdater.fail(error));
+proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initialize();
 imageEditor = new ImageEditor(credentials, undefined, proxy);
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
 approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
-  if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? 'CLIProxyAPI' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的 CLIProxyAPI 图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
+  if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
   return null;
 }, execute: async (plugin, tool, args, owner, signal) => {
   signal.throwIfAborted();
@@ -485,4 +478,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater, downloadSources, shutdownRuntime };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, shutdownRuntime };

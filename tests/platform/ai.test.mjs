@@ -124,39 +124,21 @@ test('shutdown between persistence and request submission never initiates a new 
   assert.equal(count, 0); assert.equal(runtime.batches.get(batch.id).items[0].state, 'pending');
 });
 
-test('built-in CLIProxyAPI starts its actual pinned binary, restricts management and stops cleanly', async context => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-ai-proxy-'));
-  const proxy = new ProxyRuntime({ root, binary: path.resolve('resources/generated/cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: async () => {} });
-  context.after(async () => { await proxy.stop(); await rm(root, { recursive: true, force: true }); });
-  await proxy.initialize(); await Promise.all([proxy.start(), proxy.start()]); assert.equal(proxy.status().running, true);
-  assert.deepEqual(await proxy.accounts(), []);
-  const connection = await proxy.connection(); assert.ok(connection.base.startsWith('http://127.0.0.1:'));
-  assert.equal((await fetch(connection.base + '/v1/models')).status, 401);
-  assert.equal((await fetch(connection.base + '/v0/management/auth-files', { headers: { Authorization: 'Bearer ' + connection.key } })).status, 401);
-  await proxy.stop(); assert.equal(proxy.status().running, false);
-});
-
-test('proxy address boundary, external tool verification and OAuth waiting/failure/cancellation', async context => {
+test('proxy address boundary and external tool verification', async context => {
   for (const address of ['http://localhost:1234', 'http://192.168.1.1', 'https://user:key@example.com', 'http://127.0.0.1:1/?key=x']) assert.throws(() => proxyAddress(address));
   assert.equal(proxyAddress('http://127.0.0.1:8317/v1'), 'http://127.0.0.1:8317');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-oauth-')), opened = [], requests = [];
-  let authStatus = 'wait';
-  const proxy = new ProxyRuntime({ root, credentials, openExternal: async url => opened.push(url), request: async (_base, endpoint, options) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-')), requests = [];
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
     requests.push({ endpoint, options });
-    if (endpoint.includes('auth-url')) return Response.json({ state: 'fixture-state', url: 'https://auth.openai.com/oauth/authorize?state=fixture-state' });
-    if (endpoint.includes('get-auth-status')) return Response.json({ status: authStatus });
-    if (endpoint.includes('oauth-session')) return Response.json({ status: 'ok', cancelled: true });
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fixture-tool-model', display_name: 'Fixture' }] });
     return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
   } });
   context.after(() => rm(root, { recursive: true, force: true })); await proxy.initialize();
   await proxy.configure({ mode: 'external', address: 'http://127.0.0.1:8317', model: 'fixture' });
   await assert.rejects(proxy.connection(true), /验证/); await proxy.verify(); assert.equal((await proxy.connection(true)).model, 'fixture');
-  await assert.rejects(proxy.accounts(), /外部/);
-  proxy.settings.mode = 'builtin'; proxy.start = async () => {}; proxy.builtinAddress = 'http://127.0.0.1:1';
-  const login = await proxy.login('codex'); assert.equal(opened.length, 1); assert.equal((await proxy.loginStatus(login.state)).status, 'wait');
-  authStatus = 'error'; assert.equal((await proxy.loginStatus(login.state)).status, 'error');
-  await proxy.login('codex'); assert.equal((await proxy.loginStatus(login.state, true)).status, 'canceled');
-  assert.equal(requests.at(-1).options.method, 'DELETE');
+  assert.deepEqual(await proxy.models(), [{ id: 'fixture-tool-model' }]);
+  assert.equal(proxy.status().mode, 'external');
+  for (const operation of ['accounts', 'login', 'loginStatus', 'provider', 'setBinary']) assert.equal(typeof proxy[operation], 'undefined');
 });
 
 test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', { timeout: 30000 }, async context => {

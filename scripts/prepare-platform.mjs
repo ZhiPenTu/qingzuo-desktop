@@ -6,7 +6,6 @@ await rm(generated, { recursive: true, force: true });
 await mkdir(generated, { recursive: true });
 const binary = 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : '');
 await cp(path.join(root, 'native/sandbox/target/release', binary), path.join(generated, binary));
-await (await import('./prepare-ai-proxy.mjs')).prepareAiProxy(generated);
 await writeFile(path.join(generated, 'market.json'), JSON.stringify({
   url: process.env.COMMERCE_MARKET_URL || 'https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json',
   publicKey: process.env.COMMERCE_MARKET_PUBLIC_KEY || process.env.COMMERCE_PLUGIN_PUBLIC_KEY || '',

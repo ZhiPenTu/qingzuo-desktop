@@ -13,11 +13,9 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   let listener = () => {};
   let plugins = hasPlugin ? [installed] : [];
   let pluginInstalls = initialJob ? [initialJob] : [];
-  let cliProxy = { status: 'current', currentVersion: '8.0.23', candidateVersion: null as string | null, updateAvailable: false, error: null as string | null };
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
   const invoke = vi.fn(async (method: string, args?: unknown) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, cliProxy, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
-    if (method === 'cliProxy.check') { cliProxy = { status: 'available', currentVersion: '8.0.23', candidateVersion: '8.0.24', updateAvailable: true, error: null }; listener(); return cliProxy; }
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
     if (method === 'downloadSource.set') {
       const next = (args as { source: string }).source;
       downloadSource = { ...downloadSource, source: next, notice: null };
@@ -143,7 +141,7 @@ it('keeps background recovery progress visible without installed plugins and pre
   expect(screen.getByRole('button', { name: '稍后从市场安装' }).hasAttribute('disabled')).toBe(true);
 });
 
-it('shows runtime component versions, checks CLIProxyAPI candidates, and routes Harness checks to app updates', async () => {
+it('shows runtime component versions and routes Harness checks to app updates', async () => {
   const { invoke } = fixture();
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
@@ -151,14 +149,9 @@ it('shows runtime component versions, checks CLIProxyAPI candidates, and routes 
   await navigate('设置');
   await screen.findByRole('heading', { name: '运行环境' });
   await screen.findByRole('heading', { name: '轻作更新' });
-  expect(screen.getByText('v8.0.23')).toBeTruthy();
   expect(screen.getByText('v0.2.1-alpha.1')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '检查代理更新' })).toBeNull();
   expect(screen.getByText('DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。')).toBeTruthy();
-
-  fireEvent.click(screen.getByRole('button', { name: '检查 CLIProxyAPI 更新' }));
-  await screen.findByText('候选版本 v8.0.24');
-  expect(invoke.mock.calls.filter(([method]) => method === 'cliProxy.check')).toHaveLength(1);
-  expect(screen.getByText(/请先完成兼容性验证/)).toBeTruthy();
 
   expect(screen.queryByRole('button', { name: '检查轻作更新' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '检查更新' }));

@@ -2,7 +2,6 @@ import { _electron, expect } from '@playwright/test';
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import cliProxy from '../desktop/upstream/cli-proxy.json' with { type: 'json' };
 
 const sourceExecutable = path.resolve(process.argv[2] || (process.platform === 'darwin'
   ? 'release/desktop/mac-arm64/Qingzuo.app/Contents/MacOS/Qingzuo'
@@ -39,13 +38,10 @@ try {
   const resources = process.platform === 'darwin' ? path.join(installedRoot, 'Contents/Resources/commerce') : path.join(installedRoot, 'resources/commerce');
   expect(await readdir(resources)).not.toContain('plugins');
   expect(JSON.parse(await readFile(path.join(resources, 'distribution.json'), 'utf8')).preview).toBe(false);
-  const proxy = JSON.parse(await readFile(path.join(resources, 'cli-proxy-version.json'), 'utf8'));
-  expect(proxy.version).toBe(cliProxy.version);
-  expect(proxy.target).toBe(process.platform + '-' + process.arch);
-  await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
-  await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: 'AI 设置', exact: true }).click();
-  await expect(page.getByRole('button', { name: '账户与 API', exact: true })).toBeVisible();
+await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
+await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
+await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: 'AI 设置', exact: true }).click();
+await expect(page.getByRole('button', { name: '代理连接', exact: true })).toBeVisible();
   console.log('Standalone pure platform: seven Harness services, empty tool center and no bundled business plugins passed.');
 } finally {
   if (app) await app.close();
