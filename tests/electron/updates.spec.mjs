@@ -37,7 +37,7 @@ test('desktop downloads in-app, keeps progress across navigation, retries and au
         install: async prepared => { if (prepared !== 'verified-archive') throw new Error('not prepared'); globalThis.commerceInstallCount++; },
       };
     }, pathToFileURL(path.resolve('desktop/main.mjs')).href);
-    await page.getByRole('button', { name: '更新', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByText('下载完成后将自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '检查更新', exact: true }).click();
     await expect(page.getByText('检测到版本 v0.2.4', { exact: true })).toBeVisible();
@@ -49,7 +49,7 @@ test('desktop downloads in-app, keeps progress across navigation, retries and au
     await expect(page.getByText('已复用 320.0 MB 的本地文件', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '检查更新', exact: true })).toBeDisabled();
     await page.getByRole('button', { name: '工具中心', exact: true }).click();
-    await page.getByRole('button', { name: '更新', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
     await application.evaluate(() => { globalThis.commerceNotify({ mode: 'components' }); });
     await expect(page.getByRole('progressbar', { name: '正在下载所需组件' })).toHaveAttribute('aria-valuenow', '42');
@@ -101,7 +101,7 @@ test('failed checks clear stale release notes and can be retried', async () => {
         return { status: 'unpublished', version: null, notes: '' };
       };
     }, pathToFileURL(path.resolve('desktop/main.mjs')).href);
-    await page.getByRole('button', { name: '更新', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '检查更新', exact: true }).click();
     await expect(page.getByText('最新日志', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '检查更新', exact: true }).click();

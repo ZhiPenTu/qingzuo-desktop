@@ -28,7 +28,7 @@ try {
   await expect(page.getByText('Harness 内核已连接')).toBeVisible();
   const status = await page.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(status.update.status).toBe('idle');
-  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await expect(page.getByText('下载完成后将自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '工具中心', exact: true }).click();
   await mkdir('output/electron-tests', { recursive: true });

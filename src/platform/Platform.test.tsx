@@ -125,8 +125,10 @@ it('shows runtime component versions, checks CLIProxyAPI candidates, and routes 
   const { invoke } = fixture();
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
+  expect(screen.queryByRole('button', { name: '更新' })).toBeNull();
   await navigate('设置');
   await screen.findByRole('heading', { name: '运行环境' });
+  await screen.findByRole('heading', { name: '轻作更新' });
   expect(screen.getByText('v8.0.23')).toBeTruthy();
   expect(screen.getByText('v0.2.1-alpha.1')).toBeTruthy();
   expect(screen.getByText('DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。')).toBeTruthy();
