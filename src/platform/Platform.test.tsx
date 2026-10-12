@@ -14,9 +14,31 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   let plugins = hasPlugin ? [installed] : [];
   let pluginInstalls = initialJob ? [initialJob] : [];
   let cliProxy = { status: 'current', currentVersion: '8.0.23', candidateVersion: null as string | null, updateAvailable: false, error: null as string | null };
-  const invoke = vi.fn(async (method: string) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, cliProxy, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
+  let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
+  const invoke = vi.fn(async (method: string, args?: unknown) => {
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, cliProxy, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
     if (method === 'cliProxy.check') { cliProxy = { status: 'available', currentVersion: '8.0.23', candidateVersion: '8.0.24', updateAvailable: true, error: null }; listener(); return cliProxy; }
+    if (method === 'downloadSource.set') {
+      const next = (args as { source: string }).source;
+      downloadSource = { ...downloadSource, source: next, notice: null };
+      listener();
+      return downloadSource;
+    }
+    if (method === 'downloadSource.addCustomMirror') {
+      const raw = (args as { url: string }).url.trim().replace(/\/+$/, '') + '/';
+      const customMirrors = downloadSource.customMirrors.includes(raw) ? downloadSource.customMirrors : [...downloadSource.customMirrors, raw];
+      downloadSource = { ...downloadSource, source: `custom:${raw}`, customMirrors, notice: null };
+      listener();
+      return downloadSource;
+    }
+    if (method === 'downloadSource.removeCustomMirror') {
+      const raw = (args as { url: string }).url;
+      const customMirrors = downloadSource.customMirrors.filter(item => item !== raw);
+      const source = downloadSource.source === `custom:${raw}` ? 'github' : downloadSource.source;
+      downloadSource = { ...downloadSource, source, customMirrors, notice: null };
+      listener();
+      return downloadSource;
+    }
     if (method === 'market.list') return { items: [entry] };
     if (method === 'market.install') { pluginInstalls = [job('downloading', { progress: 40, transferred: 4 * 1024 ** 2, total: 10 * 1024 ** 2 })]; listener(); return { accepted: true }; }
     return {};
@@ -141,6 +163,25 @@ it('shows runtime component versions, checks CLIProxyAPI candidates, and routes 
   expect(screen.queryByRole('button', { name: '检查轻作更新' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.check')).toHaveLength(1));
+
+  const sourceSelect = screen.getByRole('combobox', { name: '切换下载源' }) as HTMLSelectElement;
+  expect(sourceSelect.value).toBe('github');
+  fireEvent.change(sourceSelect, { target: { value: 'gh-proxy' } });
+  await waitFor(() => expect(sourceSelect.value).toBe('gh-proxy'));
+
+  fireEvent.click(screen.getByRole('button', { name: '添加自定义源' }));
+  await screen.findByRole('dialog', { name: '添加自定义下载源' });
+  const mirrorInput = screen.getByLabelText('镜像前缀，例如 https://mirror.example.com/');
+  fireEvent.change(mirrorInput, { target: { value: 'https://mirror.example.com' } });
+  fireEvent.click(screen.getByRole('button', { name: '添加并切换' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加自定义下载源' })).toBeNull());
+  expect(sourceSelect.value).toBe('custom:https://mirror.example.com/');
+  expect(screen.getByRole('option', { name: '自定义镜像 · mirror.example.com' })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '添加自定义源' }));
+  await screen.findByText('已添加的自定义源');
+  fireEvent.click(screen.getByRole('button', { name: '删除自定义源' }));
+  await waitFor(() => expect(sourceSelect.value).toBe('github'));
 });
 
 it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import errors', async () => {

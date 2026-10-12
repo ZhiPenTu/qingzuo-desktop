@@ -103,10 +103,10 @@ export async function launchMacInstaller({ target, prepared, staging, receipt, p
   return child;
 }
 
-export function macUpdateAdapter({ app, beforeInstall, receipt, publicKey }) {
+export function macUpdateAdapter({ app, beforeInstall, receipt, publicKey, fetchImpl = globalThis.fetch }) {
   let active;
   return {
-    check: () => checkGitHubRelease(app.getVersion()),
+    check: () => checkGitHubRelease(app.getVersion(), { fetchImpl }),
     cancel: () => active?.abort(new Error('更新已取消。')),
     async download(release, notify) {
       const controller = new AbortController(); active = controller;
@@ -122,7 +122,7 @@ export function macUpdateAdapter({ app, beforeInstall, receipt, publicKey }) {
             notify(state); lastTime = now; lastStatus = state.status; lastMode = state.mode;
           }
         };
-        const options = { signal: controller.signal }, updates = path.join(app.getPath('userData'), 'updates');
+        const options = { signal: controller.signal, fetchImpl }, updates = path.join(app.getPath('userData'), 'updates');
         let prepared;
         if (release.components && publicKey) {
           try {

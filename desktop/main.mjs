@@ -21,6 +21,7 @@ import { ImageEditor } from './ai-images.mjs';
 import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
 import { CliProxyUpdateService } from './cli-proxy-update.mjs';
+import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 // Resolve the established profile before changing the display name. This also
@@ -40,7 +41,7 @@ const viewQueues = new Map(), viewEpochs = new Map();
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, approvals, cliProxyUpdater;
+let batches, proxy, imageEditor, approvals, cliProxyUpdater, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -186,8 +187,9 @@ async function startKernel() {
 async function catalog(signal) {
   const config = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
   if (!config.url || !config.publicKey) return { items: [], configured: false, message: '插件目录尚未发布。可以导入本地插件包。' };
-  const value = JSON.parse((await boundedDownload(config.url, 1024 * 1024, signal)).toString());
-  return { items: validateCatalog(value), configured: true };
+  const loadCatalog = async url => validateCatalog(JSON.parse((await boundedDownload(url, 1024 * 1024, signal)).toString()));
+  const items = downloadSources ? await downloadSources.runWithFallback(config.url, loadCatalog, { signal }) : await loadCatalog(config.url);
+  return { items, configured: true };
 }
 async function systemInvoke(service, method, args = {}) {
   if (service === 'ai') {
@@ -266,7 +268,11 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   }
   if (method === 'cliProxy.check') { cliProxyUpdater.check(); return { accepted: true }; }
   if (method === 'cliProxy.update') { cliProxyUpdater.update(); return { accepted: true }; }
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, cliProxy: cliProxyUpdater?.state, componentUpdates: { cliProxy: cliProxyUpdater?.state, harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'downloadSource.get') return downloadSources.snapshot();
+  if (method === 'downloadSource.set') return downloadSources.setSource(args.source);
+  if (method === 'downloadSource.addCustomMirror') return downloadSources.addCustomMirror(args.url);
+  if (method === 'downloadSource.removeCustomMirror') return downloadSources.removeCustomMirror(args.url);
+  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, cliProxy: cliProxyUpdater?.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { cliProxy: cliProxyUpdater?.state, harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -353,11 +359,13 @@ async function main() {
 await app.whenReady();
 migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
+downloadSources = new DownloadSourceService({ root: app.getPath('userData'), changed });
+await downloadSources.initialize();
 credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':'); files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog); network = new NetworkBroker(files, credentials);
 await files.initialize();
 const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
 proxy = new ProxyRuntime({ root: proxyRoot, binary: path.join(generated, 'cli-proxy-api' + (process.platform === 'win32' ? '.exe' : '')), credentials, openExternal: url => shell.openExternal(url) }); await proxy.initialize();
-cliProxyUpdater = new CliProxyUpdateService({ proxy, root: proxyRoot, changed });
+cliProxyUpdater = new CliProxyUpdateService({ proxy, root: proxyRoot, request: (url, options) => downloadSources.fetch(url, options), changed });
 await cliProxyUpdater.initialize().catch(error => cliProxyUpdater.fail(error));
 imageEditor = new ImageEditor(credentials, undefined, proxy);
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
@@ -393,7 +401,7 @@ localPreview = app.isPackaged && distribution.preview === true;
 const signed = desktopSigningMode({ COMMERCE_DESKTOP_SIGNING: distribution.signing }) === 'signed';
 const receipt = path.join(app.getPath('userData'), 'update-error.txt');
 const adapter = process.platform === 'darwin' && !signed
-  ? macUpdateAdapter({ app, beforeInstall: shutdownRuntime, receipt, publicKey: marketConfig.updatePublicKey || marketConfig.publicKey })
+  ? macUpdateAdapter({ app, beforeInstall: shutdownRuntime, receipt, publicKey: marketConfig.updatePublicKey || marketConfig.publicKey, fetchImpl: (url, options) => downloadSources.fetch(url, options) })
   : nativeUpdateAdapter(autoUpdater);
 updateService = new UpdateService(adapter, changed);
 autoUpdater.on('error', error => updateService.fail(error));
@@ -437,7 +445,8 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
   const artifact = entry?.artifacts?.[process.platform + '-' + process.arch];
   if (!artifact) throw new Error('没有适用当前平台的制品。');
   notify({ version: entry.version, status: 'downloading' });
-  const bytes = await boundedDownload(artifact.url, undefined, signal, { onProgress: value => notify({ ...value, progress: value.total ? Math.min(100, value.transferred / value.total * 100) : null }) });
+  const downloadArtifactBytes = url => boundedDownload(url, undefined, signal, { onProgress: value => notify({ ...value, progress: value.total ? Math.min(100, value.transferred / value.total * 100) : null }) });
+  const bytes = downloadSources ? await downloadSources.runWithFallback(artifact.url, downloadArtifactBytes, { signal }) : await downloadArtifactBytes(artifact.url);
   signal.throwIfAborted();
   notify({ status: 'verifying' });
   const restoring = id === 'official.labeledit' && await migration.status(manager);
@@ -476,4 +485,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater, shutdownRuntime };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater, downloadSources, shutdownRuntime };

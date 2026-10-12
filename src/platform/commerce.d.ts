@@ -8,6 +8,12 @@ export interface PluginInstallState {
   total: number;
   error: string | null;
 }
+export interface DownloadSourceState {
+  source: string;
+  customMirrors: string[];
+  gitcodeAvailable: boolean;
+  notice?: string | null;
+}
 declare global {
   interface Window {
     commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
