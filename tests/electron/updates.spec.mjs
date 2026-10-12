@@ -116,3 +116,31 @@ test('failed checks clear stale release notes and can be retried', async () => {
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('macOS updater exits after its direct runtime shutdown', async () => {
+  test.skip(process.platform !== 'darwin');
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'commerce-update-quit-'));
+  let application;
+  try {
+    application = await electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temp, 'data')] });
+    const page = await application.firstWindow();
+    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    const exited = new Promise(resolve => application.process().once('exit', resolve));
+    await application.evaluate(async ({ app }, moduleURL) => {
+      const vm = process.getBuiltinModule('node:vm');
+      const { shutdownRuntime } = await vm.runInThisContext('import(' + JSON.stringify(moduleURL) + ')', { importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER });
+      await shutdownRuntime();
+      // The macOS updater calls app.quit() after this same direct shutdown.
+      // Schedule it after the IPC evaluation has returned so the assertion can
+      // observe the process exit instead of a destroyed evaluation context.
+      setImmediate(() => app.quit());
+    }, pathToFileURL(path.resolve('desktop/main.mjs')).href);
+    await Promise.race([
+      exited,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('应用未在清理后退出。')), 5000)),
+    ]);
+  } finally {
+    if (application) await application.close().catch(() => {});
+    await rm(temp, { recursive: true, force: true });
+  }
+});

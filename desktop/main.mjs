@@ -33,7 +33,7 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, quitting = false, quitReady = false, hostReady;
+let window, manager, workers, files, credentials, network, host, quitting = false, quitReady = false, shutdownPromise, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -326,18 +326,28 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   throw new Error('插件接口不受支持。');
 });
 async function shutdownRuntime() {
+  if (shutdownPromise) return shutdownPromise;
   quitting = true;
-  await pluginInstallService?.shutdown();
-  cliProxyUpdater?.cancel();
-  await cliProxyUpdater?.pending?.catch(() => {});
-  approvals?.dispose();
-  await batches?.shutdown();
-  await proxy?.stop();
-  await Promise.all([...views.keys()].map(closeView));
-  await workers.stopAll();
-  host?.postMessage({ type: 'shutdown' });
-  await new Promise(resolve => setTimeout(resolve, 300));
-  host?.kill();
+  shutdownPromise = (async () => {
+    await pluginInstallService?.shutdown();
+    cliProxyUpdater?.cancel();
+    await cliProxyUpdater?.pending?.catch(() => {});
+    approvals?.dispose();
+    await batches?.shutdown();
+    await proxy?.stop();
+    await Promise.all([...views.keys()].map(closeView));
+    await workers.stopAll();
+    host?.postMessage({ type: 'shutdown' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    host?.kill();
+  })().finally(() => {
+    // Both the updater and the normal before-quit path call app.quit() after
+    // this cleanup. Mark the application ready first so the second
+    // before-quit event is allowed through instead of being prevented and
+    // returning early because quitting is already true.
+    quitReady = true;
+  });
+  return shutdownPromise;
 }
 async function main() {
 await app.whenReady();
@@ -466,4 +476,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, cliProxyUpdater, shutdownRuntime };
