@@ -138,7 +138,7 @@ it('shows runtime component versions, checks CLIProxyAPI candidates, and routes 
   expect(invoke.mock.calls.filter(([method]) => method === 'cliProxy.check')).toHaveLength(1);
   expect(screen.getByText(/请先完成兼容性验证/)).toBeTruthy();
 
-  fireEvent.click(screen.getByRole('button', { name: '检查轻作更新' }));
-  await screen.findByRole('heading', { name: '轻作更新' });
+  expect(screen.queryByRole('button', { name: '检查轻作更新' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.check')).toHaveLength(1));
 });

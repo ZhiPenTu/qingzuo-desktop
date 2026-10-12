@@ -418,8 +418,16 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .runtime-component > div { min-width: 0; }
 .runtime-component-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .runtime-component strong { font-size: 13px; font-weight: 500; }
-.runtime-component-description, .runtime-component-candidate { margin: 5px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.7; }
+.runtime-update-component { flex-direction: column; align-items: stretch; gap: 14px; }
+.runtime-component-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.runtime-component-head > div:first-child { min-width: 0; }
+.runtime-component-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.runtime-component-title span { font-size: 11px; color: var(--muted-foreground); }
+.runtime-component-status { margin: 6px 0 0; font-size: 12px; font-weight: 500; color: var(--foreground); }
+.runtime-component-description, .runtime-component-candidate { margin: 4px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.7; }
 .runtime-component-candidate { color: var(--primary); }
+.runtime-update-details { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-width: 640px) { .runtime-component-head { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 640px) { .runtime-component { align-items: flex-start; flex-direction: column; } }
 .updates-card { max-width: 760px; }
 .updates-card p { line-height: 1.8; margin: 0 0 10px; }
