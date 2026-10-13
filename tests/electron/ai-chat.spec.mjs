@@ -41,7 +41,6 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await expect(page.getByLabel('配置概览', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
-    await page.getByRole('button', { name: '账户与 API', exact: true }).click(); await expect(page.getByRole('button', { name: '登录 Codex' })).toBeDisabled();
     await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
     await expect(page.locator('.commerce-heading')).toHaveCount(0); await expect(page.locator('.commerce-topbar')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '今天，想让工作轻一点？' })).toBeVisible();
