@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { FileBroker, NetworkBroker } from '../../desktop/brokers.mjs';
+import { FileBroker, NetworkBroker, resolveSaveExtension, hasValidSaveExtension, ensureSaveExtension, resolveSaveFilters } from '../../desktop/brokers.mjs';
 const plugin = { id: 'local.a', title: 'Fixture', permissions: { files: true, credentials: ['removebg'], network: ['https://api.remove.bg'] } };
 test('file tokens are private per plugin and become invalid on disposal', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-files-')); const files = new FileBroker(root, {});
@@ -97,4 +97,90 @@ test('generic multipart uploads scope credentials, preserve HTTP errors and prod
     await assert.rejects(broker.call(plugin, { ...options, multipart: { files: [{ field: 'image', token: oversized.token }] } }), /25 MB/);
     assert.equal(calls, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('save helper functions resolve extensions, validation, and filters', () => {
+  assert.equal(resolveSaveExtension('label.pdf', 'application/pdf'), 'pdf');
+  assert.equal(resolveSaveExtension('label', 'application/pdf'), 'pdf');
+  assert.equal(resolveSaveExtension('文具新大 70.40', 'application/pdf'), 'pdf');
+  assert.equal(resolveSaveExtension('image.png', 'image/png'), 'png');
+  assert.equal(resolveSaveExtension('image', 'image/png'), 'png');
+  assert.equal(resolveSaveExtension('photo.jpeg', 'image/jpeg'), 'jpeg');
+  assert.equal(resolveSaveExtension('photo', 'image/jpeg'), 'jpg');
+  assert.equal(resolveSaveExtension('photo.webp', 'image/webp'), 'webp');
+  assert.equal(resolveSaveExtension('archive.zip', 'application/octet-stream'), 'zip');
+  assert.equal(resolveSaveExtension('file', 'application/octet-stream'), null);
+
+  assert.equal(hasValidSaveExtension('label.pdf', 'pdf'), true);
+  assert.equal(hasValidSaveExtension('label.PDF', 'pdf'), true);
+  assert.equal(hasValidSaveExtension('image.png', 'png'), true);
+  assert.equal(hasValidSaveExtension('photo.jpg', 'jpeg'), true);
+  assert.equal(hasValidSaveExtension('photo.jpeg', 'jpg'), true);
+  assert.equal(hasValidSaveExtension('label', 'pdf'), false);
+  assert.equal(hasValidSaveExtension('label.doc', 'pdf'), false);
+
+  assert.equal(ensureSaveExtension('label.pdf', 'pdf'), 'label.pdf');
+  assert.equal(ensureSaveExtension('label.PDF', 'pdf'), 'label.PDF');
+  assert.equal(ensureSaveExtension('label', 'pdf'), 'label.pdf');
+  assert.equal(ensureSaveExtension('label.', 'pdf'), 'label.pdf');
+  assert.equal(ensureSaveExtension('label.pdf.', 'pdf'), 'label.pdf');
+  assert.equal(ensureSaveExtension('label.PDF.', 'pdf'), 'label.PDF');
+  assert.equal(ensureSaveExtension('文具新大 70.40', 'pdf'), '文具新大 70.40.pdf');
+  assert.equal(ensureSaveExtension('image.png', 'png'), 'image.png');
+  assert.equal(ensureSaveExtension('image', 'png'), 'image.png');
+
+  const pdfFilters = resolveSaveFilters('pdf');
+  assert.equal(pdfFilters.length, 2);
+  assert.equal(pdfFilters[0].name, 'PDF 文档 (*.pdf)');
+  assert.deepEqual(pdfFilters[0].extensions, ['pdf']);
+  assert.equal(pdfFilters[1].name, '所有文件 (*.*)');
+});
+
+test('FileBroker.save configures save dialog filters and ensures .pdf extension when saving PDF files', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-save-test-'));
+  const destDir = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-dest-'));
+  let showSaveDialogOptions = null;
+  const mockDialog = {
+    showSaveDialog: async (options) => {
+      showSaveDialogOptions = options;
+      // Simulate Windows user typing filename without extension
+      return { canceled: false, filePath: path.join(destDir, 'exported-label') };
+    }
+  };
+  const files = new FileBroker(root, mockDialog);
+  try {
+    const pdfContent = Buffer.from('%PDF-1.4 mock content');
+    const item = await files.create(plugin, pdfContent, '文具新大 70X40.pdf', 'application/pdf');
+
+    // 1. Save with default suggested name ending in .pdf
+    const saved = await files.save(plugin, item.token, '文具新大 70X40 - 已编辑.pdf');
+    assert.equal(saved, true);
+    assert.equal(showSaveDialogOptions.defaultPath, '文具新大 70X40 - 已编辑.pdf');
+    assert.ok(Array.isArray(showSaveDialogOptions.filters));
+    assert.equal(showSaveDialogOptions.filters[0].name, 'PDF 文档 (*.pdf)');
+    assert.deepEqual(showSaveDialogOptions.filters[0].extensions, ['pdf']);
+
+    // Check that target path on disk got .pdf extension even though dialog returned path without extension
+    const savedPdfPath = path.join(destDir, 'exported-label.pdf');
+    const savedBytes = await readFile(savedPdfPath);
+    assert.deepEqual(savedBytes, pdfContent);
+
+    // 2. Save with filename lacking extension but item having PDF MIME
+    const saved2 = await files.save(plugin, item.token, '新标签');
+    assert.equal(saved2, true);
+    assert.equal(showSaveDialogOptions.defaultPath, '新标签.pdf');
+
+    // Save with filename containing dot dimension (e.g. 70.40) and verify defaultPath is .pdf
+    const savedDot = await files.save(plugin, item.token, '文具新大 70.40');
+    assert.equal(savedDot, true);
+    assert.equal(showSaveDialogOptions.defaultPath, '文具新大 70.40.pdf');
+
+    // 3. User cancels save dialog
+    mockDialog.showSaveDialog = async () => ({ canceled: true });
+    const canceled = await files.save(plugin, item.token, '文具新大.pdf');
+    assert.equal(canceled, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(destDir, { recursive: true, force: true });
+  }
 });

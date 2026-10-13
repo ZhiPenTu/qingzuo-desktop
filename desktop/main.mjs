@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { PluginManager, boundedDownload, inspectPackage } from './plugin-manager.mjs';
 import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
-import { FileBroker, NetworkBroker } from './brokers.mjs';
+import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
 import { Credentials } from './credentials.mjs';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
@@ -120,7 +120,32 @@ async function loadView(id, settings, epoch) {
       // elsewhere does not install an identity-bound handler in this session.
       ses.protocol.handle('commerce-plugin', request => servePlugin(request, id));
       ses.webRequest.onBeforeRequest((details, callback) => { const url = new URL(details.url); const cancel = !(['data:', 'blob:'].includes(url.protocol) || url.protocol === 'commerce-plugin:' && url.hostname === id); if(cancel)console.log('Plugin request blocked:',id,url.origin); callback({ cancel }); });
-      ses.on('will-download', async (event, item) => { item.pause(); try { const current = await manager.get(id); if (!current.enabled || !current.permissions.files) { item.cancel(); return; } const result = await dialog.showSaveDialog(window, { defaultPath: path.basename(item.getFilename()) }); if (result.canceled) item.cancel(); else { item.setSavePath(result.filePath); item.resume(); } } catch (error) { console.error('Plugin download failed:', id, error.message); item.cancel(); } });
+      ses.on('will-download', async (event, item) => {
+        item.pause();
+        try {
+          const current = await manager.get(id);
+          if (!current.enabled || !current.permissions.files) { item.cancel(); return; }
+          const rawName = (item.getFilename() || '').replace(/\\/g, '/');
+          const baseName = path.basename(rawName) || 'download';
+          const sanitized = baseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'download';
+          const ext = resolveSaveExtension(sanitized, item.getMimeType());
+          const defaultPath = ensureSaveExtension(sanitized, ext);
+          const filters = resolveSaveFilters(ext);
+          const result = await dialog.showSaveDialog(window, {
+            defaultPath,
+            ...(filters.length ? { filters } : {})
+          });
+          if (result.canceled || !result.filePath) item.cancel();
+          else {
+            const targetPath = ensureSaveExtension(result.filePath, ext);
+            item.setSavePath(targetPath);
+            item.resume();
+          }
+        } catch (error) {
+          console.error('Plugin download failed:', id, error.message);
+          item.cancel();
+        }
+      });
       pluginSessions.set(id, ses);
     }
     pluginInstallService.assertAvailable(id);

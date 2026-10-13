@@ -3,6 +3,74 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {secureRequest} from './network-transport.mjs';
 import { allowedNetwork } from './security.mjs';
+
+export function resolveSaveExtension(name, mime) {
+  const mimeMap = {
+    "application/pdf": "pdf",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  };
+  const mimeExt = (mime && mimeMap[mime.toLowerCase()]) || null;
+  const extFromName = path.extname(name || "").toLowerCase().replace(/^\./, "");
+  if (mimeExt) {
+    if (extFromName === mimeExt) return extFromName;
+    if ((mimeExt === "jpg" || mimeExt === "jpeg") && (extFromName === "jpg" || extFromName === "jpeg")) {
+      return extFromName;
+    }
+    return mimeExt;
+  }
+  return extFromName || null;
+}
+
+export function hasValidSaveExtension(filePath, ext) {
+  if (!filePath || typeof filePath !== "string" || !ext) return false;
+  const lower = filePath.toLowerCase();
+  const normalizedExt = ext.toLowerCase();
+  if (lower.endsWith("." + normalizedExt)) return true;
+  if ((normalizedExt === "jpg" || normalizedExt === "jpeg") && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) return true;
+  return false;
+}
+
+export function ensureSaveExtension(filePath, ext) {
+  if (!filePath || typeof filePath !== "string" || !ext) return filePath;
+  const trimmed = filePath.trimEnd().replace(/\.+$/, "");
+  if (hasValidSaveExtension(trimmed, ext)) return trimmed;
+  return trimmed + "." + ext.toLowerCase();
+}
+
+export function resolveSaveFilters(extension) {
+  if (!extension) return [];
+  const ext = extension.toLowerCase();
+  if (ext === "pdf") {
+    return [
+      { name: "PDF 文档 (*.pdf)", extensions: ["pdf"] },
+      { name: "所有文件 (*.*)", extensions: ["*"] }
+    ];
+  }
+  if (ext === "png") {
+    return [
+      { name: "PNG 图片 (*.png)", extensions: ["png"] },
+      { name: "所有文件 (*.*)", extensions: ["*"] }
+    ];
+  }
+  if (ext === "jpg" || ext === "jpeg") {
+    return [
+      { name: "JPEG 图片 (*.jpg;*.jpeg)", extensions: ["jpg", "jpeg"] },
+      { name: "所有文件 (*.*)", extensions: ["*"] }
+    ];
+  }
+  if (ext === "webp") {
+    return [
+      { name: "WebP 图片 (*.webp)", extensions: ["webp"] },
+      { name: "所有文件 (*.*)", extensions: ["*"] }
+    ];
+  }
+  return [
+    { name: ext.toUpperCase() + " 文件 (*." + ext + ")", extensions: [ext] },
+    { name: "所有文件 (*.*)", extensions: ["*"] }
+  ];
+}
 export class FileBroker {
   constructor(root, dialog) { this.root = root; this.dialog = dialog; this.tokens = new Map(); this.epochs = new Map(); this.directories = new Map(); }
   async initialize() { await rm(this.root, { recursive: true, force: true }); }
@@ -77,8 +145,24 @@ export class FileBroker {
   }
   async save(plugin, token, filename) {
     const item = await this.get(plugin, token);
-    const result = await this.dialog.showSaveDialog({ title: plugin.title + ' · 保存文件', defaultPath: path.basename(filename || item.name) });
-    if (result.canceled) return false; await this.get(plugin, token); await copyFile(item.filename, result.filePath); return true;
+    const candidateName = typeof filename === "string" && filename.trim() ? filename.trim() : item.name;
+    const rawName = (candidateName || "file").replace(/\\/g, "/");
+    const baseName = path.basename(rawName) || "file";
+    const sanitized = baseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim() || "file";
+    const ext = resolveSaveExtension(sanitized, item.mime);
+    const defaultPath = ensureSaveExtension(sanitized, ext);
+    const filters = resolveSaveFilters(ext);
+    const dialogOptions = {
+      title: plugin.title + " · 保存文件",
+      defaultPath,
+      ...(filters.length ? { filters } : {})
+    };
+    const result = await this.dialog.showSaveDialog(dialogOptions);
+    if (result.canceled || !result.filePath) return false;
+    await this.get(plugin, token);
+    const targetPath = ensureSaveExtension(result.filePath, ext);
+    await copyFile(item.filename, targetPath);
+    return true;
   }
   async revoke(id) { this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1); const pending = []; for (const [key, value] of this.tokens) if (value.owner === id) { this.tokens.delete(key); pending.push(rm(value.filename, { force: true })); } await Promise.all(pending); }
 }
