@@ -36,9 +36,3 @@ export async function canonicalOutputPath(filename) {
     }
   }
 }
-
-export async function assertDistinctOutputPaths(filenames, message = 'Output, candidate and report must use separate files.') {
-  const resolved = await Promise.all(filenames.map(canonicalOutputPath));
-  if (new Set(resolved).size !== resolved.length) throw new Error(message);
-  return resolved;
-}
