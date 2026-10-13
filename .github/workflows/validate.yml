@@ -1,8 +1,6 @@
 name: Validate commerce desktop
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
