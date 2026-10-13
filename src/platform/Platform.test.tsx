@@ -154,6 +154,9 @@ it('shows runtime component versions and routes Harness checks to app updates', 
   expect(screen.getByText('DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。')).toBeTruthy();
 
   expect(screen.queryByRole('button', { name: '检查轻作更新' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '清理更新缓存' }));
+  await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.cleanCache')).toHaveLength(1));
+
   fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.check')).toHaveLength(1));
 

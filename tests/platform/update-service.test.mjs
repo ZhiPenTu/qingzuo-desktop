@@ -76,3 +76,20 @@ test('native updates verify/download before silent install with forced relaunch,
   await assert.rejects(adapter.download(available, () => {}), /checksum/);
   assert.equal(updater.listenerCount('download-progress'), 0);
 });
+
+test('cleanCache delegates to adapter cleanCache and rejects while download is in flight', async () => {
+  let cleaned = false;
+  const adapter = {
+    check: async () => available,
+    download: async () => 'prepared',
+    install: async () => {},
+    cleanCache: async () => { cleaned = true; return { freedBytes: 1024 }; },
+  };
+  const service = new UpdateService(adapter);
+  const result = await service.cleanCache();
+  assert.equal(cleaned, true);
+  assert.equal(result.freedBytes, 1024);
+
+  service.state.status = 'downloading';
+  await assert.rejects(service.cleanCache(), /更新进行中/);
+});

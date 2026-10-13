@@ -37,6 +37,15 @@ export class UpdateService {
       await this.adapter.install(prepared);
     });
   }
+  async cleanCache() {
+    if (this.pending || this.state.status === 'installing' || this.state.status === 'downloading') {
+      throw new Error('更新进行中，无法清理缓存。');
+    }
+    if (typeof this.adapter.cleanCache === 'function') {
+      return await this.adapter.cleanCache();
+    }
+    return { freedBytes: 0 };
+  }
 }
 
 export function nativeUpdateAdapter(autoUpdater) {

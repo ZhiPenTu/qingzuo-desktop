@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { downloadArtifact, downloadUpdateArchive, cachedFile, parseBlockmap, planDelta, pruneCache, validateArtifact } from '../../desktop/update-download.mjs';
+import { downloadArtifact, downloadUpdateArchive, cachedFile, parseBlockmap, planDelta, pruneCache, pruneUpdateCaches, validateArtifact } from '../../desktop/update-download.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifact = (bytes, name = 'update.zip') => ({ url: `https://github.com/ZhiPenTu/LabelEdit/releases/download/v0.2.4/${name}`, size: bytes.length, sha256: digest(bytes) });
@@ -131,4 +131,41 @@ test('validateArtifact accepts releases from both LabelEdit and qingzuo-desktop 
   assert.doesNotThrow(() => validateArtifact({ url: 'https://github.com/ZhiPenTu/qingzuo-desktop/releases/download/v0.2.8/app.zip', sha256, size: 100 }));
   assert.throws(() => validateArtifact({ url: 'https://github.com/Other/qingzuo-desktop/releases/download/v0.2.8/app.zip', sha256, size: 100 }));
   assert.throws(() => validateArtifact({ url: 'https://malicious.example/app.zip', sha256, size: 100 }));
+});
+
+test('pruneUpdateCaches safely removes stale archives and components while preserving baseline and active hashes', async t => {
+  const f = await fixture(t);
+  const updatesDir = f.cache;
+  const archivesDir = path.join(updatesDir, 'archives');
+  const componentsDir = path.join(updatesDir, 'components');
+  await mkdir(archivesDir, { recursive: true });
+  await mkdir(componentsDir, { recursive: true });
+
+  const activeHash = '1'.repeat(64);
+  const baseHash = '2'.repeat(64);
+  const baseMapHash = '3'.repeat(64);
+  const staleArchive = '4'.repeat(64);
+  const staleComponent = '5'.repeat(64);
+
+  await writeFile(path.join(archivesDir, 'baseline.json'), JSON.stringify({
+    sha256: baseHash,
+    blockmap: { sha256: baseMapHash }
+  }));
+  await writeFile(path.join(archivesDir, baseHash + '.bin'), 'base');
+  await writeFile(path.join(archivesDir, baseMapHash + '.bin'), 'basemap');
+  await writeFile(path.join(archivesDir, activeHash + '.bin'), 'active');
+  await writeFile(path.join(archivesDir, staleArchive + '.bin'), 'stale-archive-content');
+  await writeFile(path.join(componentsDir, staleComponent + '.bin'), 'stale-comp-content');
+
+  const { freedBytes } = await pruneUpdateCaches(updatesDir, [activeHash]);
+  assert.ok(freedBytes > 0);
+
+  // Protected files remain
+  assert.equal((await readFile(path.join(archivesDir, baseHash + '.bin'))).toString(), 'base');
+  assert.equal((await readFile(path.join(archivesDir, baseMapHash + '.bin'))).toString(), 'basemap');
+  assert.equal((await readFile(path.join(archivesDir, activeHash + '.bin'))).toString(), 'active');
+
+  // Stale files are deleted
+  await assert.rejects(stat(path.join(archivesDir, staleArchive + '.bin')));
+  await assert.rejects(stat(path.join(componentsDir, staleComponent + '.bin')));
 });

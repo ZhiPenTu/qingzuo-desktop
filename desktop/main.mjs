@@ -271,6 +271,9 @@ async function performPlatform(method, args) {
     else updateService.download();
     return;
   }
+  if (method === 'updates.cleanCache') {
+    return await updateService.cleanCache();
+  }
   throw new Error('平台操作不受支持。');
 }
 ipcMain.handle('commerce:platform', async (event, method, args = {}) => {

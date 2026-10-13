@@ -189,9 +189,46 @@ export async function downloadUpdateArchive(artifact, cache, notify, options = {
 // Keep current/previous validated payloads and recent partial downloads; never
 // retain an unbounded history of 400 MB archives. Called after a successful job.
 export async function pruneCache(cache, keep = [], maxAge = 7 * 86400000) {
-  for (const name of await readdir(cache)) {
-    if (!/^[a-f0-9]{64}\.bin(?:\.part|\.delta)?$/.test(name) || keep.includes(name.slice(0, 64))) continue;
-    const filename = path.join(cache, name), info = await stat(filename);
-    if (name.endsWith('.bin') || Date.now() - info.mtimeMs > maxAge) await safeRm(filename);
+  try {
+    for (const name of await readdir(cache)) {
+      if (!/^[a-f0-9]{64}\.bin(?:\.part|\.delta)?$/.test(name) || keep.includes(name.slice(0, 64))) continue;
+      const filename = path.join(cache, name);
+      try {
+        const info = await stat(filename);
+        if (name.endsWith('.bin') || Date.now() - info.mtimeMs > maxAge) await safeRm(filename);
+      } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    }
+  } catch (err) { if (err.code !== 'ENOENT') throw err; }
+}
+
+export async function pruneUpdateCaches(updatesDir, activeHashes = []) {
+  let freed = 0;
+  const archivesDir = path.join(updatesDir, 'archives');
+  const componentsDir = path.join(updatesDir, 'components');
+  const keep = new Set(activeHashes);
+
+  // If a baseline.json exists, protect its referenced archive and blockmap
+  try {
+    const baselineRaw = await readFile(path.join(archivesDir, 'baseline.json'), 'utf8');
+    const base = JSON.parse(baselineRaw);
+    if (base?.sha256) keep.add(base.sha256);
+    if (base?.blockmap?.sha256) keep.add(base.blockmap.sha256);
+  } catch {}
+
+  for (const dir of [archivesDir, componentsDir]) {
+    let entries = [];
+    try { entries = await readdir(dir); } catch { continue; }
+    for (const name of entries) {
+      if (!/^[a-f0-9]{64}\.bin(?:\.part|\.delta)?$/.test(name)) continue;
+      const hash = name.slice(0, 64);
+      if (keep.has(hash)) continue;
+      const filename = path.join(dir, name);
+      try {
+        const info = await stat(filename);
+        await safeRm(filename);
+        freed += info.size;
+      } catch {}
+    }
   }
+  return { freedBytes: freed };
 }

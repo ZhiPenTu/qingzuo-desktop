@@ -4,7 +4,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { checkGitHubRelease } from './updates.mjs';
-import { downloadUpdateArchive, safeRm, withNoAsar } from './update-download.mjs';
+import { downloadUpdateArchive, pruneUpdateCaches, safeRm, withNoAsar } from './update-download.mjs';
 import { prepareComponentUpdate } from './update-components.mjs';
 
 const execute = promisify(execFile);
@@ -156,6 +156,9 @@ export function macUpdateAdapter({ app, beforeInstall, receipt, publicKey, fetch
         await safeRm(prepared.staging);
         throw error;
       }
+    },
+    async cleanCache() {
+      return pruneUpdateCaches(path.join(app.getPath('userData'), 'updates'));
     },
   };
 }
