@@ -9,13 +9,13 @@ const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', descrip
 const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
-function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false) {
+function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = []) {
   let listener = () => {};
   let plugins = hasPlugin ? [installed] : [];
   let pluginInstalls = initialJob ? [initialJob] : [];
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
   const invoke = vi.fn(async (method: string, args?: unknown) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: [], update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
     if (method === 'downloadSource.set') {
       const next = (args as { source: string }).source;
       downloadSource = { ...downloadSource, source: next, notice: null };
@@ -211,4 +211,29 @@ it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import
   expect(alert.textContent).toContain('插件包格式无效或文件未下载完整');
   expect(alert.textContent).not.toContain('Error invoking remote method');
   expect(alert.textContent).not.toContain('ADM-ZIP');
+});
+
+it('renders topbar without breadcrumbs when no tabs are open, and renders integrated tabs when tools are opened', async () => {
+  const { invoke } = fixture(undefined, true, false, ['official.labeledit']);
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+
+  expect(document.querySelector('.commerce-breadcrumb')).toBeNull();
+
+  const tablist = screen.getByRole('tablist', { name: '已打开的工具' });
+  expect(tablist).toBeTruthy();
+
+  const shellTab = screen.getByRole('tab', { name: '工具中心' });
+  expect(shellTab.getAttribute('aria-selected')).toBe('true');
+
+  const toolTab = screen.getByRole('tab', { name: 'LabelEdit' });
+  expect(toolTab.getAttribute('aria-selected')).toBe('false');
+
+  fireEvent.click(toolTab);
+  await waitFor(() => expect(toolTab.getAttribute('aria-selected')).toBe('true'));
+  expect(shellTab.getAttribute('aria-selected')).toBe('false');
+
+  const closeBtn = screen.getByRole('button', { name: '关闭工具' });
+  fireEvent.click(closeBtn);
+  await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'view.close')).toHaveLength(1));
 });
