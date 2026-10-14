@@ -30,13 +30,15 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 | `category` | 副标题，同时用于顶部分类筛选按钮 |
 | `description` | 卡片正文 |
 | `artifacts` 的键 | 平台徽标（`darwin-arm64` → macOS，`win32-x64` → Windows） |
-| `api` | 插件 API 兼容范围徽标 |
-| `releaseNotes` | 卡片底部说明（超出两行截断） |
 | `artifacts[*].url` | 反推出插件仓库地址，作为卡片链接 |
+
+`api` 与 `releaseNotes` 只用于开发排查，刻意不出现在界面上。
 
 卡片上的仓库链接是从安装包 URL 反推的（`https://github.com/<owner>/<repo>/releases/...`），目录里没有显式的仓库字段。
 
 容错：目录同样缓存 30 分钟；有缓存但网络失败时继续展示缓存并提示；无缓存且网络失败时保留 `index.html` 里静态兜底的三张卡片并给出提示，同时隐藏统计数字。
+
+界面只呈现用户需要的信息。目录同步成功时不显示任何状态提示，只有加载失败才提示；下载版本同理，正常时按钮下方只显示版本号、体积与日期，出错才引导到 Releases。
 
 ## 下载按钮如何做到「点击即下载」
 
