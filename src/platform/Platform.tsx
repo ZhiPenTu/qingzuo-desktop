@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -35,6 +35,9 @@ interface Status { version: string; kernel: { ready: boolean; error: string | nu
 const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'ai', title: 'AI 设置', icon: Sparkles }, { id: 'settings', title: '设置', icon: Settings }] as const;
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const isLabel = (id: string) => id === 'official.labeledit';
+const isCutout = (id: string) => id === 'official.removebg';
+const tabIconFor = (id: string) => (isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
@@ -217,7 +220,7 @@ export default function Platform() {
   };
   useEffect(() => {
     const element = surface.current;
-    if (!element || navigation.some(n => n.id === page)) return;
+    if (!element || navigation.some(n => n.id === page) || typeof ResizeObserver === 'undefined') return;
     const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
@@ -249,8 +252,52 @@ export default function Platform() {
       <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
     </aside>
     <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
-      {page !== 'chat' ? <header className="commerce-topbar"><div className="commerce-breadcrumb"><span>工作台</span><ChevronRight /><strong>{title}</strong></div><Button variant="outline" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button></header> : null}
-      {status?.tabs.length ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">{status.tabs.map(id => <div key={id} className="commerce-tool-tab"><Button role="tab" aria-selected={page === id} disabled={pluginInstallActive(installFor(id))} variant={page === id ? 'secondary' : 'ghost'} size="sm" onClick={() => void navigate(id)}>{plugins.find(p => p.id === id)?.title ?? id}</Button><Button variant="ghost" size="icon-sm" aria-label="关闭工具" onClick={() => { void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {}); }}><X /></Button></div>)}</div> : null}
+      {page !== 'chat' ? <header className="commerce-topbar">
+        <div className="commerce-topbar-start">
+          {status?.tabs.length ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={shellPage}
+              className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')}
+              onClick={() => void navigate('home')}
+            >
+              <Boxes className="commerce-tab-icon" />
+              <span className="commerce-tab-title">{shellPage ? (navigation.find(n => n.id === page)?.title ?? '工具中心') : '工具中心'}</span>
+            </button>
+            {status.tabs.map(id => {
+              const TabIcon = tabIconFor(id);
+              const toolTitle = plugins.find(p => p.id === id)?.title ?? id;
+              const isInstalling = pluginInstallActive(installFor(id));
+              const isActive = page === id;
+              return <div
+                key={id}
+                role="tab"
+                tabIndex={0}
+                aria-selected={isActive}
+                className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')}
+                onClick={() => { if (!isInstalling) void navigate(id); }}
+                onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}
+              >
+                <TabIcon className="commerce-tab-icon" />
+                <span className="commerce-tab-title">{toolTitle}</span>
+                <button
+                  type="button"
+                  className="commerce-tab-close"
+                  aria-label="关闭工具"
+                  title="关闭"
+                  disabled={isInstalling}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {});
+                  }}
+                ><X /></button>
+              </div>;
+            })}
+          </div> : <span className="commerce-topbar-title">{title}</span>}
+        </div>
+        <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button>
+      </header> : null}
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription>{error}</AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
         LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy || migrationRunning} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" disabled={busy || migrationRunning} onClick={() => act('migration.dismiss')}>稍后从市场安装</Button>
