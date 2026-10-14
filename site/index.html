@@ -3,20 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>轻作 Qingzuo · 轻巧的插件桌面工作台</title>
+    <title>轻作 Qingzuo · 插件式桌面工作台</title>
     <meta
       name="description"
-      content="轻作是基于 Electron、DeepSeek Harness 与系统沙箱的插件桌面工作台。下载 macOS 与 Windows 安装包，一键获取最新版本。"
+      content="轻作是基于 Electron、DeepSeek Harness 与系统沙箱的插件桌面工作台。下载底座，从插件市场按需安装工具；市场目录实时更新，新增插件自动出现在官网。"
     />
     <link rel="icon" type="image/png" href="assets/qingzuo.png" />
     <link rel="apple-touch-icon" href="assets/qingzuo.png" />
     <meta name="theme-color" content="#28654a" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#19211d" media="(prefers-color-scheme: dark)" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="轻作 Qingzuo · 轻巧的插件桌面工作台" />
+    <meta property="og:title" content="轻作 Qingzuo · 插件式桌面工作台" />
     <meta
       property="og:description"
-      content="安装轻作底座，从插件市场按需安装 LabelEdit、AI 抠图、AI 批图等工具。"
+      content="安装轻作底座，从插件市场按需安装工具。市场目录实时更新，新增插件自动出现在官网。"
     />
     <meta property="og:image" content="assets/qingzuo.png" />
     <link rel="stylesheet" href="assets/styles.css" />
@@ -44,15 +44,15 @@
           <span class="brand-name">轻作 <span class="brand-latin">Qingzuo</span></span>
         </a>
         <nav class="header-nav" aria-label="主导航">
-          <a href="#intro">介绍</a>
-          <a href="#plugins">插件</a>
+          <a href="#market">插件市场</a>
+          <a href="#intro">底座</a>
           <a href="#requirements">要求</a>
           <a href="#download">下载</a>
         </nav>
         <div class="header-actions">
-          <button class="icon-button" id="theme-toggle" type="button" aria-live="polite">
+          <button class="icon-button" id="theme-toggle" type="button">
             <span class="theme-icon" aria-hidden="true"></span>
-            <span class="sr-only" id="theme-label">切换深浅外观</span>
+            <span class="sr-only">切换深浅外观</span>
           </button>
           <a
             class="button button-primary button-small"
@@ -69,10 +69,10 @@
       <section class="hero">
         <div class="shell hero-inner">
           <div class="hero-copy">
-            <p class="eyebrow">插件桌面工作台</p>
+            <p class="eyebrow">底座 + 插件市场</p>
             <h1>让日常工作，轻一点。</h1>
             <p class="lede">
-              轻作是基于 Electron、DeepSeek Harness 与系统沙箱的桌面底座。安装包只包含底座，业务工具从插件市场按需安装、更新、卸载——标签编辑、AI 抠图、AI 批图，各自在独立沙箱里运行。
+              轻作是一个插件式桌面工作台。安装包只含底座，工具从插件市场按需安装——标签编辑、AI 抠图、AI 批图，装哪个用哪个，插件升级互不影响。
             </p>
 
             <div class="hero-actions" id="download">
@@ -104,10 +104,10 @@
               <span class="status-dot" aria-hidden="true"></span>
               <span data-status-text>正在获取最新版本…</span>
             </p>
-            <p class="download-fallback">
-              也可以前往
-              <a href="https://github.com/ZhiPenTu/qingzuo-desktop/releases" rel="noopener">GitHub Releases</a>
-              查看全部版本与更新日志。
+            <p class="hero-links">
+              <a href="#market">先看看插件市场<span data-market-count-inline></span></a>
+              <span class="dot-sep" aria-hidden="true">·</span>
+              <a href="https://github.com/ZhiPenTu/qingzuo-desktop/releases" rel="noopener">全部版本</a>
             </p>
           </div>
 
@@ -117,9 +117,96 @@
         </div>
       </section>
 
-      <section class="section" id="intro">
+      <section class="section section-market" id="market">
         <div class="shell">
-          <h2>一张轻巧的工具工作台</h2>
+          <div class="market-head">
+            <div>
+              <p class="eyebrow">插件市场</p>
+              <h2>装上底座，挑一个当下要用的工具</h2>
+              <p class="section-lede">
+                下面的目录直接读取官方市场仓库 <code>qingzuo-market</code> 的
+                <code>catalog.json</code>，与桌面端插件市场是同一份数据。市场上架新插件后，这里自动出现，无需改动官网。
+              </p>
+            </div>
+            <dl class="market-stats" data-market-stats>
+              <div>
+                <dt>在架插件</dt>
+                <dd data-market-stat="count">—</dd>
+              </div>
+              <div>
+                <dt>分类</dt>
+                <dd data-market-stat="categories">—</dd>
+              </div>
+              <div>
+                <dt>平台覆盖</dt>
+                <dd data-market-stat="platforms">—</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="market-toolbar">
+            <div class="market-filters" data-market-filters role="group" aria-label="按分类筛选"></div>
+            <div class="market-search">
+              <input
+                type="search"
+                data-market-search
+                placeholder="搜索插件名称或用途"
+                aria-label="搜索插件"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <div class="plugin-grid" data-market-grid>
+            <!-- 静态兜底：脚本加载失败或未执行时展示，保持页面可读 -->
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-labeledit" rel="noopener">
+              <div class="plugin-card-top">
+                <span class="plugin-mark" aria-hidden="true">LE</span>
+                <span class="plugin-headings">
+                  <span class="plugin-title">LabelEdit</span>
+                  <span class="plugin-category">标签与文档</span>
+                </span>
+              </div>
+              <p class="plugin-desc">本地 PDF 标签编辑、文字识别与导出。</p>
+              <p class="plugin-repo">插件仓库</p>
+            </a>
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-removebg" rel="noopener">
+              <div class="plugin-card-top">
+                <span class="plugin-mark" aria-hidden="true">BG</span>
+                <span class="plugin-headings">
+                  <span class="plugin-title">AI 抠图</span>
+                  <span class="plugin-category">图片处理</span>
+                </span>
+              </div>
+              <p class="plugin-desc">连接 remove.bg，生成透明背景的商品图片。</p>
+              <p class="plugin-repo">插件仓库</p>
+            </a>
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-ai-image" rel="noopener">
+              <div class="plugin-card-top">
+                <span class="plugin-mark" aria-hidden="true">AI</span>
+                <span class="plugin-headings">
+                  <span class="plugin-title">AI 批图</span>
+                  <span class="plugin-category">图片处理</span>
+                </span>
+              </div>
+              <p class="plugin-desc">复用外部代理或官方 API 批量编辑图片，自定义提示词与 AI 助手。</p>
+              <p class="plugin-repo">插件仓库</p>
+            </a>
+          </div>
+
+          <p class="market-status" data-market-status role="status" hidden></p>
+
+          <p class="market-foot">
+            目录由
+            <a href="https://github.com/ZhiPenTu/qingzuo-market" rel="noopener">ZhiPenTu/qingzuo-market</a>
+            维护，合并即上架；插件安装包带签名，底座安装时校验来源、平台与 API 兼容性。
+          </p>
+        </div>
+      </section>
+
+      <section class="section section-muted" id="intro">
+        <div class="shell">
+          <h2>一个底座，撑起所有工具</h2>
           <p class="section-lede">
             主页、插件市场、插件管理、设置、更新与各个工具编辑器共享同一套视觉语言与操作习惯。
           </p>
@@ -127,6 +214,10 @@
             <article class="card">
               <h3>底座 + 插件</h3>
               <p>安装包只包含底座，业务工具从插件市场按需安装。插件独立升级，互不影响。</p>
+            </article>
+            <article class="card">
+              <h3>签名与校验</h3>
+              <p>市场下载会校验签名、平台、身份与版本；安装失败自动恢复原版本，管理页可显式回退。</p>
             </article>
             <article class="card">
               <h3>沙箱隔离</h3>
@@ -144,39 +235,7 @@
               <h3>插件 SDK</h3>
               <p>插件 API / SDK 1.2.0 与运行时 API 1.2.0，附带开发文档与独立测试入口。</p>
             </article>
-            <article class="card">
-              <h3>轻量外观</h3>
-              <p>浅色、深色与跟随系统三种外观，控件高度 36px，圆角 12px，图标统一线宽。</p>
-            </article>
           </div>
-        </div>
-      </section>
-
-      <section class="section section-muted" id="plugins">
-        <div class="shell">
-          <h2>让工作台，多一点可能</h2>
-          <p class="section-lede">装好底座后，在插件市场里挑一个当下要用的工具即可。</p>
-          <div class="plugin-grid">
-            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-labeledit" rel="noopener">
-              <h3>LabelEdit</h3>
-              <p>PDF 文字识别与编辑：框选文字、实时改字、撤销与导出。</p>
-              <span class="plugin-link">插件仓库</span>
-            </a>
-            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-removebg" rel="noopener">
-              <h3>AI 抠图</h3>
-              <p>接入自备的 OpenAI 兼容服务，批量去背景并保留边缘细节。</p>
-              <span class="plugin-link">插件仓库</span>
-            </a>
-            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-ai-image" rel="noopener">
-              <h3>AI 批图</h3>
-              <p>按目录批量处理图片，统一规格后一次性交付。</p>
-              <span class="plugin-link">插件仓库</span>
-            </a>
-          </div>
-          <p class="section-foot">
-            插件市场源码：
-            <a href="https://github.com/ZhiPenTu/qingzuo-market" rel="noopener">ZhiPenTu/qingzuo-market</a>
-          </p>
         </div>
       </section>
 
@@ -241,7 +300,7 @@
         <p>轻作 Qingzuo · 让日常工作，轻一点。</p>
         <p class="footer-links">
           <a href="https://github.com/ZhiPenTu/qingzuo-desktop" rel="noopener">源码仓库</a>
-          <a href="https://github.com/ZhiPenTu/qingzuo-desktop/releases" rel="noopener">版本发布</a>
+          <a href="https://github.com/ZhiPenTu/qingzuo-market" rel="noopener">插件市场</a>
           <a href="https://github.com/ZhiPenTu/qingzuo-desktop/issues" rel="noopener">问题反馈</a>
         </p>
       </div>
