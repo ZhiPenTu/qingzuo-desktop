@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>轻作 Qingzuo · 轻巧的插件桌面工作台</title>
+    <meta
+      name="description"
+      content="轻作是基于 Electron、DeepSeek Harness 与系统沙箱的插件桌面工作台。下载 macOS 与 Windows 安装包，一键获取最新版本。"
+    />
+    <link rel="icon" type="image/png" href="assets/qingzuo.png" />
+    <link rel="apple-touch-icon" href="assets/qingzuo.png" />
+    <meta name="theme-color" content="#28654a" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#19211d" media="(prefers-color-scheme: dark)" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="轻作 Qingzuo · 轻巧的插件桌面工作台" />
+    <meta
+      property="og:description"
+      content="安装轻作底座，从插件市场按需安装 LabelEdit、AI 抠图、AI 批图等工具。"
+    />
+    <meta property="og:image" content="assets/qingzuo.png" />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script>
+      (() => {
+        let theme = 'system';
+        try {
+          const saved = localStorage.getItem('qingzuo.site.theme.v1');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+        } catch {}
+        const dark =
+          theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#download">跳到下载</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="#top">
+          <img src="assets/qingzuo.png" width="28" height="28" alt="" />
+          <span class="brand-name">轻作 <span class="brand-latin">Qingzuo</span></span>
+        </a>
+        <nav class="header-nav" aria-label="主导航">
+          <a href="#intro">介绍</a>
+          <a href="#plugins">插件</a>
+          <a href="#requirements">要求</a>
+          <a href="#download">下载</a>
+        </nav>
+        <div class="header-actions">
+          <button class="icon-button" id="theme-toggle" type="button" aria-live="polite">
+            <span class="theme-icon" aria-hidden="true"></span>
+            <span class="sr-only" id="theme-label">切换深浅外观</span>
+          </button>
+          <a
+            class="button button-primary button-small"
+            href="#download"
+            data-download-cta
+            data-target="auto"
+            >下载</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="shell hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">插件桌面工作台</p>
+            <h1>让日常工作，轻一点。</h1>
+            <p class="lede">
+              轻作是基于 Electron、DeepSeek Harness 与系统沙箱的桌面底座。安装包只包含底座，业务工具从插件市场按需安装、更新、卸载——标签编辑、AI 抠图、AI 批图，各自在独立沙箱里运行。
+            </p>
+
+            <div class="hero-actions" id="download">
+              <div class="download-row" data-download-row="mac">
+                <a
+                  class="button button-primary download-button"
+                  data-download-cta
+                  data-target="mac"
+                  href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                  rel="noopener"
+                  >下载 macOS 版</a
+                >
+                <p class="download-meta" data-download-meta="mac">macOS 15+ · Apple Silicon</p>
+              </div>
+              <div class="download-row" data-download-row="win">
+                <a
+                  class="button button-secondary download-button"
+                  data-download-cta
+                  data-target="win"
+                  href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                  rel="noopener"
+                  >下载 Windows 版</a
+                >
+                <p class="download-meta" data-download-meta="win">Windows 10+ · x64</p>
+              </div>
+            </div>
+
+            <p class="download-status" id="download-status" role="status">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span data-status-text>正在获取最新版本…</span>
+            </p>
+            <p class="download-fallback">
+              也可以前往
+              <a href="https://github.com/ZhiPenTu/qingzuo-desktop/releases" rel="noopener">GitHub Releases</a>
+              查看全部版本与更新日志。
+            </p>
+          </div>
+
+          <div class="hero-art">
+            <img src="assets/workspace.png" alt="轻作工作台插画：墨绿工具托盘与折角文档" />
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="intro">
+        <div class="shell">
+          <h2>一张轻巧的工具工作台</h2>
+          <p class="section-lede">
+            主页、插件市场、插件管理、设置、更新与各个工具编辑器共享同一套视觉语言与操作习惯。
+          </p>
+          <div class="feature-grid">
+            <article class="card">
+              <h3>底座 + 插件</h3>
+              <p>安装包只包含底座，业务工具从插件市场按需安装。插件独立升级，互不影响。</p>
+            </article>
+            <article class="card">
+              <h3>沙箱隔离</h3>
+              <p>插件代码运行在隔离上下文中，系统级能力单独授权，出问题也波及不到底座。</p>
+            </article>
+            <article class="card">
+              <h3>自带 AI 能力</h3>
+              <p>AI 对话与批图接入你自备的 OpenAI 兼容服务，地址与密钥在「AI 设置 → 代理连接」里填写。</p>
+            </article>
+            <article class="card">
+              <h3>应用内更新</h3>
+              <p>设置页直接检查新版本并增量更新；安装包也支持缓存清理与磁盘空间回收。</p>
+            </article>
+            <article class="card">
+              <h3>插件 SDK</h3>
+              <p>插件 API / SDK 1.2.0 与运行时 API 1.2.0，附带开发文档与独立测试入口。</p>
+            </article>
+            <article class="card">
+              <h3>轻量外观</h3>
+              <p>浅色、深色与跟随系统三种外观，控件高度 36px，圆角 12px，图标统一线宽。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-muted" id="plugins">
+        <div class="shell">
+          <h2>让工作台，多一点可能</h2>
+          <p class="section-lede">装好底座后，在插件市场里挑一个当下要用的工具即可。</p>
+          <div class="plugin-grid">
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-labeledit" rel="noopener">
+              <h3>LabelEdit</h3>
+              <p>PDF 文字识别与编辑：框选文字、实时改字、撤销与导出。</p>
+              <span class="plugin-link">插件仓库</span>
+            </a>
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-removebg" rel="noopener">
+              <h3>AI 抠图</h3>
+              <p>接入自备的 OpenAI 兼容服务，批量去背景并保留边缘细节。</p>
+              <span class="plugin-link">插件仓库</span>
+            </a>
+            <a class="plugin-card" href="https://github.com/ZhiPenTu/qingzuo-plugin-ai-image" rel="noopener">
+              <h3>AI 批图</h3>
+              <p>按目录批量处理图片，统一规格后一次性交付。</p>
+              <span class="plugin-link">插件仓库</span>
+            </a>
+          </div>
+          <p class="section-foot">
+            插件市场源码：
+            <a href="https://github.com/ZhiPenTu/qingzuo-market" rel="noopener">ZhiPenTu/qingzuo-market</a>
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="requirements">
+        <div class="shell">
+          <h2>系统要求</h2>
+          <div class="requirements">
+            <div class="card">
+              <h3>macOS</h3>
+              <p>macOS 15 或更高版本，Apple Silicon（arm64）。安装包为 .dmg。</p>
+            </div>
+            <div class="card">
+              <h3>Windows</h3>
+              <p>Windows 10 或更高版本，x64。安装包为 .exe，可自选安装目录。</p>
+            </div>
+            <div class="card">
+              <h3>AI 功能</h3>
+              <p>需要你自备的 OpenAI 兼容服务地址与访问密钥，轻作不内置代理进程，也不提供账户登录。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-download" id="get-started">
+        <div class="shell download-panel">
+          <div>
+            <h2>现在就装上轻作</h2>
+            <p class="section-lede" data-download-summary>
+              下载按钮会直接获取最新版本安装包，安装后即可在插件市场安装工具。
+            </p>
+          </div>
+          <div class="hero-actions">
+            <div class="download-row" data-download-row="mac">
+              <a
+                class="button button-primary download-button"
+                data-download-cta
+                data-target="mac"
+                href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                rel="noopener"
+                >下载 macOS 版</a
+              >
+              <p class="download-meta" data-download-meta="mac">macOS 15+ · Apple Silicon</p>
+            </div>
+            <div class="download-row" data-download-row="win">
+              <a
+                class="button button-secondary download-button"
+                data-download-cta
+                data-target="win"
+                href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                rel="noopener"
+                >下载 Windows 版</a
+              >
+              <p class="download-meta" data-download-meta="win">Windows 10+ · x64</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <p>轻作 Qingzuo · 让日常工作，轻一点。</p>
+        <p class="footer-links">
+          <a href="https://github.com/ZhiPenTu/qingzuo-desktop" rel="noopener">源码仓库</a>
+          <a href="https://github.com/ZhiPenTu/qingzuo-desktop/releases" rel="noopener">版本发布</a>
+          <a href="https://github.com/ZhiPenTu/qingzuo-desktop/issues" rel="noopener">问题反馈</a>
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/site.js" defer></script>
+  </body>
+</html>

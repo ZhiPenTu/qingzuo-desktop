@@ -7,6 +7,10 @@
 - AI 批图: https://github.com/ZhiPenTu/qingzuo-plugin-ai-image
 - 市场: https://github.com/ZhiPenTu/qingzuo-market
 
+## 官网
+
+`site/` 是官方介绍与下载页，配色沿用桌面端设计令牌，发布到 GitHub Pages（工作流 `.github/workflows/pages.yml`）。下载按钮在运行时解析最新 Release 资源，点击直接下载最新版本安装包。详见 [site/README.md](site/README.md)。
+
 ## 开发与验证
 
 需要 Node 24、Rust；macOS 需要 Xcode 命令行工具。原生构建工具可能需要 Python，但底座不安装业务 Python/OCR 依赖。
