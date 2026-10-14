@@ -29,7 +29,8 @@ try {
   const executablePath = path.join(target, 'Contents/MacOS/Qingzuo');
   app = await _electron.launch({ executablePath, cwd: temporary, args: ['--user-data-dir=' + profile] });
   const page = await app.firstWindow();
-  await expect(page.getByText('工具服务已就绪')).toBeVisible();
+  // The pinned v0.2.5 baseline is a real older release and keeps its own original copy.
+  await expect(page.getByText('Harness 内核已连接')).toBeVisible();
   expect((await page.evaluate(() => window.commerceDesktop.invoke('status'))).version).toBe('0.2.5');
   const zip = new AdmZip(), artifact = path.join(temporary, 'preserved.ecplugin');
   zip.addFile('package.json', Buffer.from(JSON.stringify({ version: '9.0.0', commerce: { manifestVersion: 1, id: 'local.preserved', title: 'Preserved fixture', description: '', api: '^1.0.0', ui: 'ui/index.html', permissions: { files: true } } })));

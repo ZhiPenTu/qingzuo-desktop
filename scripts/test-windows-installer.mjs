@@ -32,7 +32,8 @@ try {
   await access(path.join(installed, 'resources/commerce/plugins/official.labeledit/package.json'));
   app = await _electron.launch({ executablePath, args: ['--user-data-dir=' + profile], cwd: temporary });
   const oldPage = await app.firstWindow();
-  await expect(oldPage.getByText('工具服务已就绪')).toBeVisible();
+  // The pinned v0.2.5 baseline is a real older release and keeps its own original copy.
+  await expect(oldPage.getByText('Harness 内核已连接')).toBeVisible();
   const oldStatus = await oldPage.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(oldStatus.version).toBe('0.2.5');
   await oldPage.evaluate(() => window.commerceDesktop.invoke('plugins.enable', { id: 'official.labeledit', enabled: false }));
