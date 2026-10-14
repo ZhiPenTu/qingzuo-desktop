@@ -149,6 +149,11 @@
   function setStatus(state, text) {
     var node = statusNode();
     if (!node) return;
+    if (!text) {
+      node.hidden = true;
+      return;
+    }
+    node.hidden = false;
     node.setAttribute('data-state', state);
     var label = node.querySelector('[data-status-text]');
     if (label) label.textContent = text;
@@ -181,16 +186,13 @@
     var summary = document.querySelector('[data-download-summary]');
     if (summary) {
       summary.textContent =
-        '当前最新版本 ' +
-        version +
-        (published ? '（' + published + ' 发布）' : '') +
-        '，下载按钮直接获取该版本安装包。';
+        '当前最新版本 ' + version + (published ? '，' + published + '发布' : '') + '。';
     }
 
     if (resolved === 2) {
-      setStatus('ready', '已就绪 · 下载按钮会直接获取 ' + version + ' 安装包');
+      setStatus('ready', '');
     } else if (resolved === 1) {
-      setStatus('ready', '已就绪 · 部分平台安装包暂缺，请查看 GitHub Releases');
+      setStatus('ready', '部分平台安装包暂缺，请前往 GitHub Releases 查看');
     } else {
       setStatus('error', '未找到安装包，请前往 GitHub Releases 手动下载');
     }
@@ -217,7 +219,7 @@
         published_at: cached.publishedAt,
         assets: cached.assets,
       });
-      setStatus('ready', '已就绪 · 下载按钮会直接获取最新安装包');
+      setStatus('ready', '');
     }
     if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return;
 
@@ -349,12 +351,7 @@
         el('span', 'plugin-platform', PLATFORM_LABELS_MARKET[key] || key)
       );
     });
-    if (plugin.api) meta.appendChild(el('span', 'plugin-api', '插件 API ' + plugin.api));
     if (meta.childNodes.length) card.appendChild(meta);
-
-    if (plugin.releaseNotes) {
-      card.appendChild(el('p', 'plugin-notes', plugin.releaseNotes));
-    }
 
     card.appendChild(el('p', 'plugin-repo', repo ? '查看插件仓库' : '暂无公开仓库'));
     return card;
@@ -467,7 +464,7 @@
         if (!catalog || !Array.isArray(catalog.plugins)) throw new Error('unexpected catalog');
         writeMarketCache(catalog.plugins);
         applyCatalog(catalog.plugins);
-        setMarketStatus('ready', '目录已同步官方市场仓库，新增插件会自动出现在这里。');
+        setMarketStatus('ready', '');
       });
   }
 
@@ -475,15 +472,15 @@
     var cached = readMarketCache();
     if (cached) applyCatalog(cached.plugins);
     if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-      setMarketStatus('ready', '目录已同步官方市场仓库，新增插件会自动出现在这里。');
+      setMarketStatus('ready', '');
       return;
     }
     fetchCatalog().catch(function (error) {
       if (cached) {
-        setMarketStatus('ready', '当前展示离线缓存的目录，稍后会自动重新同步。');
+        setMarketStatus('ready', '网络不可用，暂时显示上次同步的插件列表。');
         return;
       }
-      setMarketStatus('error', '插件目录获取失败，暂时展示内置列表。可前往插件市场仓库查看完整目录。');
+      setMarketStatus('error', '插件列表加载失败，请稍后重试。');
       if (window.console) window.console.warn('[qingzuo-site] catalog lookup failed', error);
     });
 
