@@ -1,5 +1,5 @@
 /**
- * 轻作官网脚本：外观切换 + 最新版本直链解析。
+ * 轻作官网脚本：外观切换 + 最新版本直链解析 + 插件市场目录。
  *
  * GitHub Release 资源文件名带版本号（CommerceTools-<version>-mac-arm64.dmg），
  * 静态页面无法预知版本，因此运行时读取最新 Release，把下载按钮指向真实资源的
@@ -234,6 +234,269 @@
     });
   }
 
+  // ---------- 插件市场目录 ----------
+
+  // 与桌面端插件市场读取同一份目录（见 scripts/prepare-platform.mjs 的默认地址），
+  // 因此市场上架新插件后官网自动出现，无需改动页面。
+  var MARKET_URL =
+    'https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json';
+  var MARKET_CACHE_KEY = 'qingzuo.site.market.v1';
+  var PLATFORM_LABELS_MARKET = {
+    'darwin-arm64': 'macOS',
+    'win32-x64': 'Windows',
+  };
+
+  var marketState = { plugins: [], category: '全部', query: '' };
+
+  function readMarketCache() {
+    try {
+      var raw = localStorage.getItem(MARKET_CACHE_KEY);
+      if (!raw) return null;
+      var cached = JSON.parse(raw);
+      if (!cached || !cached.fetchedAt || !Array.isArray(cached.plugins)) return null;
+      return cached;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeMarketCache(plugins) {
+    try {
+      localStorage.setItem(
+        MARKET_CACHE_KEY,
+        JSON.stringify({ fetchedAt: Date.now(), plugins: plugins })
+      );
+    } catch (error) {
+      /* 缓存失败不影响浏览。 */
+    }
+  }
+
+  function pluginRepo(plugin) {
+    var artifacts = plugin.artifacts || {};
+    var keys = Object.keys(artifacts);
+    for (var i = 0; i < keys.length; i += 1) {
+      var match = String(artifacts[keys[i]].url || '').match(
+        /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\//
+      );
+      if (match) return 'https://github.com/' + match[1] + '/' + match[2];
+    }
+    return null;
+  }
+
+  function initials(words) {
+    return words
+      .slice(0, 2)
+      .map(function (word) {
+        return word.charAt(0);
+      })
+      .join('')
+      .toUpperCase();
+  }
+
+  // 标题是中文时（如「AI 批图」「AI 抠图」）改用插件 id 的词首字母，
+  // 否则多个插件会拿到同一个标记。
+  function pluginMark(plugin) {
+    var title = String(plugin.title || '');
+    var words = title.match(/[A-Za-z]+/g);
+    var hasCjk = /[\u4e00-\u9fa5]/.test(title);
+    var source = hasCjk ? String(plugin.id || '').replace(/^.*\./, '') : title;
+    var tokens = source.match(/[A-Za-z]+/g) || [];
+    if (tokens.length > 1) return initials(tokens);
+    if (tokens.length === 1) {
+      var token = tokens[0];
+      var capitals = token.match(/[A-Z]/g);
+      if (capitals && capitals.length > 1) return capitals.slice(0, 2).join('');
+      return token.slice(0, 2).toUpperCase();
+    }
+    return String(plugin.category || '插件').slice(0, 2);
+  }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  }
+
+  function buildPluginCard(plugin) {
+    var repo = pluginRepo(plugin);
+    var card = el('a', 'plugin-card');
+    card.href = repo || '#market';
+    if (repo) {
+      card.rel = 'noopener';
+    } else {
+      card.removeAttribute('href');
+      card.style.cursor = 'default';
+    }
+
+    var top = el('div', 'plugin-card-top');
+    top.appendChild(el('span', 'plugin-mark', pluginMark(plugin)));
+    var headings = el('span', 'plugin-headings');
+    var title = el('span', 'plugin-title');
+    title.appendChild(document.createTextNode(plugin.title || plugin.id || '未命名插件'));
+    if (plugin.version) title.appendChild(el('span', 'plugin-version', 'v' + plugin.version));
+    headings.appendChild(title);
+    headings.appendChild(el('span', 'plugin-category', plugin.category || '未分类'));
+    top.appendChild(headings);
+    card.appendChild(top);
+
+    if (plugin.description) card.appendChild(el('p', 'plugin-desc', plugin.description));
+
+    var meta = el('p', 'plugin-meta');
+    var artifacts = plugin.artifacts || {};
+    Object.keys(artifacts).forEach(function (key) {
+      meta.appendChild(
+        el('span', 'plugin-platform', PLATFORM_LABELS_MARKET[key] || key)
+      );
+    });
+    if (plugin.api) meta.appendChild(el('span', 'plugin-api', '插件 API ' + plugin.api));
+    if (meta.childNodes.length) card.appendChild(meta);
+
+    if (plugin.releaseNotes) {
+      card.appendChild(el('p', 'plugin-notes', plugin.releaseNotes));
+    }
+
+    card.appendChild(el('p', 'plugin-repo', repo ? '查看插件仓库' : '暂无公开仓库'));
+    return card;
+  }
+
+  function matchesFilter(plugin) {
+    if (marketState.category !== '全部' && plugin.category !== marketState.category) return false;
+    var query = marketState.query.trim().toLowerCase();
+    if (!query) return true;
+    return [plugin.title, plugin.description, plugin.category, plugin.id]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .indexOf(query) !== -1;
+  }
+
+  function renderMarket() {
+    var grid = document.querySelector('[data-market-grid]');
+    if (!grid) return;
+    var visible = marketState.plugins.filter(matchesFilter);
+    grid.textContent = '';
+    if (!visible.length) {
+      grid.appendChild(el('p', 'plugin-empty', '没有匹配的插件，换个关键词试试。'));
+      return;
+    }
+    visible.forEach(function (plugin) {
+      grid.appendChild(buildPluginCard(plugin));
+    });
+  }
+
+  function renderFilters() {
+    var box = document.querySelector('[data-market-filters]');
+    if (!box) return;
+    var categories = ['全部'];
+    marketState.plugins.forEach(function (plugin) {
+      if (plugin.category && categories.indexOf(plugin.category) === -1) {
+        categories.push(plugin.category);
+      }
+    });
+    box.textContent = '';
+    categories.forEach(function (category) {
+      var chip = el('button', 'chip', category);
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', category === marketState.category ? 'true' : 'false');
+      chip.addEventListener('click', function () {
+        marketState.category = category;
+        renderFilters();
+        renderMarket();
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  function renderStats() {
+    var platforms = {};
+    marketState.plugins.forEach(function (plugin) {
+      Object.keys(plugin.artifacts || {}).forEach(function (key) {
+        if (PLATFORM_LABELS_MARKET[key]) platforms[PLATFORM_LABELS_MARKET[key]] = true;
+      });
+    });
+    var platformNames = Object.keys(platforms);
+    var set = function (name, value) {
+      var node = document.querySelector('[data-market-stat="' + name + '"]');
+      if (node) node.textContent = value;
+    };
+    set('count', String(marketState.plugins.length));
+    set('categories', String(new Set(marketState.plugins.map(function (p) { return p.category; })).size));
+    set(
+      'platforms',
+      platformNames.length === 2 ? 'macOS · Windows' : platformNames.join(' · ') || '—'
+    );
+
+    var inline = document.querySelector('[data-market-count-inline]');
+    if (inline) {
+      inline.textContent = marketState.plugins.length
+        ? '（' + marketState.plugins.length + ' 个工具）'
+        : '';
+    }
+  }
+
+  function setMarketStatus(state, text) {
+    var node = document.querySelector('[data-market-status]');
+    var stats = document.querySelector('[data-market-stats]');
+    if (stats) stats.hidden = state === 'error';
+    if (!node) return;
+    if (!text) {
+      node.hidden = true;
+      node.textContent = '';
+      return;
+    }
+    node.hidden = false;
+    node.setAttribute('data-state', state);
+    node.textContent = text;
+  }
+
+  function applyCatalog(plugins) {
+    marketState.plugins = plugins;
+    renderFilters();
+    renderStats();
+    renderMarket();
+  }
+
+  function fetchCatalog() {
+    return fetch(MARKET_URL)
+      .then(function (response) {
+        if (!response.ok) throw new Error('catalog ' + response.status);
+        return response.json();
+      })
+      .then(function (catalog) {
+        if (!catalog || !Array.isArray(catalog.plugins)) throw new Error('unexpected catalog');
+        writeMarketCache(catalog.plugins);
+        applyCatalog(catalog.plugins);
+        setMarketStatus('ready', '目录已同步官方市场仓库，新增插件会自动出现在这里。');
+      });
+  }
+
+  function initMarket() {
+    var cached = readMarketCache();
+    if (cached) applyCatalog(cached.plugins);
+    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+      setMarketStatus('ready', '目录已同步官方市场仓库，新增插件会自动出现在这里。');
+      return;
+    }
+    fetchCatalog().catch(function (error) {
+      if (cached) {
+        setMarketStatus('ready', '当前展示离线缓存的目录，稍后会自动重新同步。');
+        return;
+      }
+      setMarketStatus('error', '插件目录获取失败，暂时展示内置列表。可前往插件市场仓库查看完整目录。');
+      if (window.console) window.console.warn('[qingzuo-site] catalog lookup failed', error);
+    });
+
+    var search = document.querySelector('[data-market-search]');
+    if (search) {
+      search.addEventListener('input', function (event) {
+        marketState.query = event.target.value || '';
+        renderMarket();
+      });
+    }
+  }
+
   setupTheme();
   initRelease();
+  initMarket();
 })();

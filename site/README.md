@@ -6,10 +6,37 @@
 site/
 ├── index.html          页面结构与文案
 ├── assets/styles.css   配色与排版（与桌面端设计令牌一致）
-├── assets/site.js      外观切换 + 最新版本直链解析
+├── assets/site.js      外观切换 + 最新版本直链解析 + 插件市场目录
 ├── assets/*.png        应用图标与工作台插画（复制自 src/assets）
 └── .nojekyll           避免 Pages 走 Jekyll 处理
 ```
+
+## 插件市场目录
+
+页面上的插件列表不是写死的，`assets/site.js` 在运行时读取官方市场仓库的目录：
+
+```
+https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
+```
+
+这与桌面端插件市场使用的地址相同（见 `scripts/prepare-platform.mjs` 的 `COMMERCE_MARKET_URL` 默认值），因此**市场上架新插件后，官网自动出现该插件，无需改动任何代码**。市场流程是「合并目录即上架」，不依赖底座安装包重发。
+
+目录字段到页面元素的映射：
+
+| `catalog.json` 字段 | 页面显示 |
+| --- | --- |
+| `title` | 卡片标题与图标文字（中文标题改用 `id` 词首字母，避免多个插件标记相同） |
+| `version` | 标题右侧版本徽标 |
+| `category` | 副标题，同时用于顶部分类筛选按钮 |
+| `description` | 卡片正文 |
+| `artifacts` 的键 | 平台徽标（`darwin-arm64` → macOS，`win32-x64` → Windows） |
+| `api` | 插件 API 兼容范围徽标 |
+| `releaseNotes` | 卡片底部说明（超出两行截断） |
+| `artifacts[*].url` | 反推出插件仓库地址，作为卡片链接 |
+
+卡片上的仓库链接是从安装包 URL 反推的（`https://github.com/<owner>/<repo>/releases/...`），目录里没有显式的仓库字段。
+
+容错：目录同样缓存 30 分钟；有缓存但网络失败时继续展示缓存并提示；无缓存且网络失败时保留 `index.html` 里静态兜底的三张卡片并给出提示，同时隐藏统计数字。
 
 ## 下载按钮如何做到「点击即下载」
 
