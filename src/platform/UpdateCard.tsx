@@ -1,5 +1,5 @@
 import { lazy, useState, Suspense } from 'react';
-import { AlertCircle, Download, LoaderCircle, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, Download, Info, LoaderCircle, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
@@ -13,8 +13,8 @@ export interface UpdateState {
 }
 const megabytes = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 
-export function UpdateCard({ version, kernelVersion, update, disabled, onAction }: {
-  version: string; kernelVersion?: string; update: UpdateState; disabled: boolean; onAction: (method: string) => Promise<any> | void;
+export function UpdateCard({ version, update, disabled, onAction }: {
+  version: string; update: UpdateState; disabled: boolean; onAction: (method: string) => Promise<any> | void;
 }) {
   const [cleaning, setCleaning] = useState(false);
   const [cleanNotice, setCleanNotice] = useState<string | null>(null);
@@ -39,16 +39,14 @@ export function UpdateCard({ version, kernelVersion, update, disabled, onAction 
     }
   };
 
+  const state = update.status === 'checking' ? 'busy' : update.status === 'current' || update.status === 'unpublished' ? 'idle' : update.version ? 'action' : 'idle';
+  const statusText = update.status === 'checking' ? '正在检查最新版本…' : update.status === 'unpublished' ? '还没有可安装的新版本' : update.status === 'current' ? '已是最新版本' : update.version ? `新版本 v${update.version}` : '尚未检查更新';
   return <div className="runtime-component runtime-update-component">
     <div className="runtime-component-head">
-      <div>
-        <div className="runtime-component-title">
-          <strong role="heading" aria-level={3}>轻作更新</strong>
-          <span>当前版本 v{version}{kernelVersion ? ` · Harness v${kernelVersion}` : ''}</span>
-        </div>
-        <p className="runtime-component-status">{update.status === 'checking' ? '正在检查最新版本…' : update.status === 'unpublished' ? '尚无公开发布的底座版本。' : update.status === 'current' ? '当前已是最新版本。' : update.version ? `检测到版本 v${update.version}` : '手动检查是否有新版本。'}</p>
-        <p className="runtime-component-description">DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。</p>
-        <p className="runtime-component-description">下载完成后将自动安装并重启，请先保存正在编辑的文件。</p>
+      <div className="runtime-component-title">
+        <strong role="heading" aria-level={3}>轻作更新</strong>
+        <span className="runtime-update-version">v{version}</span>
+        <span className="runtime-update-state" data-state={state}>{statusText}</span>
       </div>
       <div className="runtime-component-actions">
         <Button variant="outline" size="sm" disabled={disabled || running || cleaning} onClick={() => void handleCleanCache()}>
@@ -60,7 +58,8 @@ export function UpdateCard({ version, kernelVersion, update, disabled, onAction 
         {update.status === 'available' || retry ? <Button size="sm" disabled={disabled} onClick={() => onAction('updates.download')}><Download data-icon="inline-start" />{retry ? '重新下载并更新' : '下载并重启更新'}</Button> : null}
       </div>
     </div>
-    {cleanNotice ? <p role="status" className="text-sm text-muted-foreground mt-2">{cleanNotice}</p> : null}
+    {update.status === 'available' || retry ? <p className="runtime-update-hint"><Info />下载完成后会自动安装并重启，请先保存正在编辑的文件。</p> : null}
+    {cleanNotice ? <p role="status" className="text-sm text-muted-foreground">{cleanNotice}</p> : null}
     {hasDetails ? <div className="runtime-update-details">
       {downloading || preparing ? <div className="flex flex-col gap-2" aria-busy="true">
         <Progress value={downloading ? update.progress : null}>

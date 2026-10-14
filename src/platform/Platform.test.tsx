@@ -74,10 +74,12 @@ it('keeps backend progress after acknowledgment, restores it across pages, and c
   expect(screen.getByRole('button', { name: '已安装' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByRole('progressbar')).toBeNull();
   await navigate('工具中心');
-  await screen.findByText('v0.2.0 · 已启用 · 市场签名验证');
+  await screen.findByText('v0.2.0');
+  expect(screen.getByText('已启用')).toBeTruthy();
+  expect(screen.getByText('市场安装')).toBeTruthy();
   expect(screen.getByRole('button', { name: '打开工具' }).hasAttribute('disabled')).toBe(false);
   emit(job('installed', { progress: 100 }), [installed]);
-  await screen.findByText('v0.1.0 · 已启用 · 市场签名验证');
+  await screen.findByText('v0.1.0');
   expect(screen.queryByText('安装完成 · v0.2.0')).toBeNull();
   emit(job('installed', { progress: 100 }), []);
   await navigate('插件市场');
@@ -88,7 +90,7 @@ it('keeps backend progress after acknowledgment, restores it across pages, and c
 it('restores an existing background installation and retries its specific error', async () => {
   const { invoke, emit } = fixture(job('downloading', { progress: null, transferred: 1024 ** 2 }), false);
   render(<Platform />);
-  await screen.findByText('Harness 内核已连接');
+  await screen.findByText('工具服务已就绪');
   await navigate('插件市场');
   await screen.findByText('正在下载插件…');
   expect(screen.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(false);
@@ -141,17 +143,19 @@ it('keeps background recovery progress visible without installed plugins and pre
   expect(screen.getByRole('button', { name: '稍后从市场安装' }).hasAttribute('disabled')).toBe(true);
 });
 
-it('shows runtime component versions and routes Harness checks to app updates', async () => {
+it('shows the app version and routes every runtime check to app updates', async () => {
   const { invoke } = fixture();
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
   expect(screen.queryByRole('button', { name: '更新' })).toBeNull();
   await navigate('设置');
-  await screen.findByRole('heading', { name: '运行环境' });
+  await screen.findByRole('heading', { name: '关于轻作' });
   await screen.findByRole('heading', { name: '轻作更新' });
-  expect(screen.getByText('v0.2.1-alpha.1')).toBeTruthy();
+  expect(screen.getByText('尚未检查更新')).toBeTruthy();
+  expect(document.querySelector('.runtime-update-version')?.textContent).toBe('v0.3.1');
   expect(screen.queryByRole('button', { name: '检查代理更新' })).toBeNull();
-  expect(screen.getByText('DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。')).toBeTruthy();
+  expect(screen.queryByText(/Harness/)).toBeNull();
+  expect(screen.queryByText('下载完成后将自动安装并重启，请先保存正在编辑的文件。')).toBeNull();
 
   expect(screen.queryByRole('button', { name: '检查轻作更新' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '清理更新缓存' }));
@@ -167,7 +171,7 @@ it('shows runtime component versions and routes Harness checks to app updates', 
 
   fireEvent.click(screen.getByRole('button', { name: '添加自定义源' }));
   await screen.findByRole('dialog', { name: '添加自定义下载源' });
-  const mirrorInput = screen.getByLabelText('镜像前缀，例如 https://mirror.example.com/');
+  const mirrorInput = screen.getByLabelText('镜像站地址，例如 https://mirror.example.com/');
   fireEvent.change(mirrorInput, { target: { value: 'https://mirror.example.com' } });
   fireEvent.click(screen.getByRole('button', { name: '添加并切换' }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加自定义下载源' })).toBeNull());
@@ -189,7 +193,7 @@ it('checks plugin versions on demand and offers the update from management', asy
   expect(screen.getByText('检查插件是否有新版本')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '检查插件更新' }));
   await screen.findByText('发现 1 个插件更新');
-  expect(document.querySelector('.plugin-state-update')?.textContent).toContain('v0.1.0 → v0.2.0 · 有新版本');
+  expect(document.querySelector('.plugin-state .is-update')?.textContent).toBe('可更新到 v0.2.0');
   fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'market.install')).toHaveLength(1));
 });

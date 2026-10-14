@@ -64,7 +64,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     await writeFile(configFile, JSON.stringify({ url: 'https://market.example/catalog.json', publicKey: publicKey.export({ type: 'spki', format: 'pem' }) }));
     app = await electron.launch({ args: [root, '--user-data-dir=' + path.join(temp, 'profile')], timeout: 20000 });
     const page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
-    await expect(page.getByText('Harness 内核已连接', { exact: true })).toBeVisible();
+    await expect(page.getByText('工具服务已就绪', { exact: true })).toBeVisible();
     expect(page.url()).toMatch(/^commerce:\/\/shell\//); expect(await page.title()).toMatch(/轻作|Qingzuo/);
     const first = await signedFixture('0.1.0', privateKey); await fixtureFetch(app, first);
     await install(page); await expect.poll(async () => (await status(page)).pluginInstalls.find(job => job.id === id)?.status).toBe('installed');
@@ -160,8 +160,8 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     expect((await status(page)).plugins.find(plugin => plugin.id === id).version).toBe('0.4.0');
     expect(await app.evaluate(() => globalThis.__marketSlow.downloads.filter(download => download.version === '0.4.0').length)).toBe(1);
     await page.screenshot({ path: path.join(screenshotDirectory, 'sync-error.png'), fullPage: false });
-    await page.getByRole('button', { name: '重新启动内核', exact: true }).click();
-    await expect(page.getByText('Harness 内核已连接', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '重新启动工具服务', exact: true }).click();
+    await expect(page.getByText('工具服务已就绪', { exact: true })).toBeVisible();
     await marketCard.getByRole('button', { name: '重试更新', exact: true }).click();
     await expect(marketCard.getByRole('status')).toContainText('安装完成 · v0.4.0');
     expect(await app.evaluate(() => globalThis.__marketSlow.downloads.filter(download => download.version === '0.4.0').length)).toBe(1);
@@ -171,6 +171,6 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     const recoveredPlugin = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'));
     await recoveredPlugin.getByRole('button', { name: '验证新服务', exact: true }).click();
     await expect(recoveredPlugin.getByRole('status')).toHaveText('v0.4.0 · 新版本服务已同步');
-    expect(errors).toEqual([]); await expect(page.getByText('内核请求超时。', { exact: false })).toHaveCount(0);
+    expect(errors).toEqual([]); await expect(page.getByText('工具服务响应超时。', { exact: false })).toHaveCount(0);
   } finally { await app?.close(); await writeFile(configFile, previous); await rm(temp, { recursive: true, force: true }); }
 });

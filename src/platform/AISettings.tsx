@@ -85,8 +85,8 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
           <section className="ai-overview" aria-label="配置概览">
             <div className="ai-setup-steps">
               {[
-                { number: 1, title: '接入文本服务', description: status?.address ? '已配置代理地址：' + status.address : '配置外部代理或兼容服务地址与访问密钥。', button: '配置连接', action: () => selectSection('connection') },
-                { number: 2, title: '选择助手模型', description: status?.model ? '当前：' + status.model + (status.verified.includes(status.model) ? ' · 已验证工具调用' : ' · 尚未验证工具调用') : '验证工具调用后启用插件编排。图像型号不能用作文本助手。', button: '选择模型', action: () => selectSection('model') },
+                { number: 1, title: '接入文本服务', description: status?.address ? '已配置服务地址：' + status.address : '填写兼容 OpenAI 接口的本机服务地址与访问密钥。', button: '配置连接', action: () => selectSection('connection') },
+                { number: 2, title: '选择助手模型', description: status?.model ? '当前：' + status.model + (status.verified.includes(status.model) ? ' · 已验证' : ' · 未验证') : '完成验证后，助手才能调用工具。图片型号不能用作助手。', button: '选择模型', action: () => selectSection('model') },
                 { number: 3, title: '开始 AI 对话', description: '调用前展示插件及参数，确认后执行。', button: '打开对话', action: onOpenChat },
               ].map(step => (
                 <div className="ai-setup-row" key={step.number}>
@@ -98,7 +98,7 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
             </div>
             <div className="ai-image-band">
               <Image />
-              <div><h2>图像编辑</h2><p>复用代理服务图片模型，或配置官方 API。</p></div>
+              <div><h2>图像编辑</h2><p>使用已接入的图片模型，或单独配置官方 API。</p></div>
               <Button variant="outline" onClick={() => selectSection('image')}>配置图像 API<ArrowRight /></Button>
             </div>
           </section>
@@ -108,11 +108,11 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
           <Card id="ai-image" className="ai-image-entry">
             <CardHeader>
               <CardTitle role="heading" aria-level={2}><Image className="ai-section-icon" />图像编辑 API</CardTitle>
-              <CardDescription>批图插件可直接选择已接入代理服务的图片模型，也保留 Google / OpenAI 官方 API 入口。</CardDescription>
+              <CardDescription>批图可以直接使用已接入的图片模型，也可以单独配置官方 API。</CardDescription>
               <CardAction><Button disabled={!imageAvailable} onClick={onOpenImage}>配置图像 API<ArrowRight data-icon="inline-end" /></Button></CardAction>
             </CardHeader>
-            {!imageAvailable ? <CardContent><p className="text-sm text-muted-foreground">请先安装并启用「AI 批图」插件。密钥仅授权给该插件。</p></CardContent> : null}
-            <CardContent><p className="text-sm text-muted-foreground">代理模式复用已保存的连接与密钥，是否支持图片编辑取决于代理型号和账户权限。官方模式仍使用插件专属密钥；所有凭据留在宿主，不会交给插件页面或 AI 对话。选择图片型号不会改变默认文本助手模型。</p></CardContent>
+            {!imageAvailable ? <CardContent><p className="text-sm text-muted-foreground">请先安装并启用「AI 批图」插件，再来配置。</p></CardContent> : null}
+            <CardContent><p className="text-sm text-muted-foreground">能否用于图片编辑，取决于所选模型和账户权限。选择图片模型不会改变默认助手模型。</p></CardContent>
           </Card>
         ) : null}
 
@@ -120,8 +120,7 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
           <Card id="ai-connection">
             <CardHeader>
               <CardTitle role="heading" aria-level={2}><Server className="ai-section-icon" />助手连接方式</CardTitle>
-              <CardDescription>配置外部代理或兼容服务连接。保存后需在「默认模型」中完成验证。</CardDescription>
-              <CardAction><Badge variant="secondary">当前：外部代理</Badge></CardAction>
+              <CardDescription>填写兼容 OpenAI 接口的本机服务地址，保存后可在「默认模型」中验证。</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <FieldGroup className="ai-connection-fields">
@@ -134,7 +133,7 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
                   <Input id="ai-access-key" disabled={disabled} type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder="留空保留已有密钥" />
                 </Field>
               </FieldGroup>
-              <p className="text-sm text-muted-foreground">支持兼容 OpenAI 接口规范的外部代理或本地服务（例如 http://127.0.0.1:8317）。仅支持本机 HTTP 或 HTTPS 地址。</p>
+              <p className="text-sm text-muted-foreground">只支持本机地址，需使用 HTTP 或 HTTPS。</p>
               {connectionChanged ? <p role="status" className="text-sm text-muted-foreground">连接方式尚未应用。请先保存，再获取模型。</p> : null}
             </CardContent>
             <CardFooter className="ai-actions">
@@ -148,7 +147,7 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
           <Card id="ai-assistant-model">
             <CardHeader>
               <CardTitle role="heading" aria-level={2}>默认助手模型</CardTitle>
-              <CardDescription>保存连接设置后获取模型。助手能否编排批图，需要单独验证工具调用。</CardDescription>
+              <CardDescription>先保存连接设置，再获取可用模型。</CardDescription>
               <CardAction><Badge variant="secondary">{verified ? '已通过工具调用验证' : '尚未验证'}</Badge></CardAction>
             </CardHeader>
             <CardContent>
@@ -164,13 +163,13 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
                       </option>
                     ))}
                   </select>
-                  <FieldDescription>只选择文本模型。图像模型灰显，已有选择不会被静默替换。</FieldDescription>
+                  <FieldDescription>这里只列出可以用作助手的文本模型。</FieldDescription>
                 </Field>
                 <Button variant="outline" disabled={disabled || connectionChanged} onClick={() => void action('models', async () => setModels(await invoke<{ id: string }[]>('models')), '模型列表已刷新')}>
                   {spinner('models')}获取模型
                 </Button>
               </FieldGroup>
-              {imageModel ? <Alert variant="destructive"><AlertDescription>当前选择的是图像模型，不能用于 AI 对话。请获取模型后选择支持工具调用的文本型号；原配置尚未改动。</AlertDescription></Alert> : null}
+              {imageModel ? <Alert variant="destructive"><AlertDescription>当前选择的是图像模型，不能用作 AI 助手。请改选一个文本模型，当前选择不会被自动替换。</AlertDescription></Alert> : null}
             </CardContent>
             <CardFooter className="ai-actions">
               <Button disabled={disabled || connectionChanged || !model || imageModel} onClick={() => void action('model', configure, '默认助手模型已保存')}>

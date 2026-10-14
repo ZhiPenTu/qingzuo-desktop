@@ -99,7 +99,7 @@ test('incompatible APIs, reserved identifiers and unsupported platforms are reje
 });
 test('missing service dependencies prevent activation and preserve installed tools', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-dependency-')); await mkdir(path.join(root, 'bundled')); const manager = new PluginManager(path.join(root, 'plugins'), path.join(root, 'bundled'));
-  try { await manager.initialize(); await assert.rejects(manager.install(archive('0.1.0', { services: { requires: ['unavailable.service'] } })), /缺少服务/); assert.equal((await manager.list()).length, 0); }
+  try { await manager.initialize(); await assert.rejects(manager.install(archive('0.1.0', { services: { requires: ['unavailable.service'] } })), /缺少运行所需的组件/); assert.equal((await manager.list()).length, 0); }
   finally { await rm(root, { recursive: true, force: true }); }
 });
 

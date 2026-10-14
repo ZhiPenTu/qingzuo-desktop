@@ -63,7 +63,8 @@ describe('PluginCard installation state', () => {
     // The management page passes the catalog entry only after an explicit check.
     const catalogEntry = { ...entry, releaseNotes: '修复稳定性问题' };
     rerender(<PluginCard entry={catalogEntry} installed={installed} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
-    expect(container.querySelector('.plugin-state')?.textContent).toContain('v0.1.0 → v0.2.0 · 有新版本');
+    expect(container.querySelector('.plugin-state .is-update')?.textContent).toBe('可更新到 v0.2.0');
+    expect(container.querySelector('.plugin-state')?.textContent).not.toContain('签名');
     fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
     expect(onAction).toHaveBeenCalledWith('market.install', { id: entry.id });
     rerender(<PluginCard entry={entry} installed={{ ...installed, version: '0.3.0' }} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);

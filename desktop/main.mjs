@@ -172,8 +172,8 @@ async function loadView(id, settings, epoch) {
   hideViews(); visible = id; return sanitizePlugin(plugin);
 }
 function kernelRequest(message, timeout = 30000) {
-  if (!host || systems.length !== 7) return Promise.reject(new Error('Harness 内核不可用，请重新启动。'));
-  return new Promise((resolve,reject) => { const id = ++kernelCounter; const timer = timeout > 0 ? setTimeout(() => { kernelRequests.delete(id); reject(new Error('内核请求超时。')); }, timeout) : null; kernelRequests.set(id,{resolve,reject,timer}); host.postMessage({...message,id}); });
+  if (!host || systems.length !== 7) return Promise.reject(new Error('工具服务不可用，请重新启动。'));
+  return new Promise((resolve,reject) => { const id = ++kernelCounter; const timer = timeout > 0 ? setTimeout(() => { kernelRequests.delete(id); reject(new Error('工具服务响应超时。')); }, timeout) : null; kernelRequests.set(id,{resolve,reject,timer}); host.postMessage({...message,id}); });
 }
 let toolSyncPromise = null;
 async function syncTools() {
@@ -190,12 +190,12 @@ async function syncTools() {
 async function startKernel() {
   approvals?.dispose();
   kernelError = null; systems = []; const previousHost = host; host = null; previousHost?.kill();
-  for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('内核已重新启动。')); } kernelRequests.clear();
+  for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('工具服务已重新启动。')); } kernelRequests.clear();
   host = utilityProcess.fork(path.join(root, 'desktop/kernel-host.mjs'), [], { serviceName: 'Commerce Harness Kernel', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(app.getPath('userData'), 'harness'), DSH_TELEMETRY_DISABLED: '1' } });
   host.stderr?.on('data', data => console.error('[kernel]', data.toString().trim()));
   const currentHost = host;
   hostReady = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Harness 内核启动超时。')), 30000);
+    const timer = setTimeout(() => reject(new Error('工具服务启动超时。')), 30000);
     host.on('message', async message => {
       if (currentHost !== host) return;
       if (message.type === 'reply') { const p=kernelRequests.get(message.id); kernelRequests.delete(message.id); if(p) {clearTimeout(p.timer); if(message.error) p.reject(new Error(message.error)); else p.resolve(message.result);} }
@@ -203,7 +203,7 @@ async function startKernel() {
       else if (message.type === 'fatal') { clearTimeout(timer); kernelError = message.error; changed(); reject(new Error(message.error)); }
       else if (message.type === 'invoke') { try { const result = await systemInvoke(message.service, message.method, message.args); if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, result }); } catch (error) { if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, error: error.message }); } }
     });
-    host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('内核进程已退出。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = 'Harness 内核已退出（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
+    host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('工具服务已停止运行。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = '工具服务已停止运行（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
   });
   host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json'), enableAI: true } });
   await hostReady; await syncTools();
@@ -226,13 +226,13 @@ async function systemInvoke(service, method, args = {}) {
       throw new Error('对话工具接口未授权。');
     }
     const plugin = await manager.get(args.owner);
-    if (!plugin.enabled || plugin.missing.length || !plugin.permissions.ai?.includes(method.startsWith('batch.') ? 'image-edit' : 'assistant')) throw new Error('AI 内核调用未授权。');
+    if (!plugin.enabled || plugin.missing.length || !plugin.permissions.ai?.includes(method.startsWith('batch.') ? 'image-edit' : 'assistant')) throw new Error('助手调用未授权。');
     if (method === 'connection') return proxy.connection(true);
     if (method === 'event') { aiChanged(plugin.id, args.event); return; }
     if (method === 'batch.get') return batches.snapshot(batches.get(plugin, args.id));
     if (method === 'batch.revise') return batches.revise(plugin, args);
     if (method === 'batch.cancel') return batches.cancel(plugin, args.id);
-    throw new Error('AI 内核调用无效。');
+    throw new Error('助手调用无效。');
   }
   if (service === 'home' && method === 'list') return (await manager.list()).map(sanitizePlugin);
   if (service === 'sandbox' && method === 'call') {
@@ -317,7 +317,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 });
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
-  if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或内核不可用。');
+  if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或工具服务不可用。');
   if (method.startsWith('ai.')) {
     const assistant = method.startsWith('ai.assistant.');
     if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : 'image-edit')) throw new Error('AI 能力未授权。');

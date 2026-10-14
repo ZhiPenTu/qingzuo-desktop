@@ -257,8 +257,11 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .plugin-version { color: var(--muted-foreground); font-size: 12px; margin-right: auto; }
 .plugin-installed { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); font-size: 11px; }
 .plugin-installed svg { width: 14px; height: 14px; }
-.plugin-state { color: var(--muted-foreground); font-size: 11px; margin: 0; }
-.plugin-state-update { color: var(--primary); font-weight: 500; }
+.plugin-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.plugin-state li { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; line-height: 1.5; color: var(--muted-foreground); background: color-mix(in srgb, var(--secondary) 55%, transparent); }
+.plugin-state-version { font-variant-numeric: tabular-nums; }
+.plugin-state .is-update { color: var(--primary); font-weight: 500; background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.plugin-state .is-warning { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 12%, transparent); }
 .plugin-check-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--secondary) 38%, var(--card)); }
 .plugin-check-toolbar > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .plugin-check-toolbar strong { font-size: 12px; font-weight: 600; }
@@ -439,7 +442,9 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .runtime-info > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; font-size: 13px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .runtime-info dt { color: var(--muted-foreground); }
 .runtime-info dd { margin: 0; text-align: right; }
-.runtime-systems { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.runtime-service-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--muted-foreground); vertical-align: middle; }
+.runtime-service-dot.is-ready { background: var(--primary); }
+.runtime-info dd { display: flex; align-items: center; justify-content: flex-end; }
 .runtime-components { display: grid; gap: 14px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
 .runtime-component { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
 .runtime-component > div { min-width: 0; }
@@ -448,10 +453,19 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .runtime-update-component { flex-direction: column; align-items: stretch; gap: 14px; }
 .runtime-component-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .runtime-component-head > div:first-child { min-width: 0; }
-.runtime-component-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.runtime-component-title span { font-size: 11px; color: var(--muted-foreground); }
-.runtime-component-status { margin: 6px 0 0; font-size: 12px; font-weight: 500; color: var(--foreground); }
+.runtime-component-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.runtime-update-version { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.runtime-update-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+.runtime-update-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); }
+.runtime-update-state[data-state="action"] { color: var(--primary); }
+.runtime-update-state[data-state="action"]::before { background: var(--primary); }
+.runtime-update-state[data-state="busy"]::before { animation: runtime-pulse 1.2s ease-in-out infinite; }
+.runtime-update-hint { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--secondary) 45%, transparent); color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
+.runtime-update-hint svg { width: 15px; height: 15px; flex-shrink: 0; }
+@keyframes runtime-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .runtime-update-state[data-state="busy"]::before { animation: none; } }
 .runtime-component-description, .runtime-component-candidate { margin: 4px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.7; }
+.runtime-update-component .text-sm { margin: 0; }
 .runtime-component-candidate { color: var(--primary); }
 .runtime-update-details { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 @media (max-width: 640px) { .runtime-component-head { align-items: flex-start; flex-direction: column; } }

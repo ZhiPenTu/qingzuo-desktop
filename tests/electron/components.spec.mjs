@@ -14,7 +14,7 @@ test('component updater sees ASAR as raw bytes rather than an Electron virtual d
     await mkdir(path.dirname(filename), { recursive: true }); await createPackage(source, filename);
     const bytes = await readFile(filename), artifact = { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
-    await expect((await app.firstWindow()).getByText('Harness 内核已连接')).toBeVisible();
+    await expect((await app.firstWindow()).getByText('工具服务已就绪')).toBeVisible();
     const result = await app.evaluate(async (_, value) => {
       const vm = process.getBuiltinModule('node:vm');
       const importer = url => vm.runInThisContext('import(' + JSON.stringify(url) + ')', { importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER });
