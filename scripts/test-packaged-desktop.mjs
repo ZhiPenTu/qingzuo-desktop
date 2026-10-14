@@ -24,11 +24,11 @@ try {
     if (current.kernel.error) throw new Error(current.kernel.error);
     return current.kernel.systems.length;
   }, { timeout: 30000 }).toBe(7);
-  await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+  await expect(page.getByText('工具服务已就绪')).toBeVisible();
   const status = await page.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(status.update.status).toBe('idle');
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await expect(page.getByText('下载完成后将自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toBeVisible();
+  await expect(page.getByText('下载完成后会自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '工具中心', exact: true }).click();
   await mkdir('output/electron-tests', { recursive: true });
   await page.screenshot({ path: 'output/electron-tests/packaged-home.png' });

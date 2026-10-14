@@ -140,7 +140,7 @@ export class PluginManager {
           await this.stop(m.id);
           this.state.plugins[m.id] = { folder: relative, enabled: enabled ?? installed?.enabled ?? previous?.enabled ?? true, source, previous };
           activated = true;
-          const item = await this.get(m.id); if (item.enabled && item.missing.length) throw new Error('缺少服务依赖：' + item.missing.join('、')); if (item.enabled) await this.probe(item); await this.persist();
+          const item = await this.get(m.id); if (item.enabled && item.missing.length) throw new Error('缺少运行所需的组件：' + item.missing.join('、')); if (item.enabled) await this.probe(item); await this.persist();
         } catch (error) {
           if (activated) {
             if (previous) this.state.plugins[m.id] = previous; else delete this.state.plugins[m.id];
@@ -156,12 +156,12 @@ export class PluginManager {
   async setEnabled(id, enabled) { return this.transaction(async () => {
     await this.get(id);const previous=this.state.plugins[id];await this.stop(id);
     this.state.plugins[id]={...previous,enabled:Boolean(enabled)};
-    try {if(enabled){const item=await this.get(id);if(item.missing.length)throw new Error('缺少服务依赖：'+item.missing.join('、'));await this.probe(item);}await this.persist();}
+    try {if(enabled){const item=await this.get(id);if(item.missing.length)throw new Error('缺少运行所需的组件：'+item.missing.join('、'));await this.probe(item);}await this.persist();}
     catch(error){await this.stop(id);if(previous)this.state.plugins[id]=previous;else delete this.state.plugins[id];throw error;}
   }); }
   async uninstall(id) { return this.transaction(async () => { const plugin = await this.get(id); await this.stop(id); await this.forget(plugin); this.state.plugins[id] = { removed: true }; await this.persist(); await rm(path.join(this.root,'installed',id),{recursive:true,force:true,maxRetries:5,retryDelay:100}); }); }
   async rollback(id) { return this.transaction(async () => { const row = this.state.plugins[id]; if (!row?.previous && !this.defaults.has(id)) throw new Error('没有可恢复的版本。'); await this.stop(id); if (row.previous) this.state.plugins[id] = row.previous; else delete this.state.plugins[id];
-    try {const target=await this.get(id);if(target.missing.length)throw new Error('恢复版本缺少服务依赖。');if(target.enabled)await this.probe(target);await this.persist();}
+    try {const target=await this.get(id);if(target.missing.length)throw new Error('恢复版本缺少运行所需的组件。');if(target.enabled)await this.probe(target);await this.persist();}
     catch(error){await this.stop(id);this.state.plugins[id]=row;throw error;} }); }
 }
 export async function boundedDownload(url, limit = MAX_PACKAGE_BYTES, signal, { onProgress = () => {}, request = fetch, idleTimeoutMs = 120000, totalTimeoutMs = 30 * 60_000 } = {}) {

@@ -30,7 +30,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
   const executablePath = process.env.QINGZUO_HOST_EXECUTABLE;
   async function launch() {
     app = await _electron.launch({ ...(executablePath ? { executablePath } : {}), args: [...(executablePath ? [] : [process.cwd()]), '--user-data-dir=' + path.join(temporary, 'profile')] });
-    const page = await app.firstWindow(); await expect(page.getByText('Harness 内核已连接')).toBeVisible(); return page;
+    const page = await app.firstWindow(); await expect(page.getByText('工具服务已就绪')).toBeVisible(); return page;
   }
   try {
     let page = await launch();

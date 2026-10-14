@@ -49,13 +49,17 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       </div>
     </CardHeader>
     <CardContent>
-      {entry.compatible === false ? <p role="alert">请先升级轻作，此插件需要 API {entry.api}。</p> : null}
+      {entry.compatible === false ? <p role="alert">请先将轻作更新到较新版本，再安装这个工具。</p> : null}
       {mode === 'market' ? <>
-        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg API 密钥</p> : null}
+        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : null}
         {entry.releaseNotes ? <details className="plugin-notes"><summary>版本说明<ChevronDown /></summary><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></details> : null}
-      </> : <p className={cn('plugin-state', updateAvailable && 'plugin-state-update')}>
-        {updateAvailable ? <>v{installed?.version} → v{entry.version} · 有新版本</> : <>v{displayVersion}</>} · {installed?.enabled ? '已启用' : '已停用'}{installed?.missing.length ? ' · 缺少服务依赖' : ''} · {({ bundled: '内置插件', local: '本地导入', market: '市场签名验证' }[installed?.source ?? ''] ?? installed?.source)}
-      </p>}
+      </> : <ul className="plugin-state">
+        <li className="plugin-state-version">v{displayVersion}</li>
+        {updateAvailable ? <li className="plugin-state-chip is-update">可更新到 v{entry.version}</li> : null}
+        <li className="plugin-state-chip">{installed?.enabled ? '已启用' : '已停用'}</li>
+        {installed?.missing.length ? <li className="plugin-state-chip is-warning">缺少所需组件</li> : null}
+        <li className="plugin-state-chip">{({ bundled: '内置工具', local: '本地导入', market: '市场安装' }[installed?.source ?? ''] ?? installed?.source)}</li>
+      </ul>}
       {mode === 'plugins' && entry.releaseNotes ? <details className="plugin-notes"><summary>版本说明<ChevronDown /></summary><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></details> : null}
       {installed?.error ? <p role="alert" className="text-destructive">{installed.error}</p> : null}
       {updating ? <div className="plugin-update-progress" role="status" aria-busy="true" aria-live="polite">

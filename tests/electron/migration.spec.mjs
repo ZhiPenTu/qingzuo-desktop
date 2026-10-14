@@ -22,7 +22,7 @@ test('legacy recovery is explicit, offline-safe, state-preserving and recorded p
     await writeFile(configFile, JSON.stringify({ url: 'https://market.example/catalog.json', publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }) }));
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + profile] });
     const page = await app.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     const recover = page.getByRole('button', { name: '恢复 LabelEdit', exact: true });
     const later = page.getByRole('button', { name: '稍后从市场安装', exact: true });
     await expect(recover).toBeVisible();
@@ -60,7 +60,7 @@ test('legacy recovery is explicit, offline-safe, state-preserving and recorded p
     await app.close(); app = null;
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + profile] });
     const reopened = await app.firstWindow();
-    await expect(reopened.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(reopened.getByText('工具服务已就绪')).toBeVisible();
     const status = await reopened.evaluate(() => window.commerceDesktop.invoke('status'));
     expect(status.migration).toBeNull();
     expect(status.plugins[0]).toMatchObject({ version: '0.1.2', enabled: false });

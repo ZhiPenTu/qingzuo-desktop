@@ -14,7 +14,7 @@ test('pure platform installs a sandboxed Node plugin and supports uninstall/rein
     execFileSync(process.execPath, [cli, 'pack', path.join(temporary, 'fixture-native'), artifact]);
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
     const page = await app.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     expect((await page.evaluate(() => window.commerceDesktop.invoke('status'))).plugins).toEqual([]);
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     for (let iteration = 0; iteration < 2; iteration++) {

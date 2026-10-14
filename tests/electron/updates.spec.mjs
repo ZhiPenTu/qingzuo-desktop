@@ -11,7 +11,7 @@ test('desktop downloads in-app, keeps progress across navigation, retries and au
     application = await electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temp, 'data')], timeout: 20000 });
     const page = await application.firstWindow();
     const errors = []; page.on('pageerror', error => errors.push(error.message));
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     expect(await page.title()).toBe('轻作 · Qingzuo');
     expect(page.url()).toBe('commerce://shell/index.html');
     await application.evaluate(async ({ app, shell }, moduleURL) => {
@@ -38,9 +38,10 @@ test('desktop downloads in-app, keeps progress across navigation, retries and au
       };
     }, pathToFileURL(path.resolve('desktop/main.mjs')).href);
     await page.getByRole('button', { name: '设置', exact: true }).click();
-    await expect(page.getByText('下载完成后将自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toBeVisible();
+    await expect(page.getByText('下载完成后会自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '检查更新', exact: true }).click();
-    await expect(page.getByText('检测到版本 v0.2.4', { exact: true })).toBeVisible();
+    await expect(page.getByText('新版本 v0.2.4', { exact: true })).toBeVisible();
+    await expect(page.getByText('下载完成后会自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toBeVisible();
     await expect(page.getByText('最新变更：新增工具预览', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '打开 GitHub 下载页', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '下载并重启更新', exact: true }).click();
@@ -88,7 +89,7 @@ test('failed checks clear stale release notes and can be retried', async () => {
   try {
     application = await electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temp, 'data')] });
     const page = await application.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     await application.evaluate(async ({ app }, moduleURL) => {
       Object.defineProperty(app, 'isPackaged', { value: true });
       const vm = process.getBuiltinModule('node:vm');
@@ -109,7 +110,7 @@ test('failed checks clear stale release notes and can be retried', async () => {
     await expect(page.getByText('最新日志', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '下载并重启更新', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '检查更新', exact: true }).click();
-    await expect(page.getByText('尚无公开发布的底座版本。', { exact: true })).toBeVisible();
+    await expect(page.getByText('还没有可安装的新版本', { exact: true })).toBeVisible();
     await expect(page.getByRole('alert')).toHaveCount(0);
   } finally {
     if (application) await application.close();
@@ -124,7 +125,7 @@ test('macOS updater exits after its direct runtime shutdown', async () => {
   try {
     application = await electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temp, 'data')] });
     const page = await application.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     const exited = new Promise(resolve => application.process().once('exit', resolve));
     await application.evaluate(async ({ app }, moduleURL) => {
       const vm = process.getBuiltinModule('node:vm');

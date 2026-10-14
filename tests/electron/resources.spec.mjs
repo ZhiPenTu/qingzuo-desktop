@@ -14,7 +14,7 @@ test('private file resources render and expire after release', async () => {
     await writeFile(artifact, zip.toBuffer());
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
     const page = await app.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
     await page.getByRole('button', { name: '打开工具', exact: true }).click();

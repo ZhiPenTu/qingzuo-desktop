@@ -31,7 +31,7 @@ async function withMarketplace(ids, run) {
     await writeFile(configFile, JSON.stringify({ url: 'https://market.example/catalog.json', publicKey: publicKey.export({ type: 'spki', format: 'pem' }) }));
     application = await electron.launch({ args: [root, '--user-data-dir=' + profile], timeout: 20000 });
     const page = await application.firstWindow();
-    await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+    await expect(page.getByText('工具服务已就绪')).toBeVisible();
     await page.evaluate(() => window.commerceDesktop.invoke('status'));
     await application.evaluate(async (_, value) => {
       const vm = process.getBuiltinModule('node:vm');

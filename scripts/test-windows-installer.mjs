@@ -32,7 +32,7 @@ try {
   await access(path.join(installed, 'resources/commerce/plugins/official.labeledit/package.json'));
   app = await _electron.launch({ executablePath, args: ['--user-data-dir=' + profile], cwd: temporary });
   const oldPage = await app.firstWindow();
-  await expect(oldPage.getByText('Harness 内核已连接')).toBeVisible();
+  await expect(oldPage.getByText('工具服务已就绪')).toBeVisible();
   const oldStatus = await oldPage.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(oldStatus.version).toBe('0.2.5');
   await oldPage.evaluate(() => window.commerceDesktop.invoke('plugins.enable', { id: 'official.labeledit', enabled: false }));
@@ -51,7 +51,7 @@ try {
   assert.equal(await readFile(marker, 'utf8'), 'preserve plugin data');
   app = await _electron.launch({ executablePath, args: ['--user-data-dir=' + profile], cwd: temporary });
   const page = await app.firstWindow();
-  await expect(page.getByText('Harness 内核已连接')).toBeVisible();
+  await expect(page.getByText('工具服务已就绪')).toBeVisible();
   const status = await page.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(status.version).toBe(version);
   expect(status.kernel.systems).toHaveLength(7);
