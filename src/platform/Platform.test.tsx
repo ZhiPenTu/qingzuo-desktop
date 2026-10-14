@@ -180,6 +180,20 @@ it('shows runtime component versions and routes Harness checks to app updates', 
   await waitFor(() => expect(sourceSelect.value).toBe('github'));
 });
 
+it('checks plugin versions on demand and offers the update from management', async () => {
+  const { invoke } = fixture();
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+  await navigate('插件管理');
+  await screen.findByRole('heading', { name: '插件管理' });
+  expect(screen.getByText('检查插件是否有新版本')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '检查插件更新' }));
+  await screen.findByText('发现 1 个插件更新');
+  expect(document.querySelector('.plugin-state-update')?.textContent).toContain('v0.1.0 → v0.2.0 · 有新版本');
+  fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
+  await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'market.install')).toHaveLength(1));
+});
+
 it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import errors', async () => {
   const { invoke } = fixture();
   const baseImpl = invoke.getMockImplementation()!;

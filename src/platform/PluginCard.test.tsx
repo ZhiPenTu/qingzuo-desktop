@@ -55,4 +55,19 @@ describe('PluginCard installation state', () => {
     fireEvent.click(button);
     expect(onAction).toHaveBeenCalledWith('market.install', { id: entry.id });
   });
+
+  it('offers a catalog update from plugin management without downgrading local state', () => {
+    const onAction = vi.fn();
+    const { rerender, container } = render(<PluginCard entry={entry} installed={installed} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
+    expect(container.querySelector('.plugin-state')?.textContent).toContain('v0.1.0');
+    // The management page passes the catalog entry only after an explicit check.
+    const catalogEntry = { ...entry, releaseNotes: '修复稳定性问题' };
+    rerender(<PluginCard entry={catalogEntry} installed={installed} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
+    expect(container.querySelector('.plugin-state')?.textContent).toContain('v0.1.0 → v0.2.0 · 有新版本');
+    fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
+    expect(onAction).toHaveBeenCalledWith('market.install', { id: entry.id });
+    rerender(<PluginCard entry={entry} installed={{ ...installed, version: '0.3.0' }} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
+    expect(container.querySelector('.plugin-state')?.textContent).toContain('v0.3.0');
+    expect(screen.queryByRole('button', { name: '更新插件' })).toBeNull();
+  });
 });

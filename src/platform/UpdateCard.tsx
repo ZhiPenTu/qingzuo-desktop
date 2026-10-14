@@ -46,7 +46,7 @@ export function UpdateCard({ version, kernelVersion, update, disabled, onAction 
           <strong role="heading" aria-level={3}>轻作更新</strong>
           <span>当前版本 v{version}{kernelVersion ? ` · Harness v${kernelVersion}` : ''}</span>
         </div>
-        <p className="runtime-component-status">{update.status === 'unpublished' ? '尚无公开发布的底座版本。' : update.status === 'current' ? '当前已是最新版本。' : update.version ? `检测到版本 v${update.version}` : '手动检查是否有新版本。'}</p>
+        <p className="runtime-component-status">{update.status === 'checking' ? '正在检查最新版本…' : update.status === 'unpublished' ? '尚无公开发布的底座版本。' : update.status === 'current' ? '当前已是最新版本。' : update.version ? `检测到版本 v${update.version}` : '手动检查是否有新版本。'}</p>
         <p className="runtime-component-description">DeepSeek Harness 随轻作版本发布，当前运行时不会单独替换。</p>
         <p className="runtime-component-description">下载完成后将自动安装并重启，请先保存正在编辑的文件。</p>
       </div>

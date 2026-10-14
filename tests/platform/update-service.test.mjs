@@ -93,3 +93,20 @@ test('cleanCache delegates to adapter cleanCache and rejects while download is i
   service.state.status = 'downloading';
   await assert.rejects(service.cleanCache(), /更新进行中/);
 });
+
+test('invalid check results fail closed and malformed native progress cannot poison public state', async () => {
+  const service = new UpdateService({ check: async () => ({ status: 'available' }) }, () => {});
+  service.check(); await service.pending;
+  assert.equal(service.state.status, 'error');
+  assert.match(service.state.error, /缺少版本信息/);
+  const invalidStatus = new UpdateService({ check: async () => ({ status: 'broken' }) }, () => {});
+  invalidStatus.check(); await invalidStatus.pending;
+  assert.match(invalidStatus.state.error, /无效状态/);
+
+  const updater = new EventEmitter(), states = [];
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '0.2.4' } });
+  updater.downloadUpdate = async () => updater.emit('download-progress', { percent: Number.NaN, transferred: Infinity, total: -1 });
+  const adapter = nativeUpdateAdapter(updater);
+  await adapter.download({ status: 'available', version: '0.2.4' }, value => states.push(value));
+  assert.deepEqual(states[0], { status: 'downloading', progress: 0, transferred: 0, total: 0 });
+});

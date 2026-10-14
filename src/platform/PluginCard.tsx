@@ -30,6 +30,8 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const Icon = isLabel ? FileText : isCutout ? Image : Puzzle;
   // A stale catalog must not offer a downgrade of a newer bundled/local tool.
   const current = installed ? gte(installed.version, entry.version) : false;
+  const updateAvailable = mode === 'plugins' && Boolean(installed) && !current;
+  const displayVersion = mode === 'plugins' && installed ? installed.version : entry.version;
   const updating = pluginInstallActive(install);
   const unavailable = disabled || updating;
   const failed = install?.status === 'error';
@@ -51,7 +53,9 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {mode === 'market' ? <>
         {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg API 密钥</p> : null}
         {entry.releaseNotes ? <details className="plugin-notes"><summary>版本说明<ChevronDown /></summary><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></details> : null}
-      </> : <p className="plugin-state">v{entry.version} · {installed?.enabled ? '已启用' : '已停用'}{installed?.missing.length ? ' · 缺少服务依赖' : ''} · {({ bundled: '内置插件', local: '本地导入', market: '市场签名验证' }[installed?.source ?? ''] ?? installed?.source)}</p>}
+      </> : <p className={cn('plugin-state', updateAvailable && 'plugin-state-update')}>
+        {updateAvailable ? <>v{installed?.version} → v{entry.version} · 有新版本</> : <>v{displayVersion}</>} · {installed?.enabled ? '已启用' : '已停用'}{installed?.missing.length ? ' · 缺少服务依赖' : ''} · {({ bundled: '内置插件', local: '本地导入', market: '市场签名验证' }[installed?.source ?? ''] ?? installed?.source)}
+      </p>}
       {mode === 'plugins' && entry.releaseNotes ? <details className="plugin-notes"><summary>版本说明<ChevronDown /></summary><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></details> : null}
       {installed?.error ? <p role="alert" className="text-destructive">{installed.error}</p> : null}
       {updating ? <div className="plugin-update-progress" role="status" aria-busy="true" aria-live="polite">
@@ -66,6 +70,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
     </CardContent>
     <CardFooter>
       {mode === 'market' ? <><span className="plugin-version">v{entry.version}</span>{current ? <span className="plugin-installed"><Check />已安装</span> : null}<Button disabled={unavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : mode === 'plugins' ? <>
+        {updateAvailable ? <Button disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
         <Button variant="outline" disabled={unavailable} onClick={() => onAction('plugins.enable', { id: entry.id, enabled: !installed?.enabled })}>{installed?.enabled ? '停用' : '启用'}</Button>
         {installed?.settings ? <Button variant="outline" disabled={unavailable || !installed.enabled} onClick={() => onOpen(true)}>插件设置</Button> : null}
         <Button variant="ghost" disabled={unavailable} onClick={() => onAction('plugins.rollback', { id: entry.id })}>恢复版本</Button>

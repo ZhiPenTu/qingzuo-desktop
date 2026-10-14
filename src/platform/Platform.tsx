@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, ChevronRight, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/u
 import { Skeleton } from '@/components/ui/skeleton';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { PluginCard, pluginInstallActive, toolCategory, type Plugin, type ToolEntry } from './PluginCard';
+import gt from 'semver/functions/gt';
 import type { DownloadSourceState, PluginInstallState } from './commerce';
 import { useTheme } from '../theme/ThemeProvider';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,11 @@ export default function Platform() {
   const [marketState, setMarketState] = useState<'loading' | 'ready' | 'error' | 'unavailable'>('loading');
   const [marketMessage, setMarketMessage] = useState('');
   const [marketRevision, setMarketRevision] = useState(0);
+  const [marketCheckedAt, setMarketCheckedAt] = useState<number | null>(null);
+  const marketCache = useRef<{ items: ToolEntry[]; checkedAt: number; source: string } | null>(null);
+  const marketRequest = useRef(0);
+  const [pluginCheckBusy, setPluginCheckBusy] = useState(false);
+  const [pluginCheckError, setPluginCheckError] = useState<string | null>(null);
   const [customMirrorDialogOpen, setCustomMirrorDialogOpen] = useState(false);
   const [customMirrorInput, setCustomMirrorInput] = useState('');
   const [customMirrorError, setCustomMirrorError] = useState<string | null>(null);
@@ -170,22 +176,46 @@ export default function Platform() {
   };
   async function navigate(next: string, settings = false) {
     try {
+      if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
       if (navigation.some(item => item.id === next)) await window.commerceDesktop?.invoke('view.hide');
       else await run('view.open', { id: next, settings });
       setPage(next); setQuery(''); setCategory('all');
     } catch (e) { setError(formatError(e)); }
   }
+  const loadMarket = useCallback(async (force = false) => {
+    if (!window.commerceDesktop) {
+      setMarketState('unavailable'); setMarketMessage('在轻作桌面应用中浏览签名目录并安装插件。');
+      return [];
+    }
+    const source = status?.downloadSource?.source ?? 'github';
+    const cached = marketCache.current;
+    if (!force && cached && cached.source === source && Date.now() - cached.checkedAt < 60_000) {
+      setMarket(cached.items); setMarketCheckedAt(cached.checkedAt); setMarketMessage(''); setMarketState('ready');
+      return cached.items;
+    }
+    setMarketState('loading'); setMarketMessage('');
+    const requestId = ++marketRequest.current;
+    const value = await window.commerceDesktop.invoke<{ items: ToolEntry[]; message?: string }>('market.list');
+    if (requestId !== marketRequest.current) return [];
+    const items = Array.isArray(value.items) ? value.items : [];
+    const checkedAt = Date.now();
+    marketCache.current = { items, checkedAt, source };
+    setMarket(items); setMarketCheckedAt(checkedAt); setMarketMessage(value.message || ''); setMarketState(value.message ? 'unavailable' : 'ready');
+    return items;
+  }, [status?.downloadSource?.source]);
   useEffect(() => {
     if (page !== 'market') return;
     let active = true;
-    setMarket([]); setMarketState('loading'); setMarketMessage('');
-    if (!window.commerceDesktop) { setMarketState('unavailable'); setMarketMessage('在轻作桌面应用中浏览签名目录并安装插件。'); return; }
-    window.commerceDesktop.invoke<{ items: ToolEntry[]; message?: string }>('market.list').then(value => {
-      if (!active) return;
-      setMarket(value.items); setMarketMessage(value.message || ''); setMarketState(value.message ? 'unavailable' : 'ready');
-    }).catch(e => { if (active) { setMarketMessage(formatError(e)); setMarketState('error'); } });
-    return () => { active = false; };
-  }, [page, marketRevision]);
+    void loadMarket().catch(e => { if (active) { setMarketMessage(formatError(e)); setMarketState('error'); } });
+    return () => { active = false; marketCache.current = null; marketRequest.current++; };
+  }, [page, marketRevision, loadMarket]);
+  const checkPluginUpdates = async () => {
+    if (pluginCheckBusy || !desktop) return;
+    setPluginCheckBusy(true); setPluginCheckError(null);
+    try { await loadMarket(true); }
+    catch (reason) { setPluginCheckError(formatError(reason)); }
+    finally { setPluginCheckBusy(false); }
+  };
   useEffect(() => {
     const element = surface.current;
     if (!element || navigation.some(n => n.id === page)) return;
@@ -199,9 +229,17 @@ export default function Platform() {
   const migrationRunning = pluginInstallActive(migrationInstall);
   const migrationProgress = migrationInstall?.status === 'downloading' && migrationInstall.progress !== null ? Math.min(100, Math.max(0, migrationInstall.progress)) : null;
   const migrationPhase = migrationInstall ? ({ checking: '正在检查插件版本…', downloading: '正在下载插件…', verifying: '正在校验插件签名…', installing: '正在安装插件…', syncing: '正在刷新工具…', installed: '', error: '' }[migrationInstall.status]) : '';
-  const entries = page === 'market' ? market : plugins;
-  const categories = [...new Set(entries.map(toolCategory))];
-  const results = entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const marketById = useMemo(() => new Map(market.map(entry => [entry.id, entry])), [market]);
+  const pluginUpdates = useMemo(() => plugins.filter(plugin => {
+    const candidate = marketById.get(plugin.id);
+    try { return Boolean(candidate && gt(candidate.version, plugin.version)); } catch { return false; }
+  }), [plugins, marketById]);
+  const entries = page === 'market' ? market : page === 'plugins' ? plugins.map(plugin => {
+    const candidate = marketById.get(plugin.id);
+    return candidate ? { ...candidate, enabled: plugin.enabled, source: plugin.source, local: plugin.local, missing: plugin.missing, settings: plugin.settings, error: plugin.error } as Plugin : plugin;
+  }) : plugins;
+  const categories = useMemo(() => [...new Set(entries.map(toolCategory))], [entries]);
+  const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
   const title = navigation.find(n => n.id === page)?.title ?? plugins.find(p => p.id === page)?.title ?? '工具';
   const shellPage = navigation.some(n => n.id === page);
   const copy = pageCopy[page as Page];
@@ -230,6 +268,11 @@ export default function Platform() {
         {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button></div></section> : null}
         {['home', 'market', 'plugins'].includes(page) ? <>
           <div className="tool-section-heading"><div><h2>{page === 'home' ? '我的工具' : title}</h2><span>{entries.length} 款工具</span></div><InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup></div>
+          {page === 'plugins' ? <div className="plugin-check-toolbar" role="status">
+            <div><strong>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</strong>{marketCheckedAt ? <span>上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}</div>
+            <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
+          </div> : null}
+          {page === 'plugins' && pluginCheckError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{pluginCheckError}</AlertDescription></Alert> : null}
           {page === 'market' && categories.length ? <div className="market-filters" role="group" aria-label="工具分类">{['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部工具' : item}</Button>)}</div> : null}
           {page === 'market' && marketState === 'loading' ? <div className="market-loading" role="status"><LoaderCircle className="animate-spin" />正在加载插件目录…</div> : page === 'market' && (marketState === 'error' || marketState === 'unavailable') ? <Empty className="market-empty"><EmptyHeader><Store /><EmptyTitle>{marketState === 'error' ? '暂时无法加载插件市场' : desktop ? '插件目录尚未就绪' : '在桌面应用中发现更多工具'}</EmptyTitle><EmptyDescription>{marketMessage}</EmptyDescription></EmptyHeader>{desktop ? <Button variant="outline" onClick={() => setMarketRevision(value => value + 1)}><RefreshCw data-icon="inline-start" />重新加载</Button> : null}</Empty> : <>
             <div className={cn('commerce-grid', page === 'market' ? 'market-grid' : 'tool-list')}>{results.map(entry => <PluginCard key={entry.id} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode={page as 'home' | 'market' | 'plugins'} disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>

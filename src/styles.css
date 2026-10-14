@@ -258,6 +258,12 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .plugin-installed { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); font-size: 11px; }
 .plugin-installed svg { width: 14px; height: 14px; }
 .plugin-state { color: var(--muted-foreground); font-size: 11px; margin: 0; }
+.plugin-state-update { color: var(--primary); font-weight: 500; }
+.plugin-check-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--secondary) 38%, var(--card)); }
+.plugin-check-toolbar > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.plugin-check-toolbar strong { font-size: 12px; font-weight: 600; }
+.plugin-check-toolbar span { color: var(--muted-foreground); font-size: 11px; }
+@media (max-width: 620px) { .plugin-check-toolbar { align-items: flex-start; flex-direction: column; } }
 .plugin-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 20px; padding: 20px 24px; }
 .plugin-row > [data-slot="card-header"] { padding: 0; grid-row: 1; }
 .plugin-row .commerce-tool-icon { width: 48px; height: 48px; }
