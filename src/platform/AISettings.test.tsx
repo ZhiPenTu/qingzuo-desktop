@@ -27,9 +27,9 @@ it('starts with hierarchy and only shows the selected configuration level', asyn
   fireEvent.click(screen.getByRole('button', { name: '配置图像 API' })); expect(onOpenImage).toHaveBeenCalledOnce();
 });
 
-it('offers only the external proxy connection and exposes no account, OAuth or provider surface', async () => {
+it('offers only the external proxy connection and exposes no account, or provider surface', async () => {
   mockDesktop(); render(<AISettings />);
-  for (const removed of ['账户与 API', '轻作内置管理', 'OAuth 登录', 'API Key 接入', '启动代理', '停止代理', '检查代理更新']) {
+  for (const removed of ['账户与 API', '轻作内置管理', ' 登录', 'API Key 接入', '启动代理', '停止代理', '检查代理更新']) {
     expect(screen.queryByRole('button', { name: removed })).toBeNull();
     expect(screen.queryByText(removed)).toBeNull();
   }

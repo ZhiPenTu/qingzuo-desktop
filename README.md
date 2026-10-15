@@ -27,4 +27,3 @@ SDK 源码位于 packages/plugin-sdk，版本 1.2.0，运行时 API 1.2.0。插�
 
 支持 macOS 15+ Apple Silicon、Windows 10+ x64。Harness 固定 0.2.1-alpha.1，插件代码运行在隔离上下文中。
 
-AI 对话与批图通过你自备的 OpenAI 兼容服务接入：在「AI 设置 → 代理连接」填写服务地址与访问密钥即可。轻作不内置任何代理进程，也不提供 OAuth 账户登录。

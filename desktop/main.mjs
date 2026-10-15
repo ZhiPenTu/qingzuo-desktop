@@ -153,8 +153,8 @@ async function loadView(id, settings, epoch) {
     assertViewEpoch(id,epoch);
     const view = new WebContentsView({ webPreferences: { session: ses, preload: path.join(root, 'desktop/plugin-preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, spellcheck:false, additionalArguments: ['--commerce-plugin=' + id] } });
     view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
-    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) event.preventDefault(); });
+    view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
+    view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
     view.webContents.on('will-attach-webview', event => event.preventDefault());
     view.webContents.on('did-fail-load', (_event, code, description) => console.error('Plugin view failed:', id, code, description));
     view.webContents.on('render-process-gone', (_event, details) => console.error('Plugin renderer gone:', id, details));
@@ -488,8 +488,8 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
 }, changed);
 window = new BrowserWindow({ title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680, icon: path.join(root, 'desktop/icons/icon.png'), webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
-window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) event.preventDefault(); });
+window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
+window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
 protocol.handle('commerce', async request => { try { const url = new URL(request.url); if (url.hostname !== 'shell') return new Response('Forbidden', { status: 403 }); return resourceResponse(await confinedPath(path.join(root, 'dist'), decodeURIComponent(url.pathname.slice(1)))); } catch { return new Response('Not found', { status: 404 }); } });
 await window.loadURL(process.env.COMMERCE_DEV_URL || 'commerce://shell/index.html');
 void startKernel().catch(error => { kernelError = error.message; changed(); });
