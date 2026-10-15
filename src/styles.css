@@ -432,6 +432,22 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .custom-mirror-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); font-size: 12px; }
 .custom-mirror-item span { min-width: 0; overflow-wrap: anywhere; }
 .custom-mirror-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.issue-dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 19, 0.45); backdrop-filter: blur(2px); }
+.issue-dialog { width: min(540px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--card-foreground); box-shadow: 0 20px 48px rgba(0, 0, 0, 0.18); }
+.issue-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.issue-dialog-eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 500; color: var(--muted-foreground); }
+.issue-dialog-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.issue-dialog-description { margin: 0; font-size: 13px; line-height: 1.65; color: var(--muted-foreground); }
+.issue-dialog-form { display: flex; flex-direction: column; gap: 14px; }
+.issue-dialog-field { display: flex; flex-direction: column; gap: 6px; }
+.issue-dialog-label { font-size: 12px; font-weight: 500; color: var(--foreground); }
+.issue-dialog-textarea { font-size: 13px; resize: vertical; min-height: 72px; }
+.issue-diagnostics-section { display: flex; flex-direction: column; gap: 8px; }
+.issue-diagnostics-toggle { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; padding: 0; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--muted-foreground); text-align: left; }
+.issue-diagnostics-toggle:hover { color: var(--foreground); }
+.issue-diagnostics-box { max-height: 160px; overflow-y: auto; padding: 8px 12px; border-radius: 8px; background: var(--muted); border: 1px solid var(--border); }
+.issue-diagnostics-code { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--muted-foreground); }
+.issue-dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 6px; }
 @media (max-width: 680px) {
   .download-source-row { flex-direction: column; align-items: stretch; gap: 14px; }
   .download-source-actions { flex-wrap: wrap; }

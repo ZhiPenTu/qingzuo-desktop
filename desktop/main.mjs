@@ -1,6 +1,7 @@
 import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -297,7 +298,12 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'downloadSource.set') return downloadSources.setSource(args.source);
   if (method === 'downloadSource.addCustomMirror') return downloadSources.addCustomMirror(args.url);
   if (method === 'downloadSource.removeCustomMirror') return downloadSources.removeCustomMirror(args.url);
-  if (method === 'status') return { version: app.getVersion(), kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'openExternal' || method === 'shell.openExternal') {
+    if (typeof args.url !== 'string' || !/^https?:\/\//i.test(args.url)) throw new Error('链接无效。');
+    await shell.openExternal(args.url);
+    return true;
+  }
+  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
