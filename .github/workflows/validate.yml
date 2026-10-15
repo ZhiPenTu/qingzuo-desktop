@@ -1,6 +1,13 @@
 name: Validate commerce desktop
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'site/**'
+      - '*.md'
+      - '.github/workflows/pages.yml'
+      - '.gitignore'
+      - 'LICENSE'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
