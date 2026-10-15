@@ -237,3 +237,31 @@ it('renders topbar without breadcrumbs when no tabs are open, and renders integr
   fireEvent.click(closeBtn);
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'view.close')).toHaveLength(1));
 });
+
+it('shows feedback action on error alert and opens issue reporting dialog', async () => {
+  const { invoke } = fixture();
+  const baseImpl = invoke.getMockImplementation()!;
+  invoke.mockImplementation(async (method: string, args?: unknown) => {
+    if (method === 'plugins.import') throw new Error('模拟导入失败');
+    return baseImpl(method, args);
+  });
+  render(<Platform />);
+  fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
+  const feedbackBtn = await screen.findByRole('button', { name: '反馈此问题' });
+  expect(feedbackBtn).toBeTruthy();
+
+  fireEvent.click(feedbackBtn);
+  expect(await screen.findByRole('dialog', { name: /提交反馈与报错/ })).toBeTruthy();
+  expect(screen.getByText(/模拟导入失败/)).toBeTruthy();
+});
+
+it('provides an issue reporting entry in settings about card', async () => {
+  fixture();
+  render(<Platform />);
+  await navigate('设置');
+  const reportBtn = await screen.findByRole('button', { name: '提交反馈与报错' });
+  expect(reportBtn).toBeTruthy();
+
+  fireEvent.click(reportBtn);
+  expect(await screen.findByRole('dialog', { name: /提交反馈与报错/ })).toBeTruthy();
+});

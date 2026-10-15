@@ -14,6 +14,12 @@ export interface DownloadSourceState {
   gitcodeAvailable: boolean;
   notice?: string | null;
 }
+export interface SystemDiagnostics {
+  platform: string;
+  arch: string;
+  osRelease: string;
+  electron: string;
+}
 declare global {
   interface Window {
     commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
