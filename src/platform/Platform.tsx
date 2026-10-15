@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Bug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
@@ -337,7 +337,68 @@ export default function Platform() {
           <div className="commerce-info"><ShieldCheck /><div><strong>{page === 'market' ? '每个工具都会先校验来源' : '你的工作台，由你掌握'}</strong><p>{page === 'market' ? '市场里的工具都来自已校验的发布目录，安装前会自动检查一遍。' : '本地工具在本机处理文件，联网工具按你的授权访问服务。'}</p></div></div>
         </> : null}
         {page === 'ai' ? <AISettings imageAvailable={desktop && plugins.some(plugin => plugin.id === 'official.ai-image' && plugin.enabled && !plugin.missing.length) && status.kernel.ready} onOpenImage={() => void navigate('official.ai-image', true)} onOpenChat={() => void navigate('chat')} /> : null}
-        {page === 'settings' ? <div className="commerce-settings"><Card><CardHeader><CardTitle role="heading" aria-level={2}>AI 助手</CardTitle><CardDescription>统一管理助手模型、连接方式与图像 API Key。</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button></CardContent></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>外观</CardTitle><CardDescription>为工作台选择舒适的显示方式。</CardDescription></CardHeader><CardContent><div className="theme-options" role="group" aria-label="主题">{([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</div></CardContent></Card><Card className="download-source-card"><div className="download-source-row"><div className="download-source-copy"><CardTitle role="heading" aria-level={2}>切换下载源</CardTitle><CardDescription>下载会优先使用所选渠道；某个渠道不可用时会自动换用其他渠道。</CardDescription>{downloadSourceState.notice ? <p className="download-source-notice" role="status">{downloadSourceState.notice}</p> : null}</div><div className="download-source-actions"><select className="download-source-select" aria-label="切换下载源" value={downloadSourceState.source} disabled={busy || customMirrorBusy} onChange={event => void handleDownloadSourceChange(event.target.value)}><option value="github">GitHub 官方源</option><option value="gitcode" disabled={downloadSourceState.gitcodeAvailable === false}>GitCode 国内源</option><option value="gh-proxy">GitHub 镜像 · gh-proxy.com</option><option value="gh-fast">GitHub 镜像 · ghfast.top</option>{downloadSourceState.customMirrors.map(mirror => <option key={mirror} value={`custom:${mirror}`}>{formatCustomMirrorLabel(mirror)}</option>)}</select><Button type="button" className="download-source-add-btn" disabled={busy || customMirrorBusy} onClick={() => { setCustomMirrorError(null); setCustomMirrorDialogOpen(true); }}>添加自定义源</Button></div></div></Card><Card><CardHeader><CardTitle role="heading" aria-level={2}>关于轻作</CardTitle><CardDescription>版本信息与本地服务状态。</CardDescription></CardHeader><CardContent><dl className="runtime-info"><div><dt>版本</dt><dd>v{status.version}</dd></div><div><dt>工具服务</dt><dd><span className={cn('runtime-service-dot', status.kernel.ready && 'is-ready')} />{status.kernel.ready ? '运行中' : desktop ? '启动中' : '浏览器预览不启动工具服务'}</dd></div></dl><div className="runtime-components" aria-label="轻作更新"><UpdateCard version={status.version} update={status.update} disabled={!desktop || busy} onAction={act} /></div><div className="runtime-issue-row pt-3 flex justify-end"><Button variant="outline" size="sm" onClick={() => openIssueReport()}><Bug data-icon="inline-start" />提交反馈与报错</Button></div></CardContent></Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
+        {page === 'settings' ? <div className="commerce-settings">
+          <Card>
+            <CardHeader>
+              <CardTitle role="heading" aria-level={2}>AI 助手</CardTitle>
+              <CardDescription>统一管理助手模型、连接方式与图像 API Key。</CardDescription>
+              <CardAction className="self-center">
+                <Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button>
+              </CardAction>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle role="heading" aria-level={2}>外观</CardTitle>
+              <CardDescription>为工作台选择舒适的显示方式。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="theme-options" role="group" aria-label="主题">
+                {([{ value: 'light', label: '浅色', icon: Sun }, { value: 'dark', label: '深色', icon: Moon }, { value: 'system', label: '跟随系统', icon: Monitor }] as const).map(({ value, label, icon: Icon }) => (
+                  <Button key={value} variant={theme === value ? 'secondary' : 'outline'} aria-pressed={theme === value} onClick={() => setTheme(value)}>
+                    <Icon />{label}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="download-source-card">
+            <div className="download-source-row">
+              <div className="download-source-copy">
+                <CardTitle role="heading" aria-level={2}>切换下载源</CardTitle>
+                <CardDescription>下载会优先使用所选渠道；某个渠道不可用时会自动换用其他渠道。</CardDescription>
+                {downloadSourceState.notice ? <p className="download-source-notice" role="status">{downloadSourceState.notice}</p> : null}
+              </div>
+              <div className="download-source-actions">
+                <select className="download-source-select" aria-label="切换下载源" value={downloadSourceState.source} disabled={busy || customMirrorBusy} onChange={event => void handleDownloadSourceChange(event.target.value)}>
+                  <option value="github">GitHub 官方源</option>
+                  <option value="gitcode" disabled={downloadSourceState.gitcodeAvailable === false}>GitCode 国内源</option>
+                  <option value="gh-proxy">GitHub 镜像 · gh-proxy.com</option>
+                  <option value="gh-fast">GitHub 镜像 · ghfast.top</option>
+                  {downloadSourceState.customMirrors.map(mirror => <option key={mirror} value={`custom:${mirror}`}>{formatCustomMirrorLabel(mirror)}</option>)}
+                </select>
+                <Button type="button" variant="outline" className="download-source-add-btn" disabled={busy || customMirrorBusy} onClick={() => { setCustomMirrorError(null); setCustomMirrorDialogOpen(true); }}>添加自定义源</Button>
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle role="heading" aria-level={2}>关于轻作</CardTitle>
+              <CardDescription>版本信息与本地服务状态。</CardDescription>
+              <CardAction className="self-center">
+                <Button variant="outline" size="sm" onClick={() => openIssueReport()}><Bug data-icon="inline-start" />提交反馈与报错</Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <dl className="runtime-info">
+                <div><dt>版本</dt><dd>v{status.version}</dd></div>
+                <div><dt>工具服务</dt><dd><span className={cn('runtime-service-dot', status.kernel.ready && 'is-ready')} />{status.kernel.ready ? '运行中' : desktop ? '启动中' : '浏览器预览不启动工具服务'}</dd></div>
+              </dl>
+              <div className="runtime-components" aria-label="轻作更新">
+                <UpdateCard version={status.version} update={status.update} disabled={!desktop || busy} onAction={act} />
+              </div>
+            </CardContent>
+          </Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       <IssueReportDialog
         open={issueDialogOpen}
