@@ -196,13 +196,12 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-brand > div { min-width: 0; }
 .commerce-brand strong { display: block; font-size: 23px; font-weight: 650; letter-spacing: 2px; }
 .commerce-brand span { display: block; margin-top: 1px; font-size: 10px; letter-spacing: 1.6px; color: var(--muted-foreground); }
-.commerce-sidebar-toggle { color: var(--muted-foreground); }
-.commerce-sidebar-toggle svg { width: 16px; height: 16px; }
+.commerce-topbar-sidebar-toggle { flex-shrink: 0; margin-right: 8px; color: var(--muted-foreground); }
+.commerce-topbar-sidebar-toggle svg { width: 16px; height: 16px; }
 .commerce-sidebar.is-collapsed { width: 72px; padding-inline: 10px; }
 .commerce-sidebar.is-collapsed .commerce-sidebar-head { display: block; padding: 0 0 26px; }
 .commerce-sidebar.is-collapsed .commerce-brand { justify-content: center; }
 .commerce-sidebar.is-collapsed .commerce-brand > div { display: none; }
-.commerce-sidebar.is-collapsed .commerce-sidebar-toggle { position: absolute; top: -20px; right: -7px; z-index: 1; width: 24px; height: 24px; padding: 0; border-color: var(--border); background: var(--card); }
 .commerce-sidebar.is-collapsed .commerce-nav { justify-content: center; gap: 0; padding-inline: 0; font-size: 0; }
 .commerce-sidebar.is-collapsed .commerce-nav span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .commerce-sidebar.is-collapsed .commerce-nav svg { width: 20px; height: 20px; }
@@ -567,7 +566,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .commerce-brand { padding: 0; justify-content: center; }
   .commerce-brand img { width: 43px; height: 43px; }
   .commerce-brand > div { display: none; }
-  .commerce-sidebar-toggle { display: none; }
   .commerce-nav { font-size: 0; padding: 0; gap: 0; justify-content: center; }
   .commerce-nav span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .commerce-nav svg { width: 20px; height: 20px; }
