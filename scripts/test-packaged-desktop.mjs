@@ -40,7 +40,8 @@ try {
   expect(JSON.parse(await readFile(path.join(resources, 'distribution.json'), 'utf8')).preview).toBe(false);
 await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
 await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
-await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: 'AI 设置', exact: true }).click();
+await page.getByRole('button', { name: '设置', exact: true }).click();
+await page.getByRole('button', { name: '打开 AI 设置', exact: true }).click();
 await expect(page.getByRole('button', { name: '代理连接', exact: true })).toBeVisible();
   console.log('Standalone pure platform: seven Harness services, empty tool center and no bundled business plugins passed.');
 } finally {
