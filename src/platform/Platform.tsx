@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Bug } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Bug, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -34,7 +34,9 @@ interface ComponentUpdateState {
   error?: string | null;
 }
 interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
-const navigation = [{ id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'ai', title: 'AI 设置', icon: Sparkles }, { id: 'settings', title: '设置', icon: Settings }] as const;
+const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
+const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
+const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
@@ -57,6 +59,10 @@ export default function Platform() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [startingPluginId, setStartingPluginId] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return window.localStorage.getItem('qingzuo.sidebarCollapsed') === '1'; }
+    catch { return false; }
+  });
   const pendingInstalls = useRef(new Set<string>());
   const [market, setMarket] = useState<ToolEntry[]>([]);
   const [marketState, setMarketState] = useState<'loading' | 'ready' | 'error' | 'unavailable'>('loading');
@@ -188,7 +194,7 @@ export default function Platform() {
   async function navigate(next: string, settings = false) {
     try {
       if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
-      if (navigation.some(item => item.id === next)) await window.commerceDesktop?.invoke('view.hide');
+      if (isShellPage(next)) await window.commerceDesktop?.invoke('view.hide');
       else await run('view.open', { id: next, settings });
       setPage(next); setQuery(''); setCategory('all');
     } catch (e) { setError(formatError(e)); }
@@ -229,7 +235,7 @@ export default function Platform() {
   };
   useEffect(() => {
     const element = surface.current;
-    if (!element || navigation.some(n => n.id === page) || typeof ResizeObserver === 'undefined') return;
+    if (!element || isShellPage(page) || typeof ResizeObserver === 'undefined') return;
     const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
@@ -251,12 +257,20 @@ export default function Platform() {
   }) : plugins;
   const categories = useMemo(() => [...new Set(entries.map(toolCategory))], [entries]);
   const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
-  const title = navigation.find(n => n.id === page)?.title ?? plugins.find(p => p.id === page)?.title ?? '工具';
-  const shellPage = navigation.some(n => n.id === page);
+  const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
+  const shellPage = isShellPage(page);
   const copy = pageCopy[page as Page];
+  const toggleSidebar = () => setSidebarCollapsed(current => {
+    const next = !current;
+    try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
+    return next;
+  });
   return <div className="commerce-shell">
-    <aside className="commerce-sidebar">
-      <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
+    <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
+      <div className="commerce-sidebar-head">
+        <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
+        <Button variant="ghost" size="icon-sm" className="commerce-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+      </div>
       <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
       <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
     </aside>
@@ -272,7 +286,7 @@ export default function Platform() {
               onClick={() => void navigate('home')}
             >
               <Boxes className="commerce-tab-icon" />
-              <span className="commerce-tab-title">{shellPage ? (navigation.find(n => n.id === page)?.title ?? '工具中心') : '工具中心'}</span>
+              <span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
             </button>
             {status.tabs.map(id => {
               const TabIcon = tabIconFor(id);
