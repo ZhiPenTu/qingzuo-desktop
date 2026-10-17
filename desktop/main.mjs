@@ -500,7 +500,13 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
   pluginFinalizations.set(id, { version: entry.version, restoring });
   await finalizePlugin(id, notify);
 }, changed);
-window = new BrowserWindow({ title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680, icon: path.join(root, 'desktop/icons/icon.png'), webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+window = new BrowserWindow({
+  title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680,
+  icon: path.join(root, 'desktop/icons/icon.png'),
+  ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
+  ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
+  webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
+});
 browserRuntime = new BrowserRuntime({ window, changed });
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });

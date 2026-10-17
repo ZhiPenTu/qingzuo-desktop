@@ -245,11 +245,11 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
 
   const collapseButton = screen.getByRole('button', { name: '收起侧边栏' });
   expect(collapseButton.closest('aside')).toBeNull();
-  expect(collapseButton.closest('header')).toBeTruthy();
+  expect(collapseButton.closest('.commerce-windowbar')).toBeTruthy();
 
   fireEvent.click(collapseButton);
   const expandButton = await screen.findByRole('button', { name: '展开侧边栏' });
-  expect(expandButton.closest('header')).toBeTruthy();
+  expect(expandButton.closest('.commerce-windowbar')).toBeTruthy();
   expect(expandButton.getAttribute('aria-expanded')).toBe('false');
 });
 
