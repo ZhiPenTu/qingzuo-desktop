@@ -243,12 +243,12 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
 
-  const collapseButton = screen.getByRole('button', { name: '收起侧边栏', exact: true });
+  const collapseButton = screen.getByRole('button', { name: '收起侧边栏' });
   expect(collapseButton.closest('aside')).toBeNull();
   expect(collapseButton.closest('header')).toBeTruthy();
 
   fireEvent.click(collapseButton);
-  const expandButton = await screen.findByRole('button', { name: '展开侧边栏', exact: true });
+  const expandButton = await screen.findByRole('button', { name: '展开侧边栏' });
   expect(expandButton.closest('header')).toBeTruthy();
   expect(expandButton.getAttribute('aria-expanded')).toBe('false');
 });
