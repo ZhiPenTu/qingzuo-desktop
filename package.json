@@ -1,7 +1,7 @@
 {
   "name": "qingzuo-desktop",
   "private": true,
-  "version": "0.3.16",
+  "version": "0.3.17",
   "main": "desktop/main.mjs",
   "workspaces": [
     "packages/*"

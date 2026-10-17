@@ -20,6 +20,19 @@ export interface SystemDiagnostics {
   osRelease: string;
   electron: string;
 }
+export interface BrowserTabState {
+  id: string;
+  title: string;
+  url: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+export interface BrowserStatus {
+  open: boolean;
+  activeTabId: string | null;
+  tabs: BrowserTabState[];
+}
 declare global {
   interface Window {
     commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };

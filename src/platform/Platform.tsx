@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Bug, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -10,6 +10,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { PluginCard, pluginInstallActive, toolCategory, type Plugin, type ToolEntry } from './PluginCard';
 import gt from 'semver/functions/gt';
 import type { DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
+import type { BrowserStatus } from './commerce';
+import { BrowserWorkspace } from './BrowserWorkspace';
 import { IssueReportDialog } from './IssueReportDialog';
 import { recordError, getLatestError, type CapturedError } from './error-tracker';
 import { useTheme } from '../theme/ThemeProvider';
@@ -33,15 +35,15 @@ interface ComponentUpdateState {
   compatibility?: string;
   error?: string | null;
 }
-interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
+interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
 const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
 const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
 const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: { open: false, activeTabId: null, tabs: [] }, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
-const tabIconFor = (id: string) => (isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
+const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
@@ -194,7 +196,8 @@ export default function Platform() {
   async function navigate(next: string, settings = false) {
     try {
       if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
-      if (isShellPage(next)) await window.commerceDesktop?.invoke('view.hide');
+      if (next === 'browser') { if (page !== 'browser') await run('browser.open'); }
+      else if (isShellPage(next)) await window.commerceDesktop?.invoke('view.hide');
       else await run('view.open', { id: next, settings });
       setPage(next); setQuery(''); setCategory('all');
     } catch (e) { setError(formatError(e)); }
@@ -235,7 +238,7 @@ export default function Platform() {
   };
   useEffect(() => {
     const element = surface.current;
-    if (!element || isShellPage(page) || typeof ResizeObserver === 'undefined') return;
+    if (!element || isShellPage(page) || page === 'browser' || typeof ResizeObserver === 'undefined') return;
     const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
@@ -257,8 +260,9 @@ export default function Platform() {
   }) : plugins;
   const categories = useMemo(() => [...new Set(entries.map(toolCategory))], [entries]);
   const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
-  const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
+  const title = navigation.find(n => n.id === page)?.title ?? (page === 'browser' ? '浏览器' : page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
   const shellPage = isShellPage(page);
+  const browserPage = page === 'browser';
   const copy = pageCopy[page as Page];
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
@@ -269,7 +273,6 @@ export default function Platform() {
     <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
       <div className="commerce-sidebar-head">
         <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-        <Button variant="ghost" size="icon-sm" className="commerce-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
       </div>
       <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
       <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
@@ -277,7 +280,8 @@ export default function Platform() {
     <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
       {page !== 'chat' ? <header className="commerce-topbar">
         <div className="commerce-topbar-start">
-          {status?.tabs.length ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">
+          <Button variant="ghost" size="icon-sm" className="commerce-topbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+          {(status?.tabs.length || status?.browser?.open) ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">
             <button
               type="button"
               role="tab"
@@ -288,6 +292,18 @@ export default function Platform() {
               <Boxes className="commerce-tab-icon" />
               <span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
             </button>
+            {status.browser?.open ? <div
+              role="tab"
+              tabIndex={0}
+              aria-selected={browserPage}
+              className={cn('commerce-tool-tab', browserPage && 'is-active')}
+              onClick={() => void navigate('browser')}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void navigate('browser'); } }}
+            >
+              <Globe className="commerce-tab-icon" />
+              <span className="commerce-tab-title">浏览器</span>
+              <button type="button" className="commerce-tab-close" aria-label="关闭浏览器" title="关闭" onClick={e => { e.stopPropagation(); void run('browser.closeWorkspace').then(() => { if (browserPage) setPage('home'); }).catch(() => {}); }}><X /></button>
+            </div> : null}
             {status.tabs.map(id => {
               const TabIcon = tabIconFor(id);
               const toolTitle = plugins.find(p => p.id === id)?.title ?? id;
@@ -334,7 +350,7 @@ export default function Platform() {
       {status?.kernel.error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{status.kernel.error}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => act('kernel.retry')}>重新启动工具服务</Button><Button variant="outline" size="sm" onClick={() => openIssueReport(status.kernel.error, '工具服务')}>反馈报错</Button></div></AlertDescription></Alert> : null}
       {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className="commerce-content-inner">
         <div className="commerce-heading"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
-        {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button></div></section> : null}
+        {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><div className="workspace-feature-actions"><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button><Button variant="outline" onClick={() => void navigate('browser')}><Globe data-icon="inline-start" />打开浏览器</Button></div></div></section> : null}
         {['home', 'market', 'plugins'].includes(page) ? <>
           <div className="tool-section-heading"><div><h2>{page === 'home' ? '我的工具' : title}</h2><span>{entries.length} 款工具</span></div><InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup></div>
           {page === 'plugins' ? <div className="plugin-check-toolbar" role="status">
@@ -413,7 +429,7 @@ export default function Platform() {
               </div>
             </CardContent>
           </Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
-      </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
+      </div></main> : browserPage ? <BrowserWorkspace status={status.browser ?? { open: false, activeTabId: null, tabs: [] }} busy={busy} onAction={run} /> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       <IssueReportDialog
         open={issueDialogOpen}
         onClose={() => setIssueDialogOpen(false)}

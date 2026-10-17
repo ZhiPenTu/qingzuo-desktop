@@ -24,6 +24,7 @@ import { ProxyRuntime } from './ai-proxy.mjs';
 import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
+import { BrowserRuntime } from './browser.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
 app.setName('Commerce Tools');
@@ -34,7 +35,7 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, quitting = false, quitReady = false, shutdownPromise, hostReady;
+let window, manager, workers, files, credentials, network, host, browserRuntime, quitting = false, quitReady = false, shutdownPromise, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -63,7 +64,7 @@ function assertFrame(event, shellOnly = false) {
   return id;
 }
 function validateCall(method, args) { if (typeof method !== 'string' || method.length > 80 || (JSON.stringify(args) ?? '').length > 38_000_000) throw new Error('请求无效或过大。'); }
-function hideViews() { for (const v of views.values()) v.setVisible(false); visible = null; }
+function hideViews() { for (const v of views.values()) v.setVisible(false); browserRuntime?.hide(); visible = null; }
 async function closeView(id) {
   viewEpochs.set(id,(viewEpochs.get(id) ?? 0)+1);
   const view = views.get(id); if (view) { views.delete(id); if (!view.webContents.isDestroyed()) { view.webContents.send('commerce:dispose'); owners.delete(view.webContents.id); if (window && !window.isDestroyed()) window.contentView.removeChildView(view); view.webContents.close(); } }
@@ -303,7 +304,19 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     await shell.openExternal(args.url);
     return true;
   }
-  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], migration: await migration.status(manager) };
+  if (method === 'browser.status') return browserRuntime.status();
+  if (method === 'browser.open') { hideViews(); return browserRuntime.open(); }
+  if (method === 'browser.newTab') { hideViews(); return browserRuntime.newTab(args.url); }
+  if (method === 'browser.activate') { hideViews(); return browserRuntime.activate(args.id); }
+  if (method === 'browser.navigate') { hideViews(); return browserRuntime.navigate(args.id, args.url); }
+  if (method === 'browser.back') return browserRuntime.goBack();
+  if (method === 'browser.forward') return browserRuntime.goForward();
+  if (method === 'browser.reload') return browserRuntime.reload();
+  if (method === 'browser.closeTab') { if (browserRuntime.status().activeTabId === args.id) hideViews(); return browserRuntime.closeTab(args.id); }
+  if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
+  if (method === 'browser.hide') { browserRuntime.hide(); return; }
+  if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
+  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -370,6 +383,7 @@ async function shutdownRuntime() {
     approvals?.dispose();
     await batches?.shutdown();
     await proxy?.stop();
+    await browserRuntime?.shutdown();
     await Promise.all([...views.keys()].map(closeView));
     await workers.stopAll();
     host?.postMessage({ type: 'shutdown' });
@@ -487,6 +501,7 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
   await finalizePlugin(id, notify);
 }, changed);
 window = new BrowserWindow({ title: '轻作 · Qingzuo', width: 1380, height: 900, minWidth: 1000, minHeight: 680, icon: path.join(root, 'desktop/icons/icon.png'), webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+browserRuntime = new BrowserRuntime({ window, changed });
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
 window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
