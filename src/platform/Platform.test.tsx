@@ -206,6 +206,8 @@ it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import
     return baseImpl(method);
   });
   render(<Platform />);
+  fireEvent.click(await screen.findByRole('button', { name: '插件市场' }));
+  await screen.findByRole('heading', { name: '插件市场' });
   fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('插件包格式无效或文件未下载完整');
@@ -213,12 +215,13 @@ it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import
   expect(alert.textContent).not.toContain('ADM-ZIP');
 });
 
-it('renders topbar without breadcrumbs when no tabs are open, and renders integrated tabs when tools are opened', async () => {
+it('renders workspace tabs without a duplicate page title bar', async () => {
   const { invoke } = fixture(undefined, true, false, ['official.labeledit']);
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
 
   expect(document.querySelector('.commerce-breadcrumb')).toBeNull();
+  expect(document.querySelector('.commerce-topbar')).toBeNull();
 
   const tablist = screen.getByRole('tablist', { name: '已打开的工具' });
   expect(tablist).toBeTruthy();
@@ -261,6 +264,8 @@ it('shows feedback action on error alert and opens issue reporting dialog', asyn
     return baseImpl(method, args);
   });
   render(<Platform />);
+  fireEvent.click(await screen.findByRole('button', { name: '插件市场' }));
+  await screen.findByRole('heading', { name: '插件市场' });
   fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
   const feedbackBtn = await screen.findByRole('button', { name: '反馈此问题' });
   expect(feedbackBtn).toBeTruthy();

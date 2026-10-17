@@ -225,9 +225,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .connection-dot.connected { background: var(--primary); }
 .commerce-sidebar-footer small { grid-column: 2; font-size: 10px; }
 .commerce-main { min-width: 0; flex: 1; display: flex; flex-direction: column; }
-.commerce-topbar { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 12px; height: 44px; padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--background); }
-.commerce-topbar-start { display: flex; align-items: center; min-width: 0; flex: 1; }
-.commerce-topbar-title { font-size: 15px; font-weight: 600; color: var(--foreground); letter-spacing: -.2px; white-space: nowrap; }
 .commerce-content { flex: 1; min-height: 0; overflow: auto; padding: 28px 36px; }
 .commerce-content-inner { display: flex; flex-direction: column; gap: 18px; max-width: 1100px; margin-inline: auto; }
 .commerce-heading { padding: 0 0 2px; }
@@ -240,6 +237,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .workspace-feature button { height: 38px; padding-inline: 16px; gap: 8px; }
 .tool-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .tool-section-heading > div { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.commerce-page-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .tool-section-heading h2 { font-size: 16px; font-weight: 600; margin: 0; }
 .tool-section-heading span { color: var(--muted-foreground); font-size: 12px; }
 .commerce-search { max-width: 290px; min-width: 140px; background: var(--card); height: 36px; }
@@ -544,6 +542,10 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .browser-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; background: var(--background); }
 .browser-tabs { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 4px 14px 0; border-bottom: 1px solid var(--border); background: var(--card); overflow-x: auto; scrollbar-width: none; }
 .browser-tabs::-webkit-scrollbar { display: none; }
+.browser-tabs-windowbar { min-height: 34px; max-width: min(520px, 42vw); padding: 0; border: 0; background: transparent; -webkit-app-region: no-drag; }
+.browser-tabs-windowbar .browser-tab { height: 32px; max-width: 180px; border-bottom: 1px solid transparent; border-radius: 8px; }
+.browser-tabs-windowbar .browser-tab.is-active { border-color: var(--border); background: var(--card); }
+.browser-tabs-windowbar .browser-new-tab-button { width: 28px; height: 28px; }
 .browser-tab { display: inline-flex; align-items: center; gap: 7px; height: 34px; min-width: 0; max-width: 220px; padding: 0 6px 0 11px; border: 1px solid transparent; border-bottom: 0; border-radius: 9px 9px 0 0; color: var(--muted-foreground); background: transparent; cursor: pointer; flex-shrink: 0; outline: none; }
 .browser-tab:hover:not(.is-active) { background: color-mix(in srgb, var(--foreground) 6%, transparent); color: var(--foreground); }
 .browser-tab.is-active { color: var(--foreground); border-color: var(--border); background: var(--background); }
@@ -591,7 +593,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 @media (max-width: 1100px) {
   .commerce-sidebar { width: 182px; }
   .commerce-content { padding: 30px; }
-  .commerce-topbar { padding-inline: 30px; }
   .commerce-heading h1 { font-size: 28px; }
   .workspace-feature { gap: 16px; padding-inline: 0; }
   .workspace-feature h2 { font-size: 18px; }
@@ -614,7 +615,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .commerce-sidebar-footer { display: flex; justify-content: center; padding: 16px 0 0; }
   .commerce-sidebar-footer span:not(.connection-dot), .commerce-sidebar-footer small { display: none; }
   .commerce-content { padding: 26px 22px; }
-  .commerce-topbar { padding-inline: 22px; }
   .commerce-tool-tab { max-width: 140px; }
   .commerce-heading h1 { font-size: 25px; }
   .commerce-heading p { font-size: 12px; }
@@ -622,6 +622,8 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .workspace-feature img { height: 160px; }
   .workspace-feature > div { text-align: center; }
   .tool-section-heading { flex-wrap: wrap; gap: 14px; }
+  .commerce-page-actions { width: 100%; justify-content: stretch; }
+  .commerce-page-actions .commerce-search { flex: 1; }
   .commerce-search { max-width: none; }
   .market-grid { grid-template-columns: 1fr; }
   .plugin-row { grid-template-columns: 1fr; }
@@ -631,7 +633,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 @media (max-width: 420px) {
   .commerce-windowbar { height: 46px; padding-inline: 66px 8px; }
   .commerce-sidebar { width: 58px; padding-inline: 6px; }
-  .commerce-topbar { padding-inline: 14px; height: 50px; }
   .commerce-tool-tab { max-width: 120px; font-size: 12px; padding: 0 4px 0 8px; }
   .commerce-tool-tab-shell { padding: 0 10px; }
   .commerce-content { padding: 24px 16px; }
