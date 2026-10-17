@@ -36,7 +36,7 @@ interface ComponentUpdateState {
   error?: string | null;
 }
 interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
-const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
+const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'browser', title: '浏览器', icon: Globe }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
 const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
 const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
@@ -269,71 +269,41 @@ export default function Platform() {
     try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
     return next;
   });
+  const renderWorkspaceTabs = () => (status?.tabs.length || status?.browser?.open) ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
+    <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate('home')}>
+      <Boxes className="commerce-tab-icon" /><span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
+    </button>
+    {status.browser?.open ? <div role="tab" tabIndex={0} aria-selected={browserPage} className={cn('commerce-tool-tab', browserPage && 'is-active')} onClick={() => void navigate('browser')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void navigate('browser'); } }}>
+      <Globe className="commerce-tab-icon" /><span className="commerce-tab-title">浏览器</span>
+      <button type="button" className="commerce-tab-close" aria-label="关闭浏览器" title="关闭" onClick={e => { e.stopPropagation(); void run('browser.closeWorkspace').then(() => { if (browserPage) setPage('home'); }).catch(() => {}); }}><X /></button>
+    </div> : null}
+    {status.tabs.map(id => {
+      const TabIcon = tabIconFor(id); const toolTitle = plugins.find(p => p.id === id)?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
+      return <div key={id} role="tab" tabIndex={0} aria-selected={isActive} className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')} onClick={() => { if (!isInstalling) void navigate(id); }} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}>
+        <TabIcon className="commerce-tab-icon" /><span className="commerce-tab-title">{toolTitle}</span>
+        <button type="button" className="commerce-tab-close" aria-label="关闭工具" title="关闭" disabled={isInstalling} onClick={e => { e.stopPropagation(); void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {}); }}><X /></button>
+      </div>;
+    })}
+  </div> : <span className="commerce-windowbar-context">{title}</span>;
   return <div className="commerce-shell">
-    <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
-      <div className="commerce-sidebar-head">
-        <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-      </div>
-      <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
-      <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
-    </aside>
-    <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
+    <div className="commerce-windowbar">
+      <div className="commerce-windowbar-title"><img src={brandIcon} alt="" /><span>轻作 · Qingzuo</span></div>
+      <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+      {renderWorkspaceTabs()}
+      <div className="commerce-windowbar-drag" aria-hidden="true" />
+    </div>
+    <div className="commerce-body">
+      <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
+        <div className="commerce-sidebar-head">
+          <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
+        </div>
+        <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
+        <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
+      </aside>
+      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
       {page !== 'chat' ? <header className="commerce-topbar">
         <div className="commerce-topbar-start">
-          <Button variant="ghost" size="icon-sm" className="commerce-topbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
-          {(status?.tabs.length || status?.browser?.open) ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={shellPage}
-              className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')}
-              onClick={() => void navigate('home')}
-            >
-              <Boxes className="commerce-tab-icon" />
-              <span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
-            </button>
-            {status.browser?.open ? <div
-              role="tab"
-              tabIndex={0}
-              aria-selected={browserPage}
-              className={cn('commerce-tool-tab', browserPage && 'is-active')}
-              onClick={() => void navigate('browser')}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void navigate('browser'); } }}
-            >
-              <Globe className="commerce-tab-icon" />
-              <span className="commerce-tab-title">浏览器</span>
-              <button type="button" className="commerce-tab-close" aria-label="关闭浏览器" title="关闭" onClick={e => { e.stopPropagation(); void run('browser.closeWorkspace').then(() => { if (browserPage) setPage('home'); }).catch(() => {}); }}><X /></button>
-            </div> : null}
-            {status.tabs.map(id => {
-              const TabIcon = tabIconFor(id);
-              const toolTitle = plugins.find(p => p.id === id)?.title ?? id;
-              const isInstalling = pluginInstallActive(installFor(id));
-              const isActive = page === id;
-              return <div
-                key={id}
-                role="tab"
-                tabIndex={0}
-                aria-selected={isActive}
-                className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')}
-                onClick={() => { if (!isInstalling) void navigate(id); }}
-                onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}
-              >
-                <TabIcon className="commerce-tab-icon" />
-                <span className="commerce-tab-title">{toolTitle}</span>
-                <button
-                  type="button"
-                  className="commerce-tab-close"
-                  aria-label="关闭工具"
-                  title="关闭"
-                  disabled={isInstalling}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {});
-                  }}
-                ><X /></button>
-              </div>;
-            })}
-          </div> : <span className="commerce-topbar-title">{title}</span>}
+          <span className="commerce-topbar-title">{title}</span>
         </div>
         <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button>
       </header> : null}
@@ -442,6 +412,7 @@ export default function Platform() {
           plugins: status?.plugins.map(p => ({ id: p.id, version: p.version, title: p.title })),
         }}
       />
+      </div>
     </div>
   </div>;
 }
