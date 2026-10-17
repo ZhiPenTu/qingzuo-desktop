@@ -37,7 +37,8 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
     await page.evaluate(async address => { await window.commerceDesktop.invoke('ai.configure', { mode: 'external', address, apiKey: 'fixture', model: 'fixture-tool-model' }); await window.commerceDesktop.invoke('ai.verify'); }, 'http://127.0.0.1:' + server.address().port);
-    await page.getByRole('button', { name: 'AI 设置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await page.getByRole('button', { name: '打开 AI 设置', exact: true }).click();
     await expect(page.getByLabel('配置概览', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
