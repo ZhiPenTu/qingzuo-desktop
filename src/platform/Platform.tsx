@@ -273,7 +273,6 @@ export default function Platform() {
     <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
       <div className="commerce-sidebar-head">
         <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-        <Button variant="ghost" size="icon-sm" className="commerce-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
       </div>
       <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
       <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
@@ -281,6 +280,7 @@ export default function Platform() {
     <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
       {page !== 'chat' ? <header className="commerce-topbar">
         <div className="commerce-topbar-start">
+          <Button variant="ghost" size="icon-sm" className="commerce-topbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
           {(status?.tabs.length || status?.browser?.open) ? <div className="commerce-tool-tabs" role="tablist" aria-label="已打开的工具">
             <button
               type="button"

@@ -45,7 +45,7 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); delete window.commerceDesktop; });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.removeItem('qingzuo.sidebarCollapsed'); delete window.commerceDesktop; });
 
 it('keeps backend progress after acknowledgment, restores it across pages, and completes on the installed state', async () => {
   const { invoke, emit } = fixture();
@@ -236,6 +236,21 @@ it('renders topbar without breadcrumbs when no tabs are open, and renders integr
   const closeBtn = screen.getByRole('button', { name: '关闭工具' });
   fireEvent.click(closeBtn);
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'view.close')).toHaveLength(1));
+});
+
+it('keeps the sidebar toggle in the topbar and switches its accessible state', async () => {
+  fixture();
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+
+  const collapseButton = screen.getByRole('button', { name: '收起侧边栏', exact: true });
+  expect(collapseButton.closest('aside')).toBeNull();
+  expect(collapseButton.closest('header')).toBeTruthy();
+
+  fireEvent.click(collapseButton);
+  const expandButton = await screen.findByRole('button', { name: '展开侧边栏', exact: true });
+  expect(expandButton.closest('header')).toBeTruthy();
+  expect(expandButton.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('shows feedback action on error alert and opens issue reporting dialog', async () => {
