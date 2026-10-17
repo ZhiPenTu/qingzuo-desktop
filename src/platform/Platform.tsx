@@ -11,7 +11,7 @@ import { PluginCard, pluginInstallActive, toolCategory, type Plugin, type ToolEn
 import gt from 'semver/functions/gt';
 import type { DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
-import { BrowserWorkspace } from './BrowserWorkspace';
+import { BrowserTabStrip, BrowserWorkspace } from './BrowserWorkspace';
 import { IssueReportDialog } from './IssueReportDialog';
 import { recordError, getLatestError, type CapturedError } from './error-tracker';
 import { useTheme } from '../theme/ThemeProvider';
@@ -290,6 +290,7 @@ export default function Platform() {
       <div className="commerce-windowbar-title"><img src={brandIcon} alt="" /><span>轻作 · Qingzuo</span></div>
       <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
       {renderWorkspaceTabs()}
+      {browserPage && status?.browser?.open ? <BrowserTabStrip embedded status={status.browser} busy={busy} onAction={run} /> : null}
       <div className="commerce-windowbar-drag" aria-hidden="true" />
     </div>
     <div className="commerce-body">
@@ -301,12 +302,6 @@ export default function Platform() {
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
       <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
-      {page !== 'chat' ? <header className="commerce-topbar">
-        <div className="commerce-topbar-start">
-          <span className="commerce-topbar-title">{title}</span>
-        </div>
-        <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button>
-      </header> : null}
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{error}</span><Button variant="outline" size="sm" onClick={() => openIssueReport(error, '平台操作')}>反馈此问题</Button></AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
         LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy || migrationRunning} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" disabled={busy || migrationRunning} onClick={() => act('migration.dismiss')}>稍后从市场安装</Button>
@@ -322,7 +317,7 @@ export default function Platform() {
         <div className="commerce-heading"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
         {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><div className="workspace-feature-actions"><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button><Button variant="outline" onClick={() => void navigate('browser')}><Globe data-icon="inline-start" />打开浏览器</Button></div></div></section> : null}
         {['home', 'market', 'plugins'].includes(page) ? <>
-          <div className="tool-section-heading"><div><h2>{page === 'home' ? '我的工具' : title}</h2><span>{entries.length} 款工具</span></div><InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup></div>
+          <div className="tool-section-heading"><div><h2>{page === 'home' ? '我的工具' : title}</h2><span>{entries.length} 款工具</span></div><div className="commerce-page-actions"><InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup>{page === 'market' ? <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button> : null}</div></div>
           {page === 'plugins' ? <div className="plugin-check-toolbar" role="status">
             <div><strong>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</strong>{marketCheckedAt ? <span>上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}</div>
             <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
@@ -399,7 +394,7 @@ export default function Platform() {
               </div>
             </CardContent>
           </Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
-      </div></main> : browserPage ? <BrowserWorkspace status={status.browser ?? { open: false, activeTabId: null, tabs: [] }} busy={busy} onAction={run} /> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
+      </div></main> : browserPage ? <BrowserWorkspace showTabs={false} status={status.browser ?? { open: false, activeTabId: null, tabs: [] }} busy={busy} onAction={run} /> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       <IssueReportDialog
         open={issueDialogOpen}
         onClose={() => setIssueDialogOpen(false)}
