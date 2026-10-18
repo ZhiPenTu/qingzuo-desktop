@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell, screen } from 'electron';
+import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -39,7 +39,6 @@ let window, manager, workers, files, credentials, network, host, browserRuntime,
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
-let browserResizeTimer = null;
 let browserResizeState = null;
 let updateService, pluginInstallService;
 let localPreview = false;
@@ -49,31 +48,26 @@ const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') 
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
 function stopBrowserResize() {
-  if (browserResizeTimer) clearInterval(browserResizeTimer);
-  browserResizeTimer = null;
   browserResizeState = null;
+}
+function updateBrowserResize(currentX) {
+  if (!browserResizeState || !Number.isFinite(currentX) || !window || window.isDestroyed()) return;
+  const { startX, startWidth, minWidth, maxWidth } = browserResizeState;
+  const width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth - (currentX - startX))));
+  window.webContents.send('commerce:browser-resize', { width });
 }
 function startBrowserResize(args = {}) {
   stopBrowserResize();
   if (!window || window.isDestroyed()) return;
   const values = ['startX', 'startWidth', 'minWidth', 'maxWidth'];
   if (!values.every(key => Number.isFinite(args[key]))) return;
-  const content = window.getContentBounds();
   browserResizeState = {
-    startScreenX: content.x + args.startX,
+    startX: args.startX,
     startWidth: args.startWidth,
     minWidth: args.minWidth,
     maxWidth: Math.max(args.minWidth, args.maxWidth),
   };
-  const update = () => {
-    if (!browserResizeState || !window || window.isDestroyed()) return stopBrowserResize();
-    const cursor = screen.getCursorScreenPoint();
-    const { startScreenX, startWidth, minWidth, maxWidth } = browserResizeState;
-    const width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth - (cursor.x - startScreenX))));
-    window.webContents.send('commerce:browser-resize', { width });
-  };
-  update();
-  browserResizeTimer = setInterval(update, 16);
+  updateBrowserResize(args.startX);
 }
 function aiChanged(id, event) { if (isHostChat(id)) { if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) }); return; } const view = views.get(id); if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event); }
 async function stopPlugin(id) {
@@ -187,7 +181,10 @@ async function loadView(id, settings, epoch) {
     view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
     view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
     view.webContents.on('will-attach-webview', event => event.preventDefault());
-    view.webContents.on('input-event', (_event, input) => { if (input.type === 'mouseUp') stopBrowserResize(); });
+    view.webContents.on('input-event', (_event, input) => {
+      if (input.type === 'mouseUp') stopBrowserResize();
+      else if (input.type === 'mouseMove') updateBrowserResize(view.getBounds().x + input.x);
+    });
     view.webContents.on('did-fail-load', (_event, code, description) => console.error('Plugin view failed:', id, code, description));
     view.webContents.on('render-process-gone', (_event, details) => console.error('Plugin renderer gone:', id, details));
     // Create the native view with a real viewport before navigation. Inactive
@@ -351,6 +348,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'browser.closeTab') return browserRuntime.closeTab(args.id);
   if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
   if (method === 'browser.resize.start') { startBrowserResize(args); return; }
+  if (method === 'browser.resize.move') { updateBrowserResize(args.x); return; }
   if (method === 'browser.resize.stop') { stopBrowserResize(); return; }
   if (method === 'browser.hide') { stopBrowserResize(); browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
@@ -546,7 +544,7 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed, resizeStop: stopBrowserResize });
+browserRuntime = new BrowserRuntime({ window, changed, resizeStop: stopBrowserResize, resizeMove: updateBrowserResize });
 window.on('blur', stopBrowserResize);
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });

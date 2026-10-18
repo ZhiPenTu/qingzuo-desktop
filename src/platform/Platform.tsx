@@ -252,6 +252,7 @@ export default function Platform() {
     const resize = browserResizeRef.current;
     if (!resize) return;
     setBrowserPaneWidthWithinBounds(resize.startWidth - (event.clientX - resize.startX));
+    void window.commerceDesktop?.invoke('browser.resize.move', { x: event.clientX });
     event.preventDefault();
   };
   const endBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
