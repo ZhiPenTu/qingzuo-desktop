@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -39,6 +39,8 @@ let window, manager, workers, files, credentials, network, host, browserRuntime,
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
+let browserResizeTimer = null;
+let browserResizeState = null;
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
@@ -46,6 +48,33 @@ let batches, proxy, imageEditor, approvals, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function stopBrowserResize() {
+  if (browserResizeTimer) clearInterval(browserResizeTimer);
+  browserResizeTimer = null;
+  browserResizeState = null;
+}
+function startBrowserResize(args = {}) {
+  stopBrowserResize();
+  if (!window || window.isDestroyed()) return;
+  const values = ['startX', 'startWidth', 'minWidth', 'maxWidth'];
+  if (!values.every(key => Number.isFinite(args[key]))) return;
+  const content = window.getContentBounds();
+  browserResizeState = {
+    startScreenX: content.x + args.startX,
+    startWidth: args.startWidth,
+    minWidth: args.minWidth,
+    maxWidth: Math.max(args.minWidth, args.maxWidth),
+  };
+  const update = () => {
+    if (!browserResizeState || !window || window.isDestroyed()) return stopBrowserResize();
+    const cursor = screen.getCursorScreenPoint();
+    const { startScreenX, startWidth, minWidth, maxWidth } = browserResizeState;
+    const width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth - (cursor.x - startScreenX))));
+    window.webContents.send('commerce:browser-resize', { width });
+  };
+  update();
+  browserResizeTimer = setInterval(update, 16);
+}
 function aiChanged(id, event) { if (isHostChat(id)) { if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) }); return; } const view = views.get(id); if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event); }
 async function stopPlugin(id) {
   approvals?.cancelPlugin(id);
@@ -158,6 +187,7 @@ async function loadView(id, settings, epoch) {
     view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
     view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
     view.webContents.on('will-attach-webview', event => event.preventDefault());
+    view.webContents.on('input-event', (_event, input) => { if (input.type === 'mouseUp') stopBrowserResize(); });
     view.webContents.on('did-fail-load', (_event, code, description) => console.error('Plugin view failed:', id, code, description));
     view.webContents.on('render-process-gone', (_event, details) => console.error('Plugin renderer gone:', id, details));
     // Create the native view with a real viewport before navigation. Inactive
@@ -320,13 +350,15 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'browser.reload') return browserRuntime.reload();
   if (method === 'browser.closeTab') return browserRuntime.closeTab(args.id);
   if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
-  if (method === 'browser.hide') { browserRuntime.hide(); return; }
+  if (method === 'browser.resize.start') { startBrowserResize(args); return; }
+  if (method === 'browser.resize.stop') { stopBrowserResize(); return; }
+  if (method === 'browser.hide') { stopBrowserResize(); browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
   if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
-  if (method === 'view.hide') { hidePluginViews(); return; }
+  if (method === 'view.hide') { stopBrowserResize(); hidePluginViews(); return; }
   if (method === 'view.close') { await closeView(args.id); changed(); return; }
   if (method === 'view.bounds') { const view = views.get(visible); if (view) { const {width,height} = window.getContentBounds(); if (['x','y','width','height'].every(k => Number.isFinite(args[k]) && args[k] >= 0) && args.x+args.width <= width+2 && args.y+args.height <= height+2) { view.setBounds(Object.fromEntries(['x','y','width','height'].map(k => [k,Math.floor(args[k])]))); view.setVisible(true); } } return; }
   const service = method.split('.')[0];
@@ -385,6 +417,7 @@ async function shutdownRuntime() {
   if (shutdownPromise) return shutdownPromise;
   quitting = true;
   shutdownPromise = (async () => {
+    stopBrowserResize();
     await pluginInstallService?.shutdown();
     approvals?.dispose();
     await batches?.shutdown();
@@ -513,7 +546,8 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed });
+browserRuntime = new BrowserRuntime({ window, changed, resizeStop: stopBrowserResize });
+window.on('blur', stopBrowserResize);
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
 window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });

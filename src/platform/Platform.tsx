@@ -102,6 +102,7 @@ export default function Platform() {
   };
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
+  useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => { if (Number.isFinite(width)) setBrowserPaneWidth(width); }), []);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {
@@ -239,8 +240,11 @@ export default function Platform() {
   };
   const beginBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-    browserResizeRef.current = { startX: event.clientX, startWidth: currentBrowserPaneWidth(), pointerId: event.pointerId };
+    const startWidth = currentBrowserPaneWidth();
+    const limits = browserPaneLimits();
+    browserResizeRef.current = { startX: event.clientX, startWidth, pointerId: event.pointerId };
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    void window.commerceDesktop?.invoke('browser.resize.start', { startX: event.clientX, startWidth, minWidth: limits.min, maxWidth: limits.max });
     setBrowserPaneResizing(true);
     event.preventDefault();
   };
@@ -255,6 +259,7 @@ export default function Platform() {
     if (!resize) return;
     browserResizeRef.current = null;
     if (event.currentTarget.hasPointerCapture?.(resize.pointerId)) event.currentTarget.releasePointerCapture?.(resize.pointerId);
+    void window.commerceDesktop?.invoke('browser.resize.stop');
     setBrowserPaneResizing(false);
   };
   const handleBrowserResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {

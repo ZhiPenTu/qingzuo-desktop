@@ -19,9 +19,10 @@ function publicTab(tab) {
 }
 
 export class BrowserRuntime {
-  constructor({ window, changed }) {
+  constructor({ window, changed, resizeStop = () => {} }) {
     this.window = window;
     this.changed = changed;
+    this.resizeStop = resizeStop;
     this.browserSession = null;
     this.tabs = new Map();
     this.activeTabId = null;
@@ -93,6 +94,7 @@ export class BrowserRuntime {
     view.webContents.on('did-navigate', () => { this.updateTab(tab); this.changed(); });
     view.webContents.on('did-navigate-in-page', () => { this.updateTab(tab); this.changed(); });
     view.webContents.on('page-title-updated', (_event, title) => { tab.title = title || tab.url || '新标签页'; this.changed(); });
+    view.webContents.on('input-event', (_event, input) => { if (input.type === 'mouseUp') this.resizeStop(); });
     view.webContents.on('render-process-gone', (_event, details) => { tab.loading = false; console.error('Browser renderer gone:', tab.id, details); this.changed(); });
     this.window.contentView.addChildView(view);
     tab.view = view;
