@@ -20,7 +20,7 @@ async function browserPage(app, url) {
   return app.context().pages().find(candidate => candidate.url() === url);
 }
 
-test('opens an Electron browser tool tab, navigates multiple pages, and preserves browser storage', async () => {
+test('opens an Electron browser pane, navigates multiple pages, and preserves browser storage', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-browser-'));
   const fixture = await fixtureServer();
   let app;
@@ -31,6 +31,16 @@ test('opens an Electron browser tool tab, navigates multiple pages, and preserve
     await expect(shell.getByText('工具服务已就绪', { exact: true })).toBeVisible();
     await shell.getByRole('button', { name: '打开浏览器', exact: true }).click();
     await expect(shell.getByRole('tablist', { name: '浏览器标签页', exact: true })).toBeVisible();
+    await expect(shell.locator('.commerce-browser-pane [role="tablist"]')).toHaveCount(0);
+    await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
+    await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
+    await shell.getByRole('button', { name: '收起侧边栏', exact: true }).click();
+    await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(1);
+    await shell.getByRole('button', { name: '隐藏浏览器面板', exact: true }).click();
+    await expect(shell.locator('.commerce-browser-pane')).toHaveCount(0);
+    await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
+    await shell.getByRole('button', { name: '打开浏览器面板', exact: true }).click();
+    await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
 
     let browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
     const first = browser.tabs[0].id;
