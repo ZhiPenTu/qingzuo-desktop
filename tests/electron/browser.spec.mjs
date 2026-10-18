@@ -36,6 +36,8 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
     await shell.getByRole('button', { name: '收起侧边栏', exact: true }).click();
     await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(1);
+    await shell.getByRole('button', { name: '展开侧边栏', exact: true }).click();
+    await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(0);
     await shell.getByRole('button', { name: '隐藏浏览器面板', exact: true }).click();
     await expect(shell.locator('.commerce-browser-pane')).toHaveCount(0);
     await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
