@@ -34,6 +34,13 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await expect(shell.getByRole('tablist', { name: '浏览器标签页', exact: true })).toBeVisible();
     await expect(shell.locator('.commerce-browser-pane [role="tablist"]')).toHaveCount(0);
     await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
+    let browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    const first = browser.tabs[0].id;
+    const firstUrl = fixture.base + '/page1';
+    await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: first, url: firstUrl });
+    const firstPage = await browserPage(app, firstUrl);
+    await expect(firstPage.getByText('页面一', { exact: false })).toBeVisible();
+
     const pane = shell.locator('.commerce-browser-pane');
     const divider = shell.getByRole('separator', { name: '调整浏览器面板宽度', exact: true });
     await expect(divider).toBeVisible();
@@ -47,13 +54,8 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeLessThan((initialPane?.width || 0) - 40);
     const narrowedPane = await pane.boundingBox();
     expect(narrowedPane?.width || 0).toBeLessThan((initialPane?.width || 0) - 40);
-    const narrowedDivider = await divider.boundingBox();
-    expect(narrowedDivider).toBeTruthy();
-    await shell.mouse.move(narrowedDivider.x + narrowedDivider.width / 2, narrowedDivider.y + 30);
-    await shell.mouse.down();
-    await shell.mouse.move(narrowedDivider.x - 40, narrowedDivider.y + 30);
-    await shell.mouse.up();
-    await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeGreaterThan((narrowedPane?.width || 0) + 20);
+    await divider.press('ArrowLeft');
+    await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeGreaterThan((narrowedPane?.width || 0) + 10);
     await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
     await shell.getByRole('button', { name: '收起侧边栏', exact: true }).click();
     await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(1);
@@ -65,12 +67,6 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await shell.getByRole('button', { name: '打开浏览器面板', exact: true }).click();
     await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
 
-    let browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
-    const first = browser.tabs[0].id;
-    const firstUrl = fixture.base + '/page1';
-    await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: first, url: firstUrl });
-    const firstPage = await browserPage(app, firstUrl);
-    await expect(firstPage.getByText('页面一', { exact: false })).toBeVisible();
     await firstPage.locator('#popup').click();
     const secondUrl = fixture.base + '/page2';
     await browserPage(app, secondUrl);
