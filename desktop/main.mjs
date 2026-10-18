@@ -64,7 +64,7 @@ function assertFrame(event, shellOnly = false) {
   return id;
 }
 function validateCall(method, args) { if (typeof method !== 'string' || method.length > 80 || (JSON.stringify(args) ?? '').length > 38_000_000) throw new Error('请求无效或过大。'); }
-function hideViews() { for (const v of views.values()) v.setVisible(false); browserRuntime?.hide(); visible = null; }
+function hidePluginViews() { for (const v of views.values()) v.setVisible(false); visible = null; }
 async function closeView(id) {
   viewEpochs.set(id,(viewEpochs.get(id) ?? 0)+1);
   const view = views.get(id); if (view) { views.delete(id); if (!view.webContents.isDestroyed()) { view.webContents.send('commerce:dispose'); owners.delete(view.webContents.id); if (window && !window.isDestroyed()) window.contentView.removeChildView(view); view.webContents.close(); } }
@@ -105,6 +105,7 @@ async function loadView(id, settings, epoch) {
   const plugin = await manager.get(id); if (!plugin.enabled || plugin.missing.length) throw new Error('插件已停用或缺少依赖。');
   pluginInstallService.assertAvailable(id);
   assertViewEpoch(id,epoch);
+  const existingView = views.get(id);
   if (!views.has(id)) {
     let ses = pluginSessions.get(id);
     if (!ses) {
@@ -171,7 +172,12 @@ async function loadView(id, settings, epoch) {
   assertViewEpoch(id,epoch);
   const destination = 'commerce-plugin://' + id + '/' + (settings ? plugin.settings?.entry || plugin.ui : plugin.ui);
   if (views.get(id).webContents.getURL() !== destination) await views.get(id).webContents.loadURL(destination);
-  hideViews(); visible = id; return sanitizePlugin(plugin);
+  hidePluginViews(); visible = id;
+  // Selecting an already-open tool tab while the browser pane stays mounted
+  // may not trigger a new renderer resize. Reveal its existing native surface
+  // immediately instead of leaving the tool area blank.
+  if (existingView && !existingView.webContents.isDestroyed()) existingView.setVisible(true);
+  return sanitizePlugin(plugin);
 }
 function kernelRequest(message, timeout = 30000) {
   if (!host || systems.length !== 7) return Promise.reject(new Error('工具服务不可用，请重新启动。'));
@@ -305,14 +311,14 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     return true;
   }
   if (method === 'browser.status') return browserRuntime.status();
-  if (method === 'browser.open') { hideViews(); return browserRuntime.open(); }
-  if (method === 'browser.newTab') { hideViews(); return browserRuntime.newTab(args.url); }
-  if (method === 'browser.activate') { hideViews(); return browserRuntime.activate(args.id); }
-  if (method === 'browser.navigate') { hideViews(); return browserRuntime.navigate(args.id, args.url); }
+  if (method === 'browser.open') return browserRuntime.open();
+  if (method === 'browser.newTab') return browserRuntime.newTab(args.url);
+  if (method === 'browser.activate') return browserRuntime.activate(args.id);
+  if (method === 'browser.navigate') return browserRuntime.navigate(args.id, args.url);
   if (method === 'browser.back') return browserRuntime.goBack();
   if (method === 'browser.forward') return browserRuntime.goForward();
   if (method === 'browser.reload') return browserRuntime.reload();
-  if (method === 'browser.closeTab') { if (browserRuntime.status().activeTabId === args.id) hideViews(); return browserRuntime.closeTab(args.id); }
+  if (method === 'browser.closeTab') return browserRuntime.closeTab(args.id);
   if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
   if (method === 'browser.hide') { browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
@@ -320,7 +326,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
-  if (method === 'view.hide') { hideViews(); return; }
+  if (method === 'view.hide') { hidePluginViews(); return; }
   if (method === 'view.close') { await closeView(args.id); changed(); return; }
   if (method === 'view.bounds') { const view = views.get(visible); if (view) { const {width,height} = window.getContentBounds(); if (['x','y','width','height'].every(k => Number.isFinite(args[k]) && args[k] >= 0) && args.x+args.width <= width+2 && args.y+args.height <= height+2) { view.setBounds(Object.fromEntries(['x','y','width','height'].map(k => [k,Math.floor(args[k])]))); view.setVisible(true); } } return; }
   const service = method.split('.')[0];

@@ -1,5 +1,6 @@
 import { test, expect, _electron } from '@playwright/test';
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,6 +34,17 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await expect(shell.getByRole('tablist', { name: '浏览器标签页', exact: true })).toBeVisible();
     await expect(shell.locator('.commerce-browser-pane [role="tablist"]')).toHaveCount(0);
     await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
+    const pane = shell.locator('.commerce-browser-pane');
+    const divider = shell.getByRole('separator', { name: '调整浏览器面板宽度', exact: true });
+    await expect(divider).toBeVisible();
+    const initialPane = await pane.boundingBox();
+    const dividerBox = await divider.boundingBox();
+    expect(initialPane).toBeTruthy(); expect(dividerBox).toBeTruthy();
+    await shell.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + 30);
+    await shell.mouse.down();
+    await shell.mouse.move(dividerBox.x - 120, dividerBox.y + 30);
+    await shell.mouse.up();
+    await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeGreaterThan((initialPane?.width || 0) + 80);
     await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
     await shell.getByRole('button', { name: '收起侧边栏', exact: true }).click();
     await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(1);
@@ -88,3 +100,52 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
   }
 });
 
+test('keeps the tool and browser surfaces visible while switching between them', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-switch-'));
+  const fixture = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><title>Browser fixture</title><main>Browser fixture content</main>');
+  });
+  await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
+  const fixtureUrl = `http://127.0.0.1:${fixture.address().port}/`;
+  let app;
+  const visibleViews = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children.map(view => ({ visible: view.getVisible?.(), url: view.webContents?.getURL?.() })));
+  try {
+    const cli = path.resolve('packages/plugin-sdk/cli.mjs');
+    execFileSync(process.execPath, [cli, 'create', 'fixture-native', '--native'], { cwd: temporary });
+    const artifact = path.join(temporary, 'fixture.ecplugin');
+    execFileSync(process.execPath, [cli, 'pack', path.join(temporary, 'fixture-native'), artifact]);
+    app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
+    const shell = await app.firstWindow();
+    await expect(shell.getByText('工具服务已就绪', { exact: true })).toBeVisible();
+    await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
+    await shell.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
+    await shell.getByRole('button', { name: '工具中心', exact: true }).click();
+    await shell.getByRole('button', { name: '打开工具', exact: true }).click();
+    await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://local.fixture-native/'))).toBe(true);
+
+    await shell.getByRole('button', { name: '打开浏览器面板', exact: true }).click();
+    await expect(shell.locator('.commerce-browser-pane')).toBeVisible();
+    const browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: browser.tabs[0].id, url: fixtureUrl });
+    const browserContent = await browserPage(app, fixtureUrl);
+    await expect(browserContent.getByText('Browser fixture content', { exact: true })).toBeVisible();
+
+    const assertBothViewsVisible = async () => {
+      const views = await visibleViews();
+      expect(views.filter(view => view.visible)).toHaveLength(2);
+      expect(views.some(view => view.url?.startsWith('commerce-plugin://local.fixture-native/'))).toBe(true);
+      expect(views.some(view => view.url === fixtureUrl)).toBe(true);
+    };
+    await assertBothViewsVisible();
+    await shell.getByRole('tab', { name: /fixture-native/ }).click();
+    await assertBothViewsVisible();
+    await shell.getByRole('tab', { name: /Browser fixture/ }).click();
+    await assertBothViewsVisible();
+  } finally {
+    await app?.close();
+    fixture.closeAllConnections();
+    await new Promise(resolve => fixture.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
