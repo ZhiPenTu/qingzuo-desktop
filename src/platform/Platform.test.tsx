@@ -2,20 +2,20 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, expect, it, vi } from 'vitest';
 import Platform from './Platform';
 import type { Plugin, ToolEntry } from './PluginCard';
-import type { PluginInstallState } from './commerce';
+import type { BrowserStatus, PluginInstallState } from './commerce';
 
 vi.mock('../theme/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
 const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', category: '标签与文档', version: '0.2.0' };
 const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
-function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = []) {
+function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus) {
   let listener = () => {};
   let plugins = hasPlugin ? [installed] : [];
   let pluginInstalls = initialJob ? [initialJob] : [];
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
   const invoke = vi.fn(async (method: string, args?: unknown) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, ...(browser ? { browser } : {}), update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
     if (method === 'downloadSource.set') {
       const next = (args as { source: string }).source;
       downloadSource = { ...downloadSource, source: next, notice: null };
@@ -254,6 +254,29 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
   const expandButton = await screen.findByRole('button', { name: '展开侧边栏' });
   expect(expandButton.closest('.commerce-windowbar')).toBeTruthy();
   expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+});
+
+it('opens the browser in a right-side pane with independent left and right controls', async () => {
+  const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+  const { invoke } = fixture(undefined, true, false, [], browser);
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+
+  fireEvent.click(screen.getByRole('button', { name: '打开浏览器面板' }));
+  await screen.findByRole('tablist', { name: '浏览器标签页' });
+  const sidebar = document.querySelector('.commerce-sidebar');
+  expect(sidebar).toBeTruthy();
+  expect(document.querySelector('.commerce-browser-pane')).toBeTruthy();
+  expect(screen.queryByRole('tablist', { name: '已打开的工具' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }));
+  expect(sidebar?.classList.contains('is-collapsed')).toBe(true);
+
+  fireEvent.click(screen.getByRole('button', { name: '隐藏浏览器面板' }));
+  await screen.findByRole('heading', { name: '让日常工作，轻一点。' });
+  expect(document.querySelector('.commerce-sidebar')).toBeTruthy();
+  expect(invoke.mock.calls.some(([method]) => method === 'browser.open')).toBe(true);
+  expect(invoke.mock.calls.some(([method]) => method === 'browser.hide')).toBe(true);
 });
 
 it('shows feedback action on error alert and opens issue reporting dialog', async () => {

@@ -189,7 +189,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 
 /* Qingzuo: the workspace and its tools share one quiet, readable system. */
 .commerce-shell { display: flex; flex-direction: column; height: 100dvh; color: var(--foreground); background: var(--background); }
-.commerce-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.commerce-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
 .commerce-windowbar { position: relative; z-index: 20; display: flex; align-items: center; gap: 14px; height: 52px; flex-shrink: 0; padding: 0 18px 0 88px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--background) 96%, var(--card)); -webkit-app-region: drag; user-select: none; }
 .commerce-windowbar-title { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--foreground); font-size: 13px; font-weight: 600; letter-spacing: -.1px; -webkit-app-region: no-drag; }
 .commerce-windowbar-title img { width: 25px; height: 25px; border-radius: 6px; }
@@ -207,6 +207,11 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-brand span { display: block; margin-top: 1px; font-size: 10px; letter-spacing: 1.6px; color: var(--muted-foreground); }
 .commerce-windowbar-sidebar-toggle { flex-shrink: 0; color: var(--muted-foreground); -webkit-app-region: no-drag; }
 .commerce-windowbar-sidebar-toggle svg { width: 16px; height: 16px; }
+.commerce-windowbar-browser-toggle { flex-shrink: 0; color: var(--muted-foreground); -webkit-app-region: no-drag; }
+.commerce-windowbar-browser-toggle svg { width: 17px; height: 17px; }
+.commerce-browser-pane { display: flex; flex: 0 0 min(720px, 48vw); min-width: 360px; min-height: 0; flex-direction: column; border-left: 1px solid var(--border); background: var(--background); box-shadow: -12px 0 28px color-mix(in srgb, var(--foreground) 7%, transparent); animation: browser-pane-in .18s ease-out; }
+.commerce-browser-pane .browser-workspace { min-width: 0; }
+@keyframes browser-pane-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 .commerce-sidebar.is-collapsed { width: 72px; padding-inline: 10px; }
 .commerce-sidebar.is-collapsed .commerce-sidebar-head { display: block; padding: 0 0 26px; }
 .commerce-sidebar.is-collapsed .commerce-brand { justify-content: center; }
@@ -615,6 +620,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .commerce-sidebar-footer { display: flex; justify-content: center; padding: 16px 0 0; }
   .commerce-sidebar-footer span:not(.connection-dot), .commerce-sidebar-footer small { display: none; }
   .commerce-content { padding: 26px 22px; }
+  .commerce-browser-pane { position: absolute; z-index: 15; inset: 0; width: auto; min-width: 0; }
   .commerce-tool-tab { max-width: 140px; }
   .commerce-heading h1 { font-size: 25px; }
   .commerce-heading p { font-size: 12px; }
