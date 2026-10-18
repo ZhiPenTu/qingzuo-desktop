@@ -231,7 +231,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .connection-dot.connected { background: var(--primary); }
 .commerce-sidebar-footer small { grid-column: 2; font-size: 10px; }
 .commerce-main { position: relative; min-width: 0; flex: 1; display: flex; flex-direction: column; }
-.commerce-main.has-browser-candidates { flex-direction: row; }
 .commerce-main-content { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .commerce-content { flex: 1; min-height: 0; overflow: auto; padding: 28px 36px; }
 .commerce-content-inner { display: flex; flex-direction: column; gap: 18px; max-width: 1100px; margin-inline: auto; }
@@ -582,35 +581,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .browser-new-tab-page h1 { margin: 0; color: var(--foreground); font-size: 24px; font-weight: 600; }
 .browser-new-tab-page p { margin: 0; font-size: 13px; }
 .browser-loading-icon { animation: spin 1s linear infinite; }
-.browser-candidate-panel { position: relative; z-index: 12; order: -1; display: flex; flex: 0 0 min(390px, 42%); min-width: 280px; min-height: 0; margin: 14px 0 14px 14px; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--background) 96%, var(--card)); box-shadow: 0 16px 42px color-mix(in srgb, var(--foreground) 18%, transparent); }
-.browser-candidate-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 11px; border-bottom: 1px solid var(--border); }
-.browser-candidate-head > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.browser-candidate-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.browser-candidate-head span { color: var(--muted-foreground); font-size: 11px; }
-.browser-candidate-head button svg { width: 15px; height: 15px; }
-.browser-candidate-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--secondary) 40%, transparent); }
-.browser-candidate-toolbar button { height: 30px; padding-inline: 10px; font-size: 11px; }
-.browser-candidate-select-all { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted-foreground); font-size: 11px; }
-.browser-candidate-select-all input, .browser-candidate-check input { accent-color: var(--primary); }
-.browser-candidate-list { min-height: 0; flex: 1; overflow-y: auto; padding: 8px; }
-.browser-candidate-empty { margin: 0; padding: 34px 20px; color: var(--muted-foreground); font-size: 12px; line-height: 1.7; text-align: center; }
-.browser-candidate-item { display: grid; grid-template-columns: 18px 48px minmax(0, 1fr) 28px; align-items: center; gap: 9px; min-height: 64px; padding: 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
-.browser-candidate-item:last-child { border-bottom: 0; }
-.browser-candidate-item.is-unresolved { opacity: .72; }
-.browser-candidate-check { display: inline-flex; align-items: center; justify-content: center; }
-.browser-candidate-thumb { display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; border-radius: 8px; color: var(--muted-foreground); background: var(--secondary); }
-.browser-candidate-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.browser-candidate-thumb svg { width: 20px; height: 20px; }
-.browser-candidate-info { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
-.browser-candidate-info strong { overflow: hidden; font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.browser-candidate-note { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.browser-candidate-note svg { width: 12px; height: 12px; flex-shrink: 0; }
-.browser-candidate-note.is-error { color: var(--destructive); }
-.browser-candidate-note.is-done { color: var(--primary); }
-.browser-candidate-progress { height: 3px; overflow: hidden; border-radius: 99px; background: var(--muted); }
-.browser-candidate-progress span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .2s ease; }
-.browser-candidate-actions { display: flex; align-items: center; justify-content: center; }
-.browser-candidate-actions button svg { width: 15px; height: 15px; }
 .commerce-plugin-surface { flex: 1; min-height: 0; }
 .commerce-alert { width: auto; margin: 14px 28px 0; }
 .app-header, .toolbar { background: var(--card); }

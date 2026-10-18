@@ -121,7 +121,7 @@ test('detects media incrementally and downloads selected candidates through the 
     const url = fixture.base + '/media';
     await shell.evaluate(({ id, url: address }) => window.commerceDesktop.invoke('browser.navigate', { id, url: address }), { id: browser.tabs[0].id, url });
     await expect.poll(async () => (await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'))).candidates.length).toBeGreaterThanOrEqual(2);
-    await expect(shell.getByRole('heading', { name: '检测结果' })).toBeVisible();
+    await expect(shell.getByRole('heading', { name: '检测结果' })).toHaveCount(0);
     const media = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
     const ids = media.candidates.filter(candidate => candidate.status === 'ready').map(candidate => candidate.id);
     const videoId = media.candidates.find(candidate => candidate.type === 'video' && candidate.status === 'ready')?.id;
