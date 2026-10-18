@@ -88,4 +88,13 @@ describe('IssueReportDialog', () => {
     expect(openedUrl).toContain('https://github.com/ZhiPenTu/qingzuo-desktop/issues/new');
     expect(openedUrl).toContain('title=%5BBug%5D+%E5%86%85%E6%A0%B8%E5%B4%A9%E6%BA%83');
   });
+
+  it('opens the QQ feedback group in the system browser', async () => {
+    const onOpenExternal = vi.fn().mockResolvedValue(undefined);
+    render(<IssueReportDialog open={true} onClose={vi.fn()} onOpenExternal={onOpenExternal} />);
+
+    fireEvent.click(screen.getByRole('link', { name: '点击链接加入群聊【Qingzuo技术反馈+许愿群】' }));
+
+    await waitFor(() => expect(onOpenExternal).toHaveBeenCalledWith('https://qm.qq.com/q/CkVASJvvDW'));
+  });
 });

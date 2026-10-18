@@ -473,6 +473,9 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .issue-dialog-eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 500; color: var(--muted-foreground); }
 .issue-dialog-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .issue-dialog-description { margin: 0; font-size: 13px; line-height: 1.65; color: var(--muted-foreground); }
+.issue-dialog-community { margin: -6px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted-foreground); }
+.issue-dialog-community a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.issue-dialog-community a:hover { color: var(--foreground); }
 .issue-dialog-form { display: flex; flex-direction: column; gap: 14px; }
 .issue-dialog-field { display: flex; flex-direction: column; gap: 6px; }
 .issue-dialog-label { font-size: 12px; font-weight: 500; color: var(--foreground); }
