@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import gt from 'semver/functions/gt';
 import type { DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
 import { BrowserTabStrip, BrowserWorkspace } from './BrowserWorkspace';
+import { BrowserCandidatePanel } from './BrowserCandidatePanel';
 import { IssueReportDialog } from './IssueReportDialog';
 import { recordError, getLatestError, type CapturedError } from './error-tracker';
 import { useTheme } from '../theme/ThemeProvider';
@@ -40,7 +41,11 @@ const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { i
 const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
 const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: { open: false, activeTabId: null, tabs: [] }, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const BROWSER_PANE_MIN_WIDTH = 360;
+const BROWSER_MAIN_MIN_WIDTH = 320;
+const BROWSER_PANE_DEFAULT_WIDTH = 640;
+const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
@@ -57,6 +62,8 @@ export default function Platform() {
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
   const [page, setPage] = useState<Page | string>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
+  const [browserPaneWidth, setBrowserPaneWidth] = useState<number | null>(null);
+  const [browserPaneResizing, setBrowserPaneResizing] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +74,8 @@ export default function Platform() {
     catch { return false; }
   });
   const pendingInstalls = useRef(new Set<string>());
+  const browserPaneRef = useRef<HTMLElement>(null);
+  const browserResizeRef = useRef<{ startX: number; startWidth: number; pointerId: number } | null>(null);
   const [market, setMarket] = useState<ToolEntry[]>([]);
   const [marketState, setMarketState] = useState<'loading' | 'ready' | 'error' | 'unavailable'>('loading');
   const [marketMessage, setMarketMessage] = useState('');
@@ -95,6 +104,7 @@ export default function Platform() {
   };
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
+  useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => { if (Number.isFinite(width)) setBrowserPaneWidth(width); }), []);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {
@@ -217,6 +227,50 @@ export default function Platform() {
       setBrowserPaneOpen(false);
     }
   };
+  const browserPaneLimits = () => {
+    const bodyWidth = document.querySelector<HTMLElement>('.commerce-body')?.getBoundingClientRect().width || window.innerWidth;
+    const sidebarWidth = document.querySelector<HTMLElement>('.commerce-sidebar')?.getBoundingClientRect().width || (sidebarCollapsed ? 72 : 208);
+    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, bodyWidth - sidebarWidth - BROWSER_MAIN_MIN_WIDTH) };
+  };
+  const currentBrowserPaneWidth = () => {
+    const width = browserPaneRef.current?.getBoundingClientRect().width;
+    return width && width > 0 ? width : Math.min(720, Math.max(BROWSER_PANE_MIN_WIDTH, window.innerWidth * 0.48 || BROWSER_PANE_DEFAULT_WIDTH));
+  };
+  const setBrowserPaneWidthWithinBounds = (width: number) => {
+    const { min, max } = browserPaneLimits();
+    setBrowserPaneWidth(Math.round(Math.min(max, Math.max(min, width))));
+  };
+  const beginBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const startWidth = currentBrowserPaneWidth();
+    const limits = browserPaneLimits();
+    browserResizeRef.current = { startX: event.clientX, startWidth, pointerId: event.pointerId };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    void window.commerceDesktop?.invoke('browser.resize.start', { startX: event.clientX, startWidth, minWidth: limits.min, maxWidth: limits.max });
+    setBrowserPaneResizing(true);
+    event.preventDefault();
+  };
+  const moveBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = browserResizeRef.current;
+    if (!resize) return;
+    setBrowserPaneWidthWithinBounds(resize.startWidth - (event.clientX - resize.startX));
+    void window.commerceDesktop?.invoke('browser.resize.move', { x: event.clientX });
+    event.preventDefault();
+  };
+  const endBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = browserResizeRef.current;
+    if (!resize) return;
+    browserResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(resize.pointerId)) event.currentTarget.releasePointerCapture?.(resize.pointerId);
+    void window.commerceDesktop?.invoke('browser.resize.stop');
+    setBrowserPaneResizing(false);
+  };
+  const handleBrowserResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') { event.preventDefault(); setBrowserPaneWidthWithinBounds(currentBrowserPaneWidth() + 24); }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); setBrowserPaneWidthWithinBounds(currentBrowserPaneWidth() - 24); }
+    else if (event.key === 'Home') { event.preventDefault(); setBrowserPaneWidthWithinBounds(browserPaneLimits().max); }
+    else if (event.key === 'End') { event.preventDefault(); setBrowserPaneWidthWithinBounds(browserPaneLimits().min); }
+  };
   const loadMarket = useCallback(async (force = false) => {
     if (!window.commerceDesktop) {
       setMarketState('unavailable'); setMarketMessage('在轻作桌面应用中浏览并安装更多工具。');
@@ -307,12 +361,13 @@ export default function Platform() {
     <div className="commerce-body">
       <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
         <div className="commerce-sidebar-head">
-          <div className="commerce-brand"><img src={brandIcon} alt="" /><div><strong>轻作</strong><span>QINGZUO</span></div></div>
+          <div className="commerce-brand"><div><strong>轻作</strong><span>QINGZUO</span></div></div>
         </div>
         <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
-      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
+      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main', browserPaneOpen && status?.browser?.open && 'has-browser-candidates')}>
+      <div className="commerce-main-content">
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{error}</span><Button variant="outline" size="sm" onClick={() => openIssueReport(error, '平台操作')}>反馈此问题</Button></AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
         LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy || migrationRunning} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" disabled={busy || migrationRunning} onClick={() => act('migration.dismiss')}>稍后从市场安装</Button>
@@ -407,7 +462,28 @@ export default function Platform() {
           </Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       </div>
-      {browserPaneOpen ? <aside className="commerce-browser-pane" aria-label="浏览器面板"><BrowserWorkspace showTabs={false} status={status?.browser ?? { open: false, activeTabId: null, tabs: [] }} busy={busy} onAction={run} /></aside> : null}
+      {browserPaneOpen && status?.browser?.open ? <BrowserCandidatePanel status={status.browser} busy={busy} onAction={run} /> : null}
+      </div>
+      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={browserPaneWidth ? { flexBasis: `${browserPaneWidth}px` } : undefined}>
+        <div
+          className="commerce-browser-resizer"
+          role="separator"
+          tabIndex={0}
+          aria-label="调整浏览器面板宽度"
+          aria-orientation="vertical"
+          aria-valuemin={browserPaneLimits().min}
+          aria-valuemax={browserPaneLimits().max}
+          aria-valuenow={Math.round(browserPaneWidth ?? currentBrowserPaneWidth())}
+          onPointerDown={beginBrowserResize}
+          onPointerMove={moveBrowserResize}
+          onPointerUp={endBrowserResize}
+          onPointerCancel={endBrowserResize}
+          onLostPointerCapture={endBrowserResize}
+          onKeyDown={handleBrowserResizeKeyDown}
+          onDoubleClick={() => setBrowserPaneWidth(null)}
+        />
+        <BrowserWorkspace showTabs={false} status={status?.browser ?? emptyBrowser} busy={busy} onAction={run} />
+      </aside> : null}
       <IssueReportDialog
         open={issueDialogOpen}
         onClose={() => setIssueDialogOpen(false)}

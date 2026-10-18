@@ -28,14 +28,36 @@ export interface BrowserTabState {
   canGoBack: boolean;
   canGoForward: boolean;
 }
+export interface BrowserCandidate {
+  id: string;
+  tabId: string;
+  type: 'video' | 'image';
+  title: string;
+  pageUrl: string;
+  thumbnailUrl?: string;
+  status: 'ready' | 'unresolved' | 'expired';
+  reason?: string;
+}
+export interface BrowserDownloadTask {
+  id: string;
+  candidateId: string;
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'canceled';
+  progress: number;
+  transferred: number;
+  total: number;
+  filename?: string;
+  error?: string;
+}
 export interface BrowserStatus {
   open: boolean;
   activeTabId: string | null;
   tabs: BrowserTabState[];
+  candidates: BrowserCandidate[];
+  downloads: BrowserDownloadTask[];
 }
 declare global {
   interface Window {
-    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
+    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
     commercePlugin?: PluginBridge & { id: string };
   }
 }

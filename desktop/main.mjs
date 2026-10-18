@@ -39,6 +39,7 @@ let window, manager, workers, files, credentials, network, host, browserRuntime,
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
+let browserResizeState = null;
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
@@ -46,6 +47,39 @@ let batches, proxy, imageEditor, approvals, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function browserEvent(event) {
+  if (window && !window.isDestroyed()) window.webContents.send('commerce:browser', event);
+  for (const [id, view] of views) {
+    if (!view || view.webContents.isDestroyed() || !manager) continue;
+    void manager.get(id).then(plugin => {
+      const permissions = plugin.permissions?.browser ?? [];
+      const allowed = event?.type === 'download' ? permissions.includes('download') : permissions.includes('detect');
+      if (allowed && !view.webContents.isDestroyed()) view.webContents.send('commerce:browser', event);
+    }).catch(() => {});
+  }
+}
+function stopBrowserResize() {
+  browserResizeState = null;
+}
+function updateBrowserResize(currentX) {
+  if (!browserResizeState || !Number.isFinite(currentX) || !window || window.isDestroyed()) return;
+  const { startX, startWidth, minWidth, maxWidth } = browserResizeState;
+  const width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth - (currentX - startX))));
+  window.webContents.send('commerce:browser-resize', { width });
+}
+function startBrowserResize(args = {}) {
+  stopBrowserResize();
+  if (!window || window.isDestroyed()) return;
+  const values = ['startX', 'startWidth', 'minWidth', 'maxWidth'];
+  if (!values.every(key => Number.isFinite(args[key]))) return;
+  browserResizeState = {
+    startX: args.startX,
+    startWidth: args.startWidth,
+    minWidth: args.minWidth,
+    maxWidth: Math.max(args.minWidth, args.maxWidth),
+  };
+  updateBrowserResize(args.startX);
+}
 function aiChanged(id, event) { if (isHostChat(id)) { if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) }); return; } const view = views.get(id); if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event); }
 async function stopPlugin(id) {
   approvals?.cancelPlugin(id);
@@ -64,7 +98,7 @@ function assertFrame(event, shellOnly = false) {
   return id;
 }
 function validateCall(method, args) { if (typeof method !== 'string' || method.length > 80 || (JSON.stringify(args) ?? '').length > 38_000_000) throw new Error('请求无效或过大。'); }
-function hideViews() { for (const v of views.values()) v.setVisible(false); browserRuntime?.hide(); visible = null; }
+function hidePluginViews() { for (const v of views.values()) v.setVisible(false); visible = null; }
 async function closeView(id) {
   viewEpochs.set(id,(viewEpochs.get(id) ?? 0)+1);
   const view = views.get(id); if (view) { views.delete(id); if (!view.webContents.isDestroyed()) { view.webContents.send('commerce:dispose'); owners.delete(view.webContents.id); if (window && !window.isDestroyed()) window.contentView.removeChildView(view); view.webContents.close(); } }
@@ -105,6 +139,7 @@ async function loadView(id, settings, epoch) {
   const plugin = await manager.get(id); if (!plugin.enabled || plugin.missing.length) throw new Error('插件已停用或缺少依赖。');
   pluginInstallService.assertAvailable(id);
   assertViewEpoch(id,epoch);
+  const existingView = views.get(id);
   if (!views.has(id)) {
     let ses = pluginSessions.get(id);
     if (!ses) {
@@ -157,6 +192,10 @@ async function loadView(id, settings, epoch) {
     view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
     view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
     view.webContents.on('will-attach-webview', event => event.preventDefault());
+    view.webContents.on('input-event', (_event, input) => {
+      if (input.type === 'mouseUp') stopBrowserResize();
+      else if (input.type === 'mouseMove') updateBrowserResize(view.getBounds().x + input.x);
+    });
     view.webContents.on('did-fail-load', (_event, code, description) => console.error('Plugin view failed:', id, code, description));
     view.webContents.on('render-process-gone', (_event, details) => console.error('Plugin renderer gone:', id, details));
     // Create the native view with a real viewport before navigation. Inactive
@@ -171,7 +210,12 @@ async function loadView(id, settings, epoch) {
   assertViewEpoch(id,epoch);
   const destination = 'commerce-plugin://' + id + '/' + (settings ? plugin.settings?.entry || plugin.ui : plugin.ui);
   if (views.get(id).webContents.getURL() !== destination) await views.get(id).webContents.loadURL(destination);
-  hideViews(); visible = id; return sanitizePlugin(plugin);
+  hidePluginViews(); visible = id;
+  // Selecting an already-open tool tab while the browser pane stays mounted
+  // may not trigger a new renderer resize. Reveal its existing native surface
+  // immediately instead of leaving the tool area blank.
+  if (existingView && !existingView.webContents.isDestroyed()) existingView.setVisible(true);
+  return sanitizePlugin(plugin);
 }
 function kernelRequest(message, timeout = 30000) {
   if (!host || systems.length !== 7) return Promise.reject(new Error('工具服务不可用，请重新启动。'));
@@ -305,22 +349,28 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     return true;
   }
   if (method === 'browser.status') return browserRuntime.status();
-  if (method === 'browser.open') { hideViews(); return browserRuntime.open(); }
-  if (method === 'browser.newTab') { hideViews(); return browserRuntime.newTab(args.url); }
-  if (method === 'browser.activate') { hideViews(); return browserRuntime.activate(args.id); }
-  if (method === 'browser.navigate') { hideViews(); return browserRuntime.navigate(args.id, args.url); }
+  if (method === 'browser.open') return browserRuntime.open();
+  if (method === 'browser.newTab') return browserRuntime.newTab(args.url);
+  if (method === 'browser.activate') return browserRuntime.activate(args.id);
+  if (method === 'browser.navigate') return browserRuntime.navigate(args.id, args.url);
   if (method === 'browser.back') return browserRuntime.goBack();
   if (method === 'browser.forward') return browserRuntime.goForward();
   if (method === 'browser.reload') return browserRuntime.reload();
-  if (method === 'browser.closeTab') { if (browserRuntime.status().activeTabId === args.id) hideViews(); return browserRuntime.closeTab(args.id); }
+  if (method === 'browser.rescan') return browserRuntime.rescan(args.id);
+  if (method === 'browser.download') return browserRuntime.download(args);
+  if (method === 'browser.cancel') return browserRuntime.cancelDownload(args.id);
+  if (method === 'browser.closeTab') return browserRuntime.closeTab(args.id);
   if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
-  if (method === 'browser.hide') { browserRuntime.hide(); return; }
+  if (method === 'browser.resize.start') { startBrowserResize(args); return; }
+  if (method === 'browser.resize.move') { updateBrowserResize(args.x); return; }
+  if (method === 'browser.resize.stop') { stopBrowserResize(); return; }
+  if (method === 'browser.hide') { stopBrowserResize(); browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
   if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
-  if (method === 'view.hide') { hideViews(); return; }
+  if (method === 'view.hide') { stopBrowserResize(); hidePluginViews(); return; }
   if (method === 'view.close') { await closeView(args.id); changed(); return; }
   if (method === 'view.bounds') { const view = views.get(visible); if (view) { const {width,height} = window.getContentBounds(); if (['x','y','width','height'].every(k => Number.isFinite(args[k]) && args[k] >= 0) && args.x+args.width <= width+2 && args.y+args.height <= height+2) { view.setBounds(Object.fromEntries(['x','y','width','height'].map(k => [k,Math.floor(args[k])]))); view.setVisible(true); } } return; }
   const service = method.split('.')[0];
@@ -337,6 +387,16 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
   if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或工具服务不可用。');
+  if (method === 'browser.status' || method === 'browser.rescan') {
+    if (!(plugin.permissions.browser ?? []).includes('detect')) throw new Error('浏览器检测未授权。');
+    const includeDownloads = (plugin.permissions.browser ?? []).includes('download');
+    if (method === 'browser.rescan') { await browserRuntime.rescan(args.id); return browserRuntime.status({ includeDownloads }); }
+    return browserRuntime.status({ includeDownloads });
+  }
+  if (method === 'browser.download' || method === 'browser.cancel') {
+    if (!(plugin.permissions.browser ?? []).includes('download')) throw new Error('浏览器下载未授权。');
+    return method === 'browser.download' ? browserRuntime.download(args) : browserRuntime.cancelDownload(args.id);
+  }
   if (method.startsWith('ai.')) {
     const assistant = method.startsWith('ai.assistant.');
     if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : 'image-edit')) throw new Error('AI 能力未授权。');
@@ -379,6 +439,7 @@ async function shutdownRuntime() {
   if (shutdownPromise) return shutdownPromise;
   quitting = true;
   shutdownPromise = (async () => {
+    stopBrowserResize();
     await pluginInstallService?.shutdown();
     approvals?.dispose();
     await batches?.shutdown();
@@ -507,7 +568,11 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed });
+browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize });
+ipcMain.on('commerce:browser-candidates', (event, payload) => {
+  browserRuntime?.ingestFromContents(event.sender.id, payload);
+});
+window.on('blur', stopBrowserResize);
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
 window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });

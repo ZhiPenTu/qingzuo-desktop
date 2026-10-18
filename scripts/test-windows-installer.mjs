@@ -19,7 +19,7 @@ async function install(filename, destination) {
   });
 }
 try {
-  const releaseResponse = await fetch('https://api.github.com/repos/ZhiPenTu/LabelEdit/releases/tags/v0.2.5');
+  const releaseResponse = await fetch('https://api.github.com/repos/ZhiPenTu/qingzuo-desktop/releases/tags/v0.2.5');
   if (!releaseResponse.ok) throw new Error('Pinned upgrade baseline unavailable.');
   const baseline = (await releaseResponse.json()).assets.find(asset => asset.name === 'CommerceTools-0.2.5-win-x64.exe');
   assert.ok(baseline?.digest?.startsWith('sha256:'));

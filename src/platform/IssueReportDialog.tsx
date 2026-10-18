@@ -1,4 +1,4 @@
-import { useState, useId, type FormEvent } from 'react';
+import { useState, useId, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { X, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Bug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,6 +8,8 @@ import {
   type CapturedError,
   type EnvironmentContext,
 } from './error-tracker';
+
+const QQ_FEEDBACK_GROUP_URL = 'https://qm.qq.com/q/CkVASJvvDW';
 
 export interface IssueReportDialogProps {
   open: boolean;
@@ -72,6 +74,17 @@ export function IssueReportDialog({
     }
   };
 
+  const handleOpenQQGroup = async (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (onOpenExternal) {
+      await onOpenExternal(QQ_FEEDBACK_GROUP_URL);
+    } else if (window.commerceDesktop) {
+      await window.commerceDesktop.invoke('openExternal', { url: QQ_FEEDBACK_GROUP_URL });
+    } else {
+      window.open(QQ_FEEDBACK_GROUP_URL, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
     <div
       className="issue-dialog-backdrop"
@@ -108,6 +121,9 @@ export function IssueReportDialog({
 
         <p className="issue-dialog-description">
           我们会将问题和诊断日志提交至 GitHub 仓库。点击提交时，完整报告也会同步复制到剪贴板。
+        </p>
+        <p className="issue-dialog-community">
+          也可以加入反馈群：<a href={QQ_FEEDBACK_GROUP_URL} onClick={event => void handleOpenQQGroup(event)}>点击链接加入群聊【Qingzuo技术反馈+许愿群】</a>
         </p>
 
         <form className="issue-dialog-form" onSubmit={handleSubmit}>

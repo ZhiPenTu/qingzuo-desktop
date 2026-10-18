@@ -21,6 +21,8 @@ npm run plugin -- pack my-tool my-tool.ecplugin
 
 SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络请求、服务调用、工具/设置贡献、取消和清理。凭据读取仅存在于可信代理，插件页面无法读取已保存密钥。界面通过 `createPluginClient()` 获得 API；类型见 `packages/plugin-sdk/index.d.ts`。普通网络请求支持 HTTPS 的 GET/POST/PUT/PATCH/DELETE、JSON 内容及按引用注入 Bearer/X-Api-Key，响应为状态、MIME 和 Base64 数据。remove.bg 另提供受控文件上传适配器，返回可保存文件令牌。代理锁定已解析目标，禁止私网、重定向及未声明来源；公共域名兼容系统 TUN 的 198.18/15 映射，并始终验证该域名的 TLS 证书。任务取消会停止调用方本地进程并终止在线请求；失败请求不会自动重发。
 
+浏览器联动需要在清单中显式声明 `permissions.browser`，可申请 `detect` 和 `download`。宿主只向插件发送脱敏的候选 ID、标题、类型、来源页和状态；媒体地址、Cookie、签名参数和浏览器会话始终留在主进程。插件通过 `createPluginClient().browser` 读取候选、请求重新扫描、创建下载任务和接收状态事件，不能直接访问浏览器 DOM 或会话。
+
 插件生成的文件通过 `client.files.create({ data, filename, mime })` 建立私有文件令牌，`data` 为 Base64；再调用 `client.files.save(token.token, filename)` 打开系统保存对话框。需要声明 `permissions.files`，其他插件无法读取该令牌；生成内容建议不超过 25 MB。LabelEdit 的 PDF 导出直接使用这条通道，不依赖浏览器下载事件。
 
 插件页面的网络隔离同时使用 CSP、请求拦截、不可达 SOCKS 代理及 WebRTC 禁止非代理连接策略，包含回环地址；配置校验失败时页面不会启动。插件的 HTTP 和 WebRTC 连接不能绕过 `client.network.request()`；页面无需自行配置代理。

@@ -257,7 +257,7 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
 });
 
 it('opens the browser in a right-side pane with independent left and right controls', async () => {
-  const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+  const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
   const { invoke } = fixture(undefined, true, false, [], browser);
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });

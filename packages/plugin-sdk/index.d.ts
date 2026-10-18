@@ -1,9 +1,13 @@
 export interface FileToken { token: string; name: string; size: number; mime: string }
-export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void }
+export interface BrowserCandidate { id: string; tabId: string; type: 'video' | 'image'; title: string; pageUrl: string; thumbnailUrl?: string; status: 'ready' | 'unresolved' | 'expired'; reason?: string }
+export interface BrowserDownloadTask { id: string; candidateId: string; status: 'queued' | 'downloading' | 'completed' | 'failed' | 'canceled'; progress: number; transferred: number; total: number; filename?: string; error?: string }
+export interface BrowserStatus { open: boolean; activeTabId: string | null; tabs: Array<{ id: string; title: string; url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }>; candidates: BrowserCandidate[]; downloads: BrowserDownloadTask[] }
+export interface BrowserEvent { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }
+export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void; onBrowser?(callback: (event: BrowserEvent) => void): () => void }
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
   ui: string; category?: string; releaseNotes?: string;
-  permissions: { files?: boolean; credentials?: string[]; network?: string[]; ai?: ('assistant' | 'image-edit')[] };
+  permissions: { files?: boolean; credentials?: string[]; network?: string[]; ai?: ('assistant' | 'image-edit')[]; browser?: ('detect' | 'download')[] };
   services?: { provides?: string[]; requires?: string[] };
   assistant?: { tools: { name: string; title: string; description: string; service: string; method: string; parameters: AssistantToolSchema }[] };
   backend?: { type: 'node' | 'executable'; entry: Record<string, string> };
@@ -15,6 +19,7 @@ export function createPluginClient(bridge?: PluginBridge): {
   files: { pick(options?: { extensions?: string[] }): Promise<FileToken | null>; pickMany(options?: { extensions?: string[] }): Promise<FileToken[]>; pickDirectory(): Promise<DirectoryGrant | null>; read(token: string): Promise<{ data: string; mime: string }>; create(options: { data: string; filename: string; mime: string }): Promise<FileToken>; url(token: string): Promise<string>; release(token: string): Promise<void>; save(token: string, filename: string): Promise<boolean> };
   credentials: { set(name: string, value: string): Promise<void>; status(name: string): Promise<boolean>; clear(name: string): Promise<void> };
   network: { request(options: { url: 'https://api.remove.bg/v1.0/removebg'; fileToken: string; credential: string; taskId?: string }): Promise<FileToken>; request(options: NetworkRequest & { responseType: 'file' }): Promise<{ status: number; mime: string; file: FileToken }>; request(options: NetworkRequest & { responseType?: 'data' }): Promise<{ status: number; mime: string; data: string }> };
+  browser: { status(): Promise<BrowserStatus>; rescan(tabId?: string): Promise<BrowserStatus>; download(options: { candidateIds: string[]; mode?: 'single' | 'batch' }): Promise<BrowserStatus>; cancel(id: string): Promise<BrowserStatus>; onEvent(callback: (event: BrowserEvent) => void): () => void };
   services: { call<T = unknown>(service: string, method: string, args?: unknown): Promise<T> };
   tasks: { cancel(id: string): Promise<void> };
   ai: { models(options?: { source?: ImageSource }): Promise<ImageModel[]>; batch: { create(options: BatchInput): Promise<ImageBatch>; list(): Promise<ImageBatch[]>; get(options: { id: string }): Promise<ImageBatch>; revise(options: { id: string; revision: number; prompts: string[] }): Promise<ImageBatch>; start(options: { id: string; revision: number; directoryToken: string; retryFailed?: boolean }): Promise<ImageBatch>; cancel(options: { id: string }): Promise<ImageBatch>; preview(options: { id: string; itemId: string; original?: boolean }): Promise<FileToken> }; assistant: { send(options: { text: string; batchId?: string }): Promise<AssistantStatus>; status(): Promise<AssistantStatus>; cancel(): Promise<AssistantStatus> }; onEvent(callback: (event: AIEvent) => void): () => void };
