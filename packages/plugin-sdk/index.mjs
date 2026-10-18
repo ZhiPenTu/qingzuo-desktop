@@ -11,6 +11,13 @@ export function createPluginClient(bridge = globalThis.commercePlugin) {
     network: { request: options => invoke('network.request', options) },
     services: { call: (service, method, args) => invoke('services.call', { service, method, args }) },
     tasks: { cancel: id => invoke('tasks.cancel', { id }) },
+    browser: {
+      status: () => invoke('browser.status'),
+      rescan: tabId => invoke('browser.rescan', tabId ? { id: tabId } : {}),
+      download: options => invoke('browser.download', options),
+      cancel: id => invoke('browser.cancel', { id }),
+      onEvent: callback => bridge.onBrowser?.(callback) || (() => {}),
+    },
     ai: {
       models: options => invoke('ai.models', options),
       batch: Object.fromEntries(['create', 'get', 'list', 'revise', 'start', 'cancel', 'preview'].map(method => [method, args => invoke('ai.batch.' + method, args)])),

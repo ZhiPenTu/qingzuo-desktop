@@ -1,15 +1,18 @@
 import { test, expect, _electron } from '@playwright/test';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 async function fixtureServer() {
   const server = createServer((request, response) => {
     const page = new URL(request.url, 'http://127.0.0.1').pathname;
+    if (page === '/media.mp4') { response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '13' }); response.end('fixture-video'); return; }
+    if (page === '/image.jpg') { response.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': '13' }); response.end('fixture-image'); return; }
     if (page === '/cookie') response.setHeader('set-cookie', 'browser_fixture=ok; Path=/');
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    if (page === '/media') { response.end('<!doctype html><title>媒体页</title><main><article><h1>测试视频</h1><video src="/media.mp4" poster="/image.jpg"></video></article><article><h1>测试图片</h1><img width="320" height="180" src="/image.jpg"></article></main>'); return; }
     response.end(`<!doctype html><title>${page === '/page2' ? '第二页' : '第一页'}</title><main>${page === '/page2' ? '页面二' : '页面一'}<button id="popup" onclick="window.open('/page2', '_blank')">打开第二页</button></main>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -97,6 +100,44 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     const relaunchedPage = await browserPage(app, relaunchedUrl);
     await expect.poll(() => relaunchedPage.evaluate(() => document.cookie)).toContain('browser_fixture=ok');
     await expect(relaunched.evaluate(({ id }) => window.commerceDesktop.invoke('browser.navigate', { id, url: 'file:///tmp/blocked.html' }), { id: relaunchedStatus.tabs[0].id })).rejects.toThrow(/HTTP 或 HTTPS/);
+  } finally {
+    await app?.close();
+    fixture.server.closeAllConnections();
+    await new Promise(resolve => fixture.server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('detects media incrementally and downloads selected candidates through the browser session', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-browser-media-'));
+  const fixture = await fixtureServer();
+  let app;
+  try {
+    app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
+    const shell = await app.firstWindow();
+    await expect(shell.getByText('工具服务已就绪', { exact: true })).toBeVisible();
+    await shell.getByRole('button', { name: '打开浏览器', exact: true }).click();
+    const browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    const url = fixture.base + '/media';
+    await shell.evaluate(({ id, url: address }) => window.commerceDesktop.invoke('browser.navigate', { id, url: address }), { id: browser.tabs[0].id, url });
+    await expect.poll(async () => (await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'))).candidates.length).toBeGreaterThanOrEqual(2);
+    await expect(shell.getByRole('heading', { name: '检测结果' })).toBeVisible();
+    const media = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    const ids = media.candidates.filter(candidate => candidate.status === 'ready').map(candidate => candidate.id);
+    const videoId = media.candidates.find(candidate => candidate.type === 'video' && candidate.status === 'ready')?.id;
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    expect(videoId).toBeTruthy();
+    await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, temporary);
+    await shell.evaluate(candidateIds => window.commerceDesktop.invoke('browser.download', { candidateIds, mode: 'batch' }), ids.slice(0, 2));
+    await expect.poll(async () => (await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'))).downloads.filter(task => task.status === 'completed').length).toBeGreaterThanOrEqual(2);
+    const filenames = await readdir(temporary);
+    const videoFile = filenames.find(filename => filename.endsWith('.mp4'));
+    expect((await readFile(path.join(temporary, videoFile))).toString()).toBe('fixture-video');
+    const singlePath = path.join(temporary, 'single-video.mp4');
+    await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, singlePath);
+    await shell.evaluate(candidateId => window.commerceDesktop.invoke('browser.download', { candidateIds: [candidateId], mode: 'single' }), videoId);
+    await expect.poll(async () => (await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'))).downloads.filter(task => task.status === 'completed').length).toBeGreaterThanOrEqual(3);
+    expect((await readFile(singlePath)).toString()).toBe('fixture-video');
   } finally {
     await app?.close();
     fixture.server.closeAllConnections();

@@ -18,9 +18,10 @@ export function validateManifest(pkg, target = TARGET) {
   safeRelative(m.ui);
   if (m.settings) { if (typeof m.settings.title !== 'string') throw new Error('插件设置无效。'); safeRelative(m.settings.entry); }
   const permissions = m.permissions ?? {};
-  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'ai'].includes(k))) throw new Error('插件申请了不支持的权限。');
+  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'ai', 'browser'].includes(k))) throw new Error('插件申请了不支持的权限。');
   if (permissions.ai !== undefined && (!Array.isArray(permissions.ai) || new Set(permissions.ai).size !== permissions.ai.length || permissions.ai.some(value => !['assistant', 'image-edit'].includes(value)))) throw new Error('AI 权限无效。');
   if (permissions.files !== undefined && typeof permissions.files !== 'boolean') throw new Error('文件权限无效。');
+  if (permissions.browser !== undefined && (!Array.isArray(permissions.browser) || new Set(permissions.browser).size !== permissions.browser.length || permissions.browser.some(value => !['detect', 'download'].includes(value)))) throw new Error('浏览器权限无效。');
   for (const key of ['network', 'credentials']) if (permissions[key] !== undefined && (!Array.isArray(permissions[key]) || permissions[key].length > 16 || permissions[key].some(v => typeof v !== 'string'))) throw new Error('插件权限无效。');
   for (const origin of permissions.network ?? []) { const url = new URL(origin); if (url.protocol !== 'https:' || url.origin !== origin || url.username || url.password) throw new Error('网络权限必须为 HTTPS 来源。'); }
   for (const name of permissions.credentials ?? []) if (!/^[a-z][a-z0-9.-]{0,63}$/.test(name)) throw new Error('凭据名称无效。');

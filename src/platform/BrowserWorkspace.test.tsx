@@ -6,6 +6,8 @@ import type { BrowserStatus } from './commerce';
 const status: BrowserStatus = {
   open: true,
   activeTabId: 'one',
+  candidates: [],
+  downloads: [],
   tabs: [
     { id: 'one', title: '商品页', url: 'https://shop.example/products/1', loading: false, canGoBack: true, canGoForward: false },
     { id: 'two', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false },

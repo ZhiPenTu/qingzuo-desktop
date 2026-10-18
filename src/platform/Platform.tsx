@@ -12,6 +12,7 @@ import gt from 'semver/functions/gt';
 import type { DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
 import { BrowserTabStrip, BrowserWorkspace } from './BrowserWorkspace';
+import { BrowserCandidatePanel } from './BrowserCandidatePanel';
 import { IssueReportDialog } from './IssueReportDialog';
 import { recordError, getLatestError, type CapturedError } from './error-tracker';
 import { useTheme } from '../theme/ThemeProvider';
@@ -43,7 +44,8 @@ const defaultDownloadSource: DownloadSourceState = { source: 'github', customMir
 const BROWSER_PANE_MIN_WIDTH = 360;
 const BROWSER_MAIN_MIN_WIDTH = 320;
 const BROWSER_PANE_DEFAULT_WIDTH = 640;
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: { open: false, activeTabId: null, tabs: [] }, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
@@ -364,7 +366,8 @@ export default function Platform() {
         <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
-      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
+      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main', browserPaneOpen && status?.browser?.open && 'has-browser-candidates')}>
+      <div className="commerce-main-content">
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{error}</span><Button variant="outline" size="sm" onClick={() => openIssueReport(error, '平台操作')}>反馈此问题</Button></AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
         LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy || migrationRunning} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" disabled={busy || migrationRunning} onClick={() => act('migration.dismiss')}>稍后从市场安装</Button>
@@ -459,6 +462,8 @@ export default function Platform() {
           </Card>{customMirrorDialogOpen ? <div className="custom-mirror-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeCustomMirrorDialog(); }}><div className="custom-mirror-dialog" role="dialog" aria-modal="true" aria-labelledby="custom-mirror-dialog-title"><div className="custom-mirror-dialog-head"><div><p className="custom-mirror-dialog-eyebrow">切换下载源</p><h2 id="custom-mirror-dialog-title">添加自定义下载源</h2></div><Button type="button" variant="ghost" size="icon-sm" aria-label="关闭" title="关闭" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}><X /></Button></div><p className="custom-mirror-dialog-description">填写一个以 https:// 开头的镜像站地址，选中后立即生效。</p><form className="custom-mirror-form" onSubmit={event => void submitCustomMirror(event)}><input className="custom-mirror-input" type="url" value={customMirrorInput} onChange={event => { setCustomMirrorInput(event.target.value); if (customMirrorError) setCustomMirrorError(null); }} placeholder="镜像站地址，例如 https://mirror.example.com/" aria-label="镜像站地址，例如 https://mirror.example.com/" disabled={customMirrorBusy} autoFocus />{customMirrorError ? <p className="custom-mirror-error" role="alert">{customMirrorError}</p> : null}{downloadSourceState.customMirrors.length > 0 ? <div className="custom-mirror-list-section"><span className="custom-mirror-list-label">已添加的自定义源</span><ul className="custom-mirror-list">{downloadSourceState.customMirrors.map(mirror => <li key={mirror} className="custom-mirror-item"><span>{mirror}</span><Button type="button" variant="ghost" size="icon-xs" aria-label="删除自定义源" title="删除自定义源" disabled={customMirrorBusy} onClick={() => void removeCustomMirror(mirror)}><X /></Button></li>)}</ul></div> : null}<div className="custom-mirror-dialog-footer"><Button type="button" variant="outline" disabled={customMirrorBusy} onClick={closeCustomMirrorDialog}>取消</Button><Button type="submit" disabled={!customMirrorInput.trim() || customMirrorBusy}>添加并切换</Button></div></form></div></div> : null}</div> : null}
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       </div>
+      {browserPaneOpen && status?.browser?.open ? <BrowserCandidatePanel status={status.browser} busy={busy} onAction={run} /> : null}
+      </div>
       {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={browserPaneWidth ? { flexBasis: `${browserPaneWidth}px` } : undefined}>
         <div
           className="commerce-browser-resizer"
@@ -477,7 +482,7 @@ export default function Platform() {
           onKeyDown={handleBrowserResizeKeyDown}
           onDoubleClick={() => setBrowserPaneWidth(null)}
         />
-        <BrowserWorkspace showTabs={false} status={status?.browser ?? { open: false, activeTabId: null, tabs: [] }} busy={busy} onAction={run} />
+        <BrowserWorkspace showTabs={false} status={status?.browser ?? emptyBrowser} busy={busy} onAction={run} />
       </aside> : null}
       <IssueReportDialog
         open={issueDialogOpen}

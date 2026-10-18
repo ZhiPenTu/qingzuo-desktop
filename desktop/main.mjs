@@ -47,6 +47,17 @@ let batches, proxy, imageEditor, approvals, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function browserEvent(event) {
+  if (window && !window.isDestroyed()) window.webContents.send('commerce:browser', event);
+  for (const [id, view] of views) {
+    if (!view || view.webContents.isDestroyed() || !manager) continue;
+    void manager.get(id).then(plugin => {
+      const permissions = plugin.permissions?.browser ?? [];
+      const allowed = event?.type === 'download' ? permissions.includes('download') : permissions.includes('detect');
+      if (allowed && !view.webContents.isDestroyed()) view.webContents.send('commerce:browser', event);
+    }).catch(() => {});
+  }
+}
 function stopBrowserResize() {
   browserResizeState = null;
 }
@@ -345,6 +356,9 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'browser.back') return browserRuntime.goBack();
   if (method === 'browser.forward') return browserRuntime.goForward();
   if (method === 'browser.reload') return browserRuntime.reload();
+  if (method === 'browser.rescan') return browserRuntime.rescan(args.id);
+  if (method === 'browser.download') return browserRuntime.download(args);
+  if (method === 'browser.cancel') return browserRuntime.cancelDownload(args.id);
   if (method === 'browser.closeTab') return browserRuntime.closeTab(args.id);
   if (method === 'browser.closeWorkspace') return browserRuntime.closeWorkspace();
   if (method === 'browser.resize.start') { startBrowserResize(args); return; }
@@ -373,6 +387,16 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
   if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或工具服务不可用。');
+  if (method === 'browser.status' || method === 'browser.rescan') {
+    if (!(plugin.permissions.browser ?? []).includes('detect')) throw new Error('浏览器检测未授权。');
+    const includeDownloads = (plugin.permissions.browser ?? []).includes('download');
+    if (method === 'browser.rescan') { await browserRuntime.rescan(args.id); return browserRuntime.status({ includeDownloads }); }
+    return browserRuntime.status({ includeDownloads });
+  }
+  if (method === 'browser.download' || method === 'browser.cancel') {
+    if (!(plugin.permissions.browser ?? []).includes('download')) throw new Error('浏览器下载未授权。');
+    return method === 'browser.download' ? browserRuntime.download(args) : browserRuntime.cancelDownload(args.id);
+  }
   if (method.startsWith('ai.')) {
     const assistant = method.startsWith('ai.assistant.');
     if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : 'image-edit')) throw new Error('AI 能力未授权。');
@@ -544,7 +568,10 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed, resizeStop: stopBrowserResize, resizeMove: updateBrowserResize });
+browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize });
+ipcMain.on('commerce:browser-candidates', (event, payload) => {
+  browserRuntime?.ingestFromContents(event.sender.id, payload);
+});
 window.on('blur', stopBrowserResize);
 if (localPreview) window.setTitle('轻作 0.3.0 · 本地预览（未发布）');
 window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
