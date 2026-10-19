@@ -23,13 +23,13 @@
 
 ## 资源与生成记录
 
-使用内置 ImageGen 生成界面概念、应用图标和独立主页插画。界面文字与控件均使用 React 实现。
+界面概念与独立主页插画使用内置 ImageGen 生成，界面文字与控件均使用 React 实现。应用图标使用矢量绘制，避免生成图在小尺寸下的边缘噪声。
 
-图标提示词：单个透明背景应用图标；墨绿圆角方块，象牙白工具托盘与折角文档，两条粗绿线，右上薄荷绿模块；克制浮雕质感；不包含文字；在 16/32px 下可辨识。
+图标构成：透明背景的墨绿圆角方块；象牙白折角文档从浅米色托盘中升起，文档上有两条墨绿粗线；右上角薄荷绿四角星芒表示「轻」；不含文字，轮廓在 16/32px 下仍可辨识。
 
 插画提示词：透明背景、墨绿浅工具托盘，象牙白折角文档、浅绿色标签、四个手柄的裁切框；简洁轻微阴影；无文字与无关物体。
 
-源图标位于 `desktop/icons/icon.png`，由它生成 macOS ICNS、Windows ICO 与 UI PNG。主页插画位于 `src/assets/workspace.png`。转换只缩放及编码，不重新绘制图像。
+矢量源文件为 `desktop/icons/icon.svg`，由它渲染并编码出 `desktop/icons/icon.png`、macOS ICNS、Windows ICO（16–256px）以及 128px 的 UI PNG（`src/assets/qingzuo.png`、`site/assets/qingzuo.png`）。主页插画位于 `src/assets/workspace.png`。转换只缩放及编码，不重新绘制图像。
 
 ## 更新兼容性
 
