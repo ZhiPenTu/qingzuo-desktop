@@ -10,6 +10,7 @@ import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
 import { Credentials } from './credentials.mjs';
+import { PluginStorage } from './plugin-storage.mjs';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
 import {validateCatalog} from './catalog.mjs';
@@ -25,6 +26,7 @@ import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 import { BrowserRuntime } from './browser.mjs';
+import { testRoutedRequest } from './network-test-routes.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
 app.setName('Commerce Tools');
@@ -35,7 +37,7 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, browserRuntime, quitting = false, quitReady = false, shutdownPromise, hostReady;
+let window, manager, workers, files, credentials, network, host, browserRuntime, storage, quitting = false, quitReady = false, shutdownPromise, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -298,7 +300,11 @@ async function performPlatform(method, args) {
     const result = await dialog.showOpenDialog(window, { title: '导入插件', properties: ['openFile'], filters: [{ name: '电商工具插件', extensions: ['ecplugin', 'zip'] }] }); if (result.canceled || !result.filePaths?.length) return;
     const bytes = await readFile(result.filePaths[0]); const manifest=inspectPackage(bytes);
     pluginInstallService.assertAvailable(manifest.id);
-    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n网络来源：' + (manifest.permissions.network ?? []).join('、') + '\n凭据名称：' + (manifest.permissions.credentials ?? []).join('、') + '\nAI 能力：' + (manifest.permissions.ai ?? []).join('、') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    const browserAccess = [];
+    if ((manifest.permissions.browser ?? []).includes('detect')) browserAccess.push('识别页面中的媒体');
+    if ((manifest.permissions.browser ?? []).includes('download')) browserAccess.push('下载媒体');
+    if ((manifest.permissions.browser ?? []).includes('automate')) browserAccess.push('读取并操作指定网站页面');
+    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
     pluginInstallService.assertAvailable(manifest.id);
     await manager.install(bytes); return;
   }
@@ -388,14 +394,31 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
   if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或工具服务不可用。');
   if (method === 'browser.status' || method === 'browser.rescan') {
-    if (!(plugin.permissions.browser ?? []).includes('detect')) throw new Error('浏览器检测未授权。');
-    const includeDownloads = (plugin.permissions.browser ?? []).includes('download');
+    const browserPermissions = plugin.permissions.browser ?? [];
+    // 自动化插件只需要确认自己打开的标签页是否还在，不需要看到用户其它标签页。
+    if (method === 'browser.status' && !browserPermissions.includes('detect') && browserPermissions.includes('automate')) return browserRuntime.statusForPlugin(plugin);
+    if (!browserPermissions.includes('detect')) throw new Error('浏览器检测未授权。');
+    const includeDownloads = browserPermissions.includes('download');
     if (method === 'browser.rescan') { await browserRuntime.rescan(args.id); return browserRuntime.status({ includeDownloads }); }
     return browserRuntime.status({ includeDownloads });
   }
   if (method === 'browser.download' || method === 'browser.cancel') {
     if (!(plugin.permissions.browser ?? []).includes('download')) throw new Error('浏览器下载未授权。');
     return method === 'browser.download' ? browserRuntime.download(args) : browserRuntime.cancelDownload(args.id);
+  }
+  if (method === 'browser.open') {
+    if (!(plugin.permissions.browser ?? []).includes('automate')) throw new Error('浏览器页面操作未授权。');
+    const tab = await browserRuntime.openForPlugin(plugin, args.url);
+    if (window && !window.isDestroyed()) window.webContents.send('commerce:browser-pane', { tabId: tab.tabId, pluginId: id });
+    changed();
+    return tab;
+  }
+  if (method === 'browser.snapshot' || method === 'browser.act' || method === 'browser.waitFor' || method === 'browser.saveResource') {
+    if (!(plugin.permissions.browser ?? []).includes('automate')) throw new Error('浏览器页面操作未授权。');
+    if (method === 'browser.snapshot') return browserRuntime.snapshot(plugin, args);
+    if (method === 'browser.act') return browserRuntime.act(plugin, args);
+    if (method === 'browser.waitFor') return browserRuntime.waitFor(plugin, args);
+    return browserRuntime.saveResource(plugin, args);
   }
   if (method.startsWith('ai.')) {
     const assistant = method.startsWith('ai.assistant.');
@@ -422,11 +445,26 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   if (method === 'files.url') return files.url(plugin, args.token);
   if (method === 'files.release') return files.release(plugin, args.token);
   if (method === 'files.save') return files.save(plugin, args.token, args.filename);
+  if (method.startsWith('storage.')) {
+    if (!plugin.permissions.storage) throw new Error('插件存储未授权。');
+    if (method === 'storage.get') return storage.get(plugin, args.key);
+    if (method === 'storage.set') return storage.set(plugin, args.key, args.value);
+    if (method === 'storage.keys') return storage.keys(plugin);
+    if (method === 'storage.remove') return storage.remove(plugin, args.key);
+    if (['storage.saveFile', 'storage.readFile', 'storage.removeFile'].includes(method)) {
+      if (!plugin.permissions.files) throw new Error('插件没有文件权限。');
+      if (method === 'storage.saveFile') return storage.saveFile(plugin, args);
+      if (method === 'storage.readFile') return storage.readFile(plugin, args.token);
+      return storage.removeFile(plugin, args.token);
+    }
+    throw new Error('插件存储接口无效。');
+  }
   if (method.startsWith('credentials.')) {
     if (!(plugin.permissions.credentials ?? []).includes(args.name)) throw new Error('凭据未授权。');
     return kernelRequest({type:'call',kind:'system',service:'credentials',method:method.slice(12),args:{...args,id}});
   }
   if (method === 'network.request') return network.call(plugin, args);
+  if (method === 'network.sign') return network.sign(plugin, args);
   if (method === 'tasks.cancel') { network.cancel(id, args.id); await workers.stop(id); return; }
   if (method === 'contributions.tool' || method === 'contributions.settings') { if (args.title !== plugin.title && args.title !== plugin.settings?.title) throw new Error('入口必须与已安装清单一致。'); return; }
   if (method === 'services.call') {
@@ -465,7 +503,13 @@ migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
 downloadSources = new DownloadSourceService({ root: app.getPath('userData'), changed });
 await downloadSources.initialize();
-credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':'); files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog); network = new NetworkBroker(files, credentials);
+credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':');
+storage = new PluginStorage(path.join(app.getPath('userData'), 'plugin-storage'));
+await storage.initialize();
+files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog, { persistent: storage });
+// Plugin end-to-end tests point fixed platform hosts at a local fixture server.
+// Packaged builds always use the pinned public-address transport.
+network = new NetworkBroker(files, credentials, testRoutedRequest({ packaged: app.isPackaged, value: process.env.COMMERCE_TEST_NETWORK_ROUTES }));
 await files.initialize();
 const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
 proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initialize();
@@ -514,6 +558,7 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
   probe: async plugin => { if (plugin.backend) { await workers.start(plugin); await workers.stop(plugin.id); } },
   forget: async plugin => {
     for (const name of plugin.permissions.credentials ?? []) await credentials.clear(plugin.id, name);
+    await storage?.clear(plugin.id).catch(error => console.error('插件存储清理失败：', error.message));
     await session.fromPartition('persist:commerce-' + plugin.id).clearStorageData();
   },
 });
@@ -568,7 +613,7 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize });
+browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize, files, storage });
 ipcMain.on('commerce:browser-candidates', (event, payload) => {
   browserRuntime?.ingestFromContents(event.sender.id, payload);
 });
@@ -598,4 +643,4 @@ if (!primary) app.quit();
 else void main().catch(error => { console.error(error); app.quit(); });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, shutdownRuntime };
+export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, browserRuntime, files, storage, shutdownRuntime };

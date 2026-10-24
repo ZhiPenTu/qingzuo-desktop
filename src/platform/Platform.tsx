@@ -104,6 +104,7 @@ export default function Platform() {
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
   useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => { if (Number.isFinite(width)) setBrowserPaneWidth(width); }), []);
+  useEffect(() => window.commerceDesktop?.onBrowserPane?.(() => setBrowserPaneOpen(true)), []);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {

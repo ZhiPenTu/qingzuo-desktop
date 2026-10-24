@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile, copyFile, realpath, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {secureRequest} from './network-transport.mjs';
-import { allowedNetwork } from './security.mjs';
+import { allowedHeaderName, allowedNetwork } from './security.mjs';
 
 export function resolveSaveExtension(name, mime) {
   const mimeMap = {
@@ -72,7 +72,7 @@ export function resolveSaveFilters(extension) {
   ];
 }
 export class FileBroker {
-  constructor(root, dialog) { this.root = root; this.dialog = dialog; this.tokens = new Map(); this.epochs = new Map(); this.directories = new Map(); }
+  constructor(root, dialog, { persistent = null } = {}) { this.root = root; this.dialog = dialog; this.tokens = new Map(); this.epochs = new Map(); this.directories = new Map(); this.persistent = persistent; }
   async initialize() { await rm(this.root, { recursive: true, force: true }); }
   async create(plugin, bytes, name, mime = 'application/octet-stream', epoch = this.epochs.get(plugin.id) ?? 0) {
     if (!plugin.permissions.files) throw new Error('插件没有文件权限。');
@@ -85,7 +85,8 @@ export class FileBroker {
     this.tokens.set(token, { ...item, filename, owner: plugin.id }); return item;
   }
   async get(plugin, token) {
-    const item = this.tokens.get(token);
+    let item = this.tokens.get(token);
+    if (!item && this.persistent && plugin.permissions.files) item = await this.persistent.resolve(plugin, token).catch(() => null);
     if (!item || item.owner !== plugin.id || !plugin.permissions.files) throw new Error('文件未授权或已失效。');
     if ((await lstat(item.filename)).isSymbolicLink() || await realpath(item.filename) !== item.filename) throw new Error('文件路径已改变。');
     return item;
@@ -168,6 +169,21 @@ export class FileBroker {
 }
 export class NetworkBroker {
   constructor(files, credentials, request = secureRequest) { this.files = files; this.credentials = credentials; this.request = request; this.tasks = new Map(); }
+  async sign(plugin, options = {}) {
+    const algorithm = options.algorithm;
+    if (!['hmac-sha256', 'sha256'].includes(algorithm)) throw new Error('签名算法不受支持。');
+    if (typeof options.credential !== 'string' || !(plugin.permissions.credentials ?? []).includes(options.credential)) throw new Error('凭据未授权。');
+    if (typeof options.message !== 'string' || !options.message || options.message.length > 64 * 1024) throw new Error('签名内容无效。');
+    const digest = value => ({ algorithm, encoding: 'base64', digest: value });
+    if (algorithm === 'sha256') { if (options.keySuffix !== undefined) throw new Error('签名内容无效。'); return digest(createHash('sha256').update(options.message, 'utf8').digest('base64')); }
+    // Some platforms derive the HMAC key from the secret plus a public nonce that
+    // travels in the request, so the suffix is appended inside the host.
+    const suffix = options.keySuffix ?? '';
+    if (typeof suffix !== 'string' || suffix.length > 32 || /[^\x21-\x7e]/.test(suffix)) throw new Error('签名附加内容无效。');
+    const secret = await this.credentials.get(plugin.id, options.credential);
+    if (!secret) throw new Error('请先配置服务凭据。');
+    return digest(createHmac('sha256', secret + suffix).update(options.message, 'utf8').digest('base64'));
+  }
   async call(plugin, options) {
     const url = allowedNetwork(plugin, options.url);
     if (url.href !== 'https://api.remove.bg/v1.0/removebg' || !options.fileToken) return this.generic(plugin, options, url);
@@ -198,6 +214,11 @@ export class NetworkBroker {
   async generic(plugin,options,url) {
     const method=options.method || 'GET';if(!['GET','POST','PUT','PATCH','DELETE'].includes(method))throw new Error('请求方法不受支持。');
     const headers={Accept:'application/json'};let body;
+    if(options.headers!==undefined){
+      if(!options.headers||typeof options.headers!=='object'||Array.isArray(options.headers))throw new Error('请求头无效。');
+      const entries=Object.entries(options.headers);if(entries.length>16)throw new Error('请求头过多。');
+      for(const [name,value] of entries){allowedHeaderName(plugin,name);if(typeof value!=='string'||value.length>2048||/[\r\n\0]/.test(value))throw new Error('请求头内容无效。');if(name.toLowerCase()==='content-type'){if(options.multipart!==undefined||!/^application\/json\s*(;\s*charset=[A-Za-z0-9-]+)?$/i.test(value))throw new Error('请求头内容无效。');}headers[name]=value;}
+    }
     if (options.responseType !== undefined && !['data', 'file'].includes(options.responseType)) throw new Error('响应类型不受支持。');
     if (options.responseType === 'file' && !plugin.permissions.files) throw new Error('插件没有文件权限。');
     if (options.multipart !== undefined) {
@@ -220,7 +241,7 @@ export class NetworkBroker {
       for (const { field, item } of items) form.append(field, new Blob([await readFile(item.filename)], { type: item.mime }), item.name);
       body = form;
     }
-    if(options.json!==undefined) {body=JSON.stringify(options.json);if(body.length>4*1024*1024||method==='GET')throw new Error('请求内容无效或过大。');headers['Content-Type']='application/json';}
+    if(options.json!==undefined) {body=JSON.stringify(options.json);if(body.length>4*1024*1024||method==='GET')throw new Error('请求内容无效或过大。');if(!Object.keys(headers).some(name=>name.toLowerCase()==='content-type'))headers['Content-Type']='application/json';}
     if(options.credential) {
       if(!(plugin.permissions.credentials ?? []).includes(options.credential))throw new Error('凭据未授权。');
       const secret=await this.credentials.get(plugin.id,options.credential);if(!secret)throw new Error('请先配置服务凭据。');

@@ -1,12 +1,12 @@
 # 轻作发布与独立插件
 
-底座版本 0.3.23，插件 API / SDK 1.2.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.4.0，插件 API / SDK 1.3.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 底座
 
 Node 24 和 Rust 构建工作台、Harness 适配和系统沙箱。npm run platform:prepare 会清理旧生成目录，禁止携带编辑器、OCR 模型或业务 Python 后端。
 
-Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.3.23 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
+Validate commerce desktop 验证通用契约、沙箱、空工具中心、外部安装包和组件重建。Release commerce desktop 手动运行需要匹配版本，只上传 Commerce-macOS/Commerce-Windows 验收制品；v0.4.0 标签发布安装包和组件，不发布业务插件。正式资源禁止设置 QINGZUO_LOCAL_PREVIEW=1。
 
 插件市场公钥使用 COMMERCE_MARKET_PUBLIC_KEY；桌面组件继续使用既有 COMMERCE_PLUGIN_PUBLIC_KEY/COMMERCE_PLUGIN_SIGNING_KEY。两种用途在生成资源中分开记录。插件发布者不持有这两种私钥。
 
@@ -18,7 +18,7 @@ macOS 新组件仅有 core、electron、dependencies，保留旧组件清单读�
 
 sdk-v1.1.0 首次发布后，测试辅助入口的可见视图修正以 sdk-v1.1.1 发布，不覆盖原制品；运行时 API 仍为 1.1.0。两个版本设置 latest=false，不干扰桌面升级。独立插件用固定 sdk-v1.1.1 Release URL 和 lockfile integrity 安装 SDK。
 
-sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次和助手接口；sdk-v1.2.1 补齐浏览器权限校验与浏览器桥接接口，同样设置 latest=false。AI 批图仓库固定其 Release 字节，发布流水线核对 SHA-256，并核对 v0.3.0 底座发布运行的提交与正式标签后使用安装制品验收。市场验证器先升级 SDK 并注册发布者，再验证、签名和上架。
+sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次和助手接口；sdk-v1.2.1 补齐浏览器权限校验与浏览器桥接接口，同样设置 latest=false。AI 批图仓库固定其 Release 字节，发布流水线核对 SHA-256，并核对 v0.3.0 底座发布运行的提交与正式标签后使用安装制品验收。sdk-v1.3.0 增加页面自动化、页面来源白名单、资源转存、签名与自定义请求头、插件持久化存储，同样设置 latest=false。市场验证器先升级 SDK 并注册发布者，再验证、签名和上架。
 
 插件源码、Python/模型/字体、业务测试和打包在各自仓库完成。插件 CI 必须提供成功的底座验收运行 ID，从该运行下载对应平台安装制品并在真实沙箱中验收，不能借用底座源码依赖。
 

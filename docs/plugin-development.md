@@ -21,7 +21,9 @@ npm run plugin -- pack my-tool my-tool.ecplugin
 
 SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络请求、服务调用、工具/设置贡献、取消和清理。凭据读取仅存在于可信代理，插件页面无法读取已保存密钥。界面通过 `createPluginClient()` 获得 API；类型见 `packages/plugin-sdk/index.d.ts`。普通网络请求支持 HTTPS 的 GET/POST/PUT/PATCH/DELETE、JSON 内容及按引用注入 Bearer/X-Api-Key，响应为状态、MIME 和 Base64 数据。remove.bg 另提供受控文件上传适配器，返回可保存文件令牌。代理锁定已解析目标，禁止私网、重定向及未声明来源；公共域名兼容系统 TUN 的 198.18/15 映射，并始终验证该域名的 TLS 证书。任务取消会停止调用方本地进程并终止在线请求；失败请求不会自动重发。
 
-浏览器联动需要在清单中显式声明 `permissions.browser`，可申请 `detect` 和 `download`。宿主只向插件发送脱敏的候选 ID、标题、类型、来源页和状态；媒体地址、Cookie、签名参数和浏览器会话始终留在主进程。插件通过 `createPluginClient().browser` 读取候选、请求重新扫描、创建下载任务和接收状态事件，不能直接访问浏览器 DOM 或会话。
+浏览器联动需要在清单中显式声明 `permissions.browser`，可申请 `detect`、`download` 和 `automate`。宿主只向插件发送脱敏的候选 ID、标题、类型、来源页和状态；媒体地址、Cookie、签名参数和浏览器会话始终留在主进程。插件通过 `createPluginClient().browser` 读取候选、请求重新扫描、创建下载任务和接收状态事件，不能直接访问浏览器 DOM 或会话；`automate` 只能通过 API 1.3 的结构化快照和受限操作触达清单白名单内的页面。
+
+只申请 `automate` 的插件也可以调用 `browser.status()`，但返回值被裁剪为它自己打开过的标签页，候选、下载任务和其他标签页一律不可见。`browser.rescan()` 与完整状态仍然需要 `detect`。
 
 插件生成的文件通过 `client.files.create({ data, filename, mime })` 建立私有文件令牌，`data` 为 Base64；再调用 `client.files.save(token.token, filename)` 打开系统保存对话框。需要声明 `permissions.files`，其他插件无法读取该令牌；生成内容建议不超过 25 MB。LabelEdit 的 PDF 导出直接使用这条通道，不依赖浏览器下载事件。
 
@@ -30,6 +32,42 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 本地程序只可读取插件制品和必要运行时，写入私有任务目录。文件选择器由宿主授权，文件字节由文件令牌或受控 RPC 传入。输出由选择器保存。直接联网、访问其他插件数据与系统凭据、启动其他程序均被系统沙箱阻止；沙箱不可用时拒绝运行。
 
 ## 市场发布与升级
+
+### API 1.3 本地预览
+
+SDK 1.3.0 为「在指定网站上采集结构化数据」补齐五组主进程能力。新增能力全部要求显式清单权限，旧插件不受影响。
+
+- **页面操作**：`browser.open(url)` 在右侧浏览器面板打开页面并返回 `tabId`；`browser.snapshot({ tabId })` 返回 `ref`、`role`、`name`、`value`、`visible`、`rect`，图片与链接附带绝对 `url`，不返回 HTML、Cookie、隐藏输入和密码字段；`browser.act` 支持 `click / type / select / scroll / hover`；`browser.waitFor` 等待元素或文本出现、消失。需要 `permissions.browser: ['automate']`。
+- **页面来源白名单**：清单新增 `permissions.browserOrigins`（最多 16 个 origin，可写 `http://127.0.0.1:端口` 便于本地联调）。`browser.snapshot / act / waitFor / saveResource` 只在标签页当前 origin 命中白名单时可用，否则直接拒绝；`browser.open` 也只接受白名单地址。登录态保存在插件隔离分区中，验证码和改版页面由插件提示用户处理，底座不做绕过。
+- **资源转存**：`browser.saveResource({ tabId, url })` 使用该标签页的会话（带登录态和 Referer）抓取图片，校验内容类型与 32 MB 上限后交给存储，返回可直接用于上传的文件令牌。需要 `permissions.files` 与 `permissions.storage`。跨源地址仍禁止私网、回环和本地域名。
+- **签名与自定义请求头**：`network.sign({ credential, algorithm, message, keySuffix })` 支持 `hmac-sha256` 和 `sha256`，返回 `{ algorithm, encoding: 'base64', digest }`，密钥不离开主进程，凭据必须已列入 `permissions.credentials`。`keySuffix` 用于「HMAC 密钥 = 密钥 + 请求中公开的随机串」这类平台（如希音），最多 32 个可见字符，只有 `hmac-sha256` 接受。`network.request` 新增 `headers`，每个头名都必须列入 `permissions.networkHeaders`（最多 16 个，不能覆盖 `Authorization`、`Cookie`、`Host` 等传输头，单值不超过 2048 字符，`Content-Type` 只在 JSON 请求中允许 `application/json` 及可选 charset，multipart 请求不可覆盖）。用于需要 `x-lt-openKeyId / x-lt-timestamp / x-lt-signature` 这类平台签名头的接口。
+- **持久化存储**：`storage.get/set/keys/remove` 按插件隔离，单键 JSON 不超过 1 MB、总量不超过 100 MB；`storage.saveFile/readFile/removeFile` 保存跨重启可用的文件令牌。需要 `permissions.storage`，文件相关方法还需要 `permissions.files`。卸载插件时连同凭据、浏览器分区与存储一并清除。
+
+示例：
+
+```json
+"permissions": {
+  "files": true,
+  "storage": true,
+  "browser": ["automate"],
+  "browserOrigins": ["https://detail.1688.com"],
+  "network": ["https://openapi.sheincorp.com"],
+  "networkHeaders": ["x-lt-openkeyid", "x-lt-timestamp", "x-lt-signature"],
+  "credentials": ["shein.open-key", "shein.secret-key"]
+}
+```
+
+插件页面仍拿不到密钥与页面 HTML，只能拿到结构化结果和摘要。旧底座通过 `api: '^1.3.0'` 拒绝安装并提示升级。
+
+### 插件端到端联调
+
+自动化测试需要用真实平台主机名访问本地模拟服务。未打包构建可设置 `COMMERCE_TEST_NETWORK_ROUTES`，把已声明的平台 origin 映射到本机 HTTP 服务：
+
+```sh
+COMMERCE_TEST_NETWORK_ROUTES='{"https://openapi-test01.sheincorp.cn":"http://127.0.0.1:7801","https://api.openai.com":"http://127.0.0.1:7801"}' npm run desktop:dev
+```
+
+只接受 `openapi.sheincorp.com`、`openapi-test01.sheincorp.cn`、`api.openai.com`、`api.deepseek.com` 四个来源，目标必须是 `127.0.0.1`。改写发生在 `NetworkBroker` 完成清单授权之后，插件声明的 `permissions.network` 仍是唯一准入依据；打包构建忽略该变量。页面侧仍走 Chromium，需要真实域名时用 `--host-resolver-rules` 加自签名证书。
 
 ### API 1.2 本地预览
 
