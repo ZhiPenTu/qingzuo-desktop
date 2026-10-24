@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash, createHmac } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -183,4 +184,52 @@ test('FileBroker.save configures save dialog filters and ensures .pdf extension 
     await rm(root, { recursive: true, force: true });
     await rm(destDir, { recursive: true, force: true });
   }
+});
+
+test('request signing keeps secrets in the main process and rejects undeclared credentials', async () => {
+  const signed = { ...plugin, permissions: { ...plugin.permissions, credentials: ['shein.secret'] } };
+  const broker = new NetworkBroker(null, { get: async (_id, name) => name === 'shein.secret' ? 'fixture-secret' : null });
+  const message = 'openKeyId=key-1&timestamp=1700000000000';
+  const hmac = await broker.sign(signed, { credential: 'shein.secret', algorithm: 'hmac-sha256', message });
+  assert.equal(hmac.digest, createHmac('sha256', 'fixture-secret').update(message).digest('base64'));
+  assert.equal(hmac.encoding, 'base64');
+  assert.equal('secret' in hmac, false);
+  assert.equal((await broker.sign(signed, { credential: 'shein.secret', algorithm: 'sha256', message: 'abc' })).digest, createHash('sha256').update('abc').digest('base64'));
+  await assert.rejects(broker.sign(signed, { credential: 'other', algorithm: 'hmac-sha256', message }), /凭据未授权/);
+  await assert.rejects(broker.sign(signed, { credential: 'shein.secret', algorithm: 'md5', message }), /签名算法/);
+  await assert.rejects(broker.sign(signed, { credential: 'shein.secret', algorithm: 'hmac-sha256', message: '' }), /签名内容无效/);
+  await assert.rejects(new NetworkBroker(null, { get: async () => null }).sign(signed, { credential: 'shein.secret', algorithm: 'hmac-sha256', message }), /配置/);
+});
+
+test('signing appends a public suffix to the key without exposing the secret', async () => {
+  const scoped = { ...plugin, permissions: { ...plugin.permissions, credentials: ['shein.secret-key'] } };
+  const broker = new NetworkBroker(null, { get: async () => 'SECRET' }, async () => new Response('{}'));
+  const plain = await broker.sign(scoped, { credential: 'shein.secret-key', algorithm: 'hmac-sha256', message: 'openKeyId&1&/open-api/goods/x' });
+  const suffixed = await broker.sign(scoped, { credential: 'shein.secret-key', algorithm: 'hmac-sha256', message: 'openKeyId&1&/open-api/goods/x', keySuffix: 'test1' });
+  assert.notEqual(plain.digest, suffixed.digest);
+  assert.equal(suffixed.encoding, 'base64');
+  assert.equal(JSON.stringify(suffixed).includes('SECRET'), false);
+  await assert.rejects(broker.sign(scoped, { credential: 'shein.secret-key', algorithm: 'hmac-sha256', message: 'x', keySuffix: 'bad suffix' }), /签名附加内容无效/);
+  await assert.rejects(broker.sign(scoped, { credential: 'shein.secret-key', algorithm: 'sha256', message: 'x', keySuffix: 'a' }), /签名内容无效/);
+});
+
+test('declared custom headers reach the request while undeclared ones are refused', async () => {
+  const scoped = { ...plugin, permissions: { ...plugin.permissions, network: ['https://openapi.sheincorp.com'], networkHeaders: ['x-lt-openKeyId', 'x-lt-timestamp'] } };
+  let captured = null;
+  const broker = new NetworkBroker(null, { get: async () => null }, async (_url, request) => { captured = request; return new Response('{"ok":true}'); });
+  const result = await broker.call(scoped, { url: 'https://openapi.sheincorp.com/goods/upload-pic', headers: { 'x-lt-openKeyId': 'key-1', 'x-lt-timestamp': '1700000000000' } });
+  assert.equal(Buffer.from(result.data, 'base64').toString(), '{"ok":true}');
+  assert.equal(captured.headers['x-lt-openKeyId'], 'key-1');
+  assert.equal(captured.headers.Accept, 'application/json');
+  await assert.rejects(broker.call(scoped, { url: 'https://openapi.sheincorp.com/x', headers: { 'x-other': '1' } }), /未授权/);
+  await assert.rejects(broker.call(scoped, { url: 'https://openapi.sheincorp.com/x', headers: { 'x-lt-timestamp': 'a\r\nb' } }), /内容无效/);
+  await assert.rejects(broker.call(scoped, { url: 'https://openapi.sheincorp.com/x', headers: ['a'] }), /请求头无效/);
+  const jsonBroker = { ...scoped, permissions: { ...scoped.permissions, networkHeaders: ['content-type'] } };
+  let jsonHeaders = null;
+  const jsonCall = new NetworkBroker(null, { get: async () => null }, async (_url, request) => { jsonHeaders = request.headers; return new Response('{}'); });
+  await jsonCall.call(jsonBroker, { url: 'https://openapi.sheincorp.com/x', method: 'POST', headers: { 'Content-Type': 'application/json;charset=UTF-8' }, json: { a: 1 } });
+  assert.equal(jsonHeaders['Content-Type'], 'application/json;charset=UTF-8');
+  await assert.rejects(jsonCall.call(jsonBroker, { url: 'https://openapi.sheincorp.com/x', method: 'POST', headers: { 'Content-Type': 'text/plain' }, json: { a: 1 } }), /内容无效/);
+  await assert.rejects(jsonCall.call(jsonBroker, { url: 'https://openapi.sheincorp.com/x', method: 'POST', headers: { 'Content-Type': 'application/json' }, multipart: { fields: { a: '1' } } }), /内容无效/);
+  await assert.rejects(broker.call({ ...scoped, permissions: { ...scoped.permissions, networkHeaders: ['authorization'] } }, { url: 'https://openapi.sheincorp.com/x', headers: { Authorization: 'Bearer x' } }), /请求头无效/);
 });

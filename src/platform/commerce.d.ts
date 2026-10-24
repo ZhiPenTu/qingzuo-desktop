@@ -57,7 +57,7 @@ export interface BrowserStatus {
 }
 declare global {
   interface Window {
-    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
+    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowserPane?(callback: (value: { tabId: string; pluginId: string }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
     commercePlugin?: PluginBridge & { id: string };
   }
 }

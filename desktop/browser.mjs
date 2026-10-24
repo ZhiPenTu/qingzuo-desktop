@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { dialog, session, WebContentsView } from 'electron';
-import { isAllowedBrowserUrl, normalizeBrowserUrl } from './browser-policy.mjs';
+import { isAllowedBrowserUrl, normalizeBrowserUrl, ownedBrowserTabs } from './browser-policy.mjs';
+import { allowedBrowserOrigin } from './security.mjs';
+import { buildActionScript, buildSnapshotScript, buildWaitScript, validateAction, validateWait } from './browser-automation.mjs';
+import { readImageResource } from './browser-resources.mjs';
+import { ensureBrowserLayout, releaseBrowserLayout } from './browser-viewport.mjs';
 import {
   MAX_BROWSER_CANDIDATES,
   candidateKey,
@@ -41,13 +45,15 @@ function publicDownload(task) {
 }
 
 export class BrowserRuntime {
-  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {} }) {
+  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {}, files = null, storage = null }) {
     this.window = window;
     this.changed = changed;
     this.event = event;
     this.preload = preload;
     this.resizeStop = resizeStop;
     this.resizeMove = resizeMove;
+    this.files = files;
+    this.storage = storage;
     this.browserSession = null;
     this.tabs = new Map();
     this.activeTabId = null;
@@ -86,6 +92,18 @@ export class BrowserRuntime {
     };
   }
 
+  // Automation-only plugins get this narrower view: their own tabs, nothing else.
+  statusForPlugin(plugin) {
+    const owned = ownedBrowserTabs([...this.tabs.values()], plugin.id);
+    return {
+      open: owned.length > 0,
+      activeTabId: owned.some(tab => tab.id === this.activeTabId) ? this.activeTabId : (owned[0]?.id ?? null),
+      tabs: owned.map(publicTab),
+      candidates: [],
+      downloads: [],
+    };
+  }
+
   candidateFor(id) {
     for (const items of this.candidates.values()) {
       const candidate = [...items.values()].find(item => item.id === id);
@@ -102,6 +120,85 @@ export class BrowserRuntime {
     await this.ensureSession();
     if (!this.tabs.size) await this.newTab();
     return this.status();
+  }
+
+  resolveTab(tabId) {
+    const id = tabId ?? this.activeTabId;
+    const tab = id ? this.tabs.get(id) : null;
+    if (!tab) throw new Error('浏览器标签不存在。');
+    if (!tab.view || tab.view.webContents.isDestroyed()) throw new Error('浏览器页面尚未打开。');
+    return tab;
+  }
+
+  assertTabOrigin(plugin, tab) {
+    const address = tab.view?.webContents.getURL() || tab.url;
+    if (!address) throw new Error('浏览器页面尚未加载。');
+    return allowedBrowserOrigin(plugin, address);
+  }
+
+  async openForPlugin(plugin, url) {
+    const address = normalizeBrowserUrl(url);
+    allowedBrowserOrigin(plugin, address);
+    await this.ensureSession();
+    const previous = [...this.tabs.values()].find(tab => tab.owner === plugin.id && tab.view && !tab.view.webContents.isDestroyed());
+    const created = previous ? null : await this.newTab();
+    // newTab() returns the public tab, while ownership and the view live on
+    // the internal record, so reuse the record rather than the public copy.
+    const tab = previous ?? this.tabs.get(created.id);
+    tab.owner = plugin.id;
+    await this.navigate(tab.id, address);
+    this.activeTabId = tab.id;
+    this.notify({ type: 'status', tabId: tab.id });
+    return { tabId: tab.id, url: address, title: tab.title };
+  }
+
+  async snapshot(plugin, options = {}) {
+    const tab = this.resolveTab(options.tabId);
+    const url = this.assertTabOrigin(plugin, tab);
+    await ensureBrowserLayout(tab.view.webContents, this.window.getContentBounds());
+    const result = await tab.view.webContents.executeJavaScript(buildSnapshotScript(), true);
+    const nodes = Array.isArray(result?.nodes) ? result.nodes.filter(node => node && typeof node.ref === 'string' && typeof node.role === 'string') : [];
+    return { tabId: tab.id, url: url.href, title: tab.title, nodes, truncated: Boolean(result?.truncated) };
+  }
+
+  async act(plugin, options = {}) {
+    const input = validateAction(options);
+    const tab = this.resolveTab(options.tabId);
+    const url = this.assertTabOrigin(plugin, tab);
+    await ensureBrowserLayout(tab.view.webContents, this.window.getContentBounds());
+    const outcome = await tab.view.webContents.executeJavaScript(buildActionScript(input), true);
+    if (!outcome || outcome.ok !== true) {
+      const reason = outcome?.reason === 'missing' ? '页面元素已变化，请重新采集。' : outcome?.reason === 'option-missing' ? '下拉选项未找到。' : outcome?.reason === 'not-select' ? '该元素不是下拉框。' : '页面操作未完成。';
+      throw new Error(reason);
+    }
+    return { tabId: tab.id, url: url.href, action: input.action, ok: true, ...(outcome.value !== undefined ? { value: outcome.value } : {}), ...(outcome.scrollY !== undefined ? { scrollY: outcome.scrollY } : {}) };
+  }
+
+  async waitFor(plugin, options = {}) {
+    const input = validateWait(options);
+    const tab = this.resolveTab(options.tabId);
+    const url = this.assertTabOrigin(plugin, tab);
+    await ensureBrowserLayout(tab.view.webContents, this.window.getContentBounds());
+    const outcome = await tab.view.webContents.executeJavaScript(buildWaitScript(input), true);
+    return { tabId: tab.id, url: url.href, ok: Boolean(outcome?.ok), elapsed: Number(outcome?.elapsed) || 0 };
+  }
+
+  async saveResource(plugin, options = {}) {
+    if (!plugin.permissions.files || !this.files) throw new Error('插件没有文件权限。');
+    if (!plugin.permissions.storage || !this.storage) throw new Error('插件需要长期保存图片，请声明插件存储权限。');
+    const tab = this.resolveTab(options.tabId);
+    const pageUrl = this.assertTabOrigin(plugin, tab);
+    const address = normalizeBrowserUrl(options.url);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    try {
+      const resource = await readImageResource({ fetch: this.browserSession.fetch.bind(this.browserSession), address, referer: pageUrl.href, sameOrigin: pageUrl.origin, signal: controller.signal });
+      const file = await this.storage.saveFile(plugin, { data: resource.bytes.toString('base64'), filename: resource.name, mime: resource.mime });
+      return { tabId: tab.id, ...file };
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('图片读取超时或已取消。');
+      throw error instanceof Error && /^(图片|该地址)/.test(error.message) ? error : new Error('图片读取失败，请在页面中重新打开后重试。');
+    } finally { clearTimeout(timer); }
   }
 
   async newTab(url) {
@@ -129,6 +226,10 @@ export class BrowserRuntime {
         spellcheck: false,
       },
     });
+    // A view that has never been sized reports a zero-width viewport, which
+    // collapses block layout and makes page collection read empty values.
+    const area = this.window.getContentBounds();
+    view.setBounds({ x: 0, y: 0, width: Math.max(1, area.width), height: Math.max(1, area.height) });
     view.setVisible(false);
     view.webContents.setWindowOpenHandler(({ url }) => {
       if (isAllowedBrowserUrl(url)) void this.newTab(url).catch(error => console.error('Browser new tab failed:', error.message));
@@ -330,6 +431,7 @@ export class BrowserRuntime {
     const nextBounds = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Math.floor(bounds[key])]));
     view.setBounds(nextBounds);
     view.setVisible(true);
+    void releaseBrowserLayout(view.webContents).catch(() => {});
   }
 
   async download({ candidateIds, mode = 'single' } = {}) {

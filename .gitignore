@@ -18,3 +18,4 @@ release/
 .commerce-dev/
 resources/generated/
 *.ecplugin
+test-results/

@@ -18,3 +18,11 @@ export function normalizeBrowserUrl(value) {
   return address.href;
 }
 
+// A plugin limited to `automate` still needs to know whether the tab it opened
+// is alive. It must never learn about tabs the user opened themselves, so the
+// ownership filter is the only thing such a plugin may observe.
+export function ownedBrowserTabs(tabs, pluginId) {
+  if (typeof pluginId !== 'string' || !pluginId) return [];
+  return (Array.isArray(tabs) ? tabs : []).filter(tab => tab && tab.owner === pluginId);
+}
+
