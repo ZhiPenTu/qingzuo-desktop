@@ -248,7 +248,9 @@ export default function Platform() {
   };
   const currentBrowserPaneWidth = () => {
     const width = browserPaneRef.current?.getBoundingClientRect().width;
-    return width && width > 0 ? width : Math.min(1360, Math.max(BROWSER_PANE_MIN_WIDTH, window.innerWidth * 0.46 || BROWSER_PANE_DEFAULT_WIDTH));
+    const limits = browserPaneLimits();
+    const defaultWidth = Math.min(limits.max, Math.max(limits.min, Math.min(2400, Math.round(window.innerWidth * 0.48)) || BROWSER_PANE_DEFAULT_WIDTH));
+    return width && width > 0 ? width : defaultWidth;
   };
   const setBrowserPaneWidthWithinBounds = (width: number) => {
     const { min, max } = browserPaneLimits();
