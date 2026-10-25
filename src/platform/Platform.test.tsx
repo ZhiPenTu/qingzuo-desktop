@@ -282,6 +282,22 @@ it('restores browser pane width from storage and clears on double-click', async 
   }
 });
 
+it('scales default browser pane width responsively on ultra-wide screens without 1360px cap', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 3840;
+  try {
+    const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+    fixture(undefined, true, false, [], browser);
+    render(<Platform />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开浏览器面板' }));
+    await screen.findByRole('tablist', { name: '浏览器标签页' });
+    const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
+    expect(Number(resizer.getAttribute('aria-valuenow'))).toBeGreaterThan(1500);
+  } finally {
+    window.innerWidth = originalWidth;
+  }
+});
+
 it('opens the browser in a right-side pane with independent left and right controls', async () => {
   const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
   const { invoke } = fixture(undefined, true, false, [], browser);
