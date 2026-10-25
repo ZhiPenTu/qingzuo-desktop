@@ -61,7 +61,15 @@ export default function Platform() {
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
   const [page, setPage] = useState<Page | string>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
-  const [browserPaneWidth, setBrowserPaneWidth] = useState<number | null>(null);
+  const [browserPaneWidth, setBrowserPaneWidth] = useState<number | null>(() => {
+    try {
+      const saved = window.localStorage.getItem('qingzuo.browserPaneWidth');
+      const parsed = saved ? parseInt(saved, 10) : null;
+      return parsed && Number.isFinite(parsed) && parsed >= BROWSER_PANE_MIN_WIDTH ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
   const [browserPaneResizing, setBrowserPaneResizing] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
@@ -103,7 +111,13 @@ export default function Platform() {
   };
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
-  useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => { if (Number.isFinite(width)) setBrowserPaneWidth(width); }), []);
+  useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => {
+    if (Number.isFinite(width)) {
+      const next = Math.round(width);
+      setBrowserPaneWidth(next);
+      try { window.localStorage.setItem('qingzuo.browserPaneWidth', String(next)); } catch { /* storage is optional */ }
+    }
+  }), []);
   useEffect(() => window.commerceDesktop?.onBrowserPane?.(() => setBrowserPaneOpen(true)), []);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
@@ -234,11 +248,13 @@ export default function Platform() {
   };
   const currentBrowserPaneWidth = () => {
     const width = browserPaneRef.current?.getBoundingClientRect().width;
-    return width && width > 0 ? width : Math.min(720, Math.max(BROWSER_PANE_MIN_WIDTH, window.innerWidth * 0.48 || BROWSER_PANE_DEFAULT_WIDTH));
+    return width && width > 0 ? width : Math.min(1360, Math.max(BROWSER_PANE_MIN_WIDTH, window.innerWidth * 0.46 || BROWSER_PANE_DEFAULT_WIDTH));
   };
   const setBrowserPaneWidthWithinBounds = (width: number) => {
     const { min, max } = browserPaneLimits();
-    setBrowserPaneWidth(Math.round(Math.min(max, Math.max(min, width))));
+    const next = Math.round(Math.min(max, Math.max(min, width)));
+    setBrowserPaneWidth(next);
+    try { window.localStorage.setItem('qingzuo.browserPaneWidth', String(next)); } catch { /* storage is optional */ }
   };
   const beginBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
@@ -463,7 +479,7 @@ export default function Platform() {
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       </div>
       </div>
-      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={browserPaneWidth ? { flexBasis: `${browserPaneWidth}px` } : undefined}>
+      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={browserPaneWidth ? { flexBasis: `${Math.min(browserPaneLimits().max, Math.max(browserPaneLimits().min, browserPaneWidth))}px` } : undefined}>
         <div
           className="commerce-browser-resizer"
           role="separator"
@@ -472,14 +488,17 @@ export default function Platform() {
           aria-orientation="vertical"
           aria-valuemin={browserPaneLimits().min}
           aria-valuemax={browserPaneLimits().max}
-          aria-valuenow={Math.round(browserPaneWidth ?? currentBrowserPaneWidth())}
+          aria-valuenow={Math.round(browserPaneWidth ? Math.min(browserPaneLimits().max, Math.max(browserPaneLimits().min, browserPaneWidth)) : currentBrowserPaneWidth())}
           onPointerDown={beginBrowserResize}
           onPointerMove={moveBrowserResize}
           onPointerUp={endBrowserResize}
           onPointerCancel={endBrowserResize}
           onLostPointerCapture={endBrowserResize}
           onKeyDown={handleBrowserResizeKeyDown}
-          onDoubleClick={() => setBrowserPaneWidth(null)}
+          onDoubleClick={() => {
+            setBrowserPaneWidth(null);
+            try { window.localStorage.removeItem('qingzuo.browserPaneWidth'); } catch { /* storage is optional */ }
+          }}
         />
         <BrowserWorkspace showTabs={false} status={status?.browser ?? emptyBrowser} busy={busy} onAction={run} />
       </aside> : null}
