@@ -45,7 +45,7 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.removeItem('qingzuo.sidebarCollapsed'); delete window.commerceDesktop; });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.removeItem('qingzuo.sidebarCollapsed'); window.localStorage.removeItem('qingzuo.browserPaneWidth'); delete window.commerceDesktop; });
 
 it('keeps backend progress after acknowledgment, restores it across pages, and completes on the installed state', async () => {
   const { invoke, emit } = fixture();
@@ -254,6 +254,32 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
   const expandButton = await screen.findByRole('button', { name: '展开侧边栏' });
   expect(expandButton.closest('.commerce-windowbar')).toBeTruthy();
   expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+});
+
+
+it('restores browser pane width from storage and clears on double-click', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 1920;
+  try {
+    window.localStorage.setItem('qingzuo.browserPaneWidth', '980');
+    const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+    fixture(undefined, true, false, [], browser);
+    render(<Platform />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开浏览器面板' }));
+    await screen.findByRole('tablist', { name: '浏览器标签页' });
+    const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
+    expect(pane).toBeTruthy();
+    expect(pane?.style.flexBasis).toBe('980px');
+
+    const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
+    expect(resizer.getAttribute('aria-valuenow')).toBe('980');
+
+    fireEvent.doubleClick(resizer);
+    expect(pane?.style.flexBasis).toBe('');
+    expect(window.localStorage.getItem('qingzuo.browserPaneWidth')).toBeNull();
+  } finally {
+    window.innerWidth = originalWidth;
+  }
 });
 
 it('opens the browser in a right-side pane with independent left and right controls', async () => {
