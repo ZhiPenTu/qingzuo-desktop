@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import { validateToolSchema } from './tool-schema-core.mjs';
-export const API_VERSION = '1.3.0';
+export const API_VERSION = '1.4.0';
 export const TARGET = process.platform + '-' + process.arch;
 export const RESERVED_HEADERS = ['authorization', 'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-connection', 'te', 'trailer'];
 export function safeRelative(value) {
@@ -20,7 +20,7 @@ export function validateManifest(pkg, target = TARGET) {
   if (m.settings) { if (typeof m.settings.title !== 'string') throw new Error('插件设置无效。'); safeRelative(m.settings.entry); }
   const permissions = m.permissions ?? {};
   if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'ai', 'browser', 'browserOrigins', 'networkHeaders', 'storage'].includes(k))) throw new Error('插件申请了不支持的权限。');
-  if (permissions.ai !== undefined && (!Array.isArray(permissions.ai) || new Set(permissions.ai).size !== permissions.ai.length || permissions.ai.some(value => !['assistant', 'image-edit'].includes(value)))) throw new Error('AI 权限无效。');
+  if (permissions.ai !== undefined && (!Array.isArray(permissions.ai) || new Set(permissions.ai).size !== permissions.ai.length || permissions.ai.some(value => !['assistant', 'image-edit', 'text'].includes(value)))) throw new Error('AI 权限无效。');
   if (permissions.files !== undefined && typeof permissions.files !== 'boolean') throw new Error('文件权限无效。');
   if (permissions.storage !== undefined && typeof permissions.storage !== 'boolean') throw new Error('存储权限无效。');
   if (permissions.browser !== undefined && (!Array.isArray(permissions.browser) || new Set(permissions.browser).size !== permissions.browser.length || permissions.browser.some(value => !['detect', 'download', 'automate'].includes(value)))) throw new Error('浏览器权限无效。');

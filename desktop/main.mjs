@@ -22,6 +22,7 @@ import { preparePluginMigration } from './plugin-migration.mjs';
 import { ImageEditor } from './ai-images.mjs';
 import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
+import { TextRuntime } from './ai-text.mjs';
 import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
@@ -45,7 +46,7 @@ let browserResizeState = null;
 let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, approvals, downloadSources;
+let batches, proxy, imageEditor, textRuntime, approvals, downloadSources;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -422,7 +423,10 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   }
   if (method.startsWith('ai.')) {
     const assistant = method.startsWith('ai.assistant.');
-    if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : 'image-edit')) throw new Error('AI 能力未授权。');
+    const text = method === 'ai.textModels' || method === 'ai.complete';
+    if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : text ? 'text' : 'image-edit')) throw new Error('AI 能力未授权。');
+    if (method === 'ai.textModels') return textRuntime.models();
+    if (method === 'ai.complete') return textRuntime.complete(args);
     if (method === 'ai.models') return imageEditor.models(plugin, args);
     if (assistant) return kernelRequest({ type: 'call', kind: 'ai', method: method.slice(3), args, caller: id });
     if (method === 'ai.batch.list') return batches.list(plugin);
@@ -514,6 +518,7 @@ await files.initialize();
 const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
 proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initialize();
 imageEditor = new ImageEditor(credentials, undefined, proxy);
+textRuntime = new TextRuntime({ proxy });
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
 approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
   if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
