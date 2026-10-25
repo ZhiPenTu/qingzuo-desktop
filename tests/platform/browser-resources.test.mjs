@@ -14,15 +14,22 @@ test('page resources never reach loopback, private or local hosts', async () => 
   assert.equal((await assertPublicResource('https://cbu01.alicdn.com/img/a.jpg', publicResolve)).origin, 'https://cbu01.alicdn.com');
 });
 
-test('image transfer keeps the page referer, bounds size and returns file metadata', async () => {
+test('image transfer keeps session, validates cross-origin referer and returns file metadata', async () => {
   let captured = null;
   const resource = await readImageResource({ address: 'https://cbu01.alicdn.com/img/abc.jpg?v=1', referer: 'https://detail.1688.com/offer/1.html', resolve: publicResolve, fetch: async (url, init) => { captured = { url, init }; return new Response(png, { headers: { 'content-type': 'image/jpeg; charset=binary' } }); } });
   assert.equal(captured.url, 'https://cbu01.alicdn.com/img/abc.jpg?v=1');
-  assert.equal(captured.init.headers.Referer, 'https://detail.1688.com/offer/1.html');
+  assert.equal(captured.init.headers.Referer, 'https://detail.1688.com');
   assert.equal(captured.init.credentials, 'include');
   assert.equal(resource.mime, 'image/jpeg');
   assert.equal(resource.name, 'abc.jpg');
   assert.deepEqual(resource.bytes, png);
+
+  let crossOrigin = null;
+  await readImageResource({ address: 'https://cbu01.alicdn.com/img/abc.jpg_.webp?v=1', referer: 'https://detail.1688.com/offer/1.html?spm=x', resolve: publicResolve, fetch: async (url, init) => {
+    crossOrigin = init;
+    return new Response(png, { headers: { 'content-type': 'image/webp' } });
+  } });
+  assert.equal(crossOrigin.headers.Referer, 'https://detail.1688.com');
 
   await assert.rejects(readImageResource({ address: 'https://cbu01.alicdn.com/a.jpg', referer: 'https://detail.1688.com/', resolve: publicResolve, fetch: async () => new Response('<html>', { headers: { 'content-type': 'text/html' } }) }), /不是图片/);
   await assert.rejects(readImageResource({ address: 'https://cbu01.alicdn.com/a.jpg', referer: 'https://detail.1688.com/', resolve: publicResolve, maxBytes: 2, fetch: async () => new Response(png, { headers: { 'content-type': 'image/png' } }) }), /超过/);

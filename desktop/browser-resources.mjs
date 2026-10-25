@@ -36,8 +36,13 @@ export async function readImageResource({ fetch, address, referer, maxBytes = MA
   const allowed = origin => Boolean(sameOrigin && origin === sameOrigin);
   let requested = null;
   try { requested = new URL(address).origin; } catch {}
+  let resourceReferer = referer;
+  try {
+    const page = new URL(referer);
+    if (requested && page.origin !== requested) resourceReferer = page.origin;
+  } catch {}
   const url = await assertPublicResource(address, resolve, { allowPrivate: allowed(requested) });
-  const response = await fetch(url.href, { credentials: 'include', redirect: 'follow', signal, headers: { Referer: referer, Accept: 'image/*,*/*;q=0.8' } });
+  const response = await fetch(url.href, { credentials: 'include', redirect: 'follow', signal, headers: { Referer: resourceReferer, Accept: 'image/*,*/*;q=0.8' } });
   if (!response.ok) throw new Error('图片读取失败（' + response.status + '）。');
   if (response.url && response.url !== url.href) {
     const target = new URL(response.url);
