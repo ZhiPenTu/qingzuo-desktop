@@ -103,7 +103,7 @@ SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回�
 
 API 1.1 增加 files.url(token) 与 files.release(token)。URL 只在插件自身隔离会话中有效；其他插件不能读取令牌。network.request 支持 multipart.fields 和 multipart.files（field/token），不能与 json 同时使用；上传总量最多 25 MB。responseType: file 返回 status/mime/file，普通响应返回 status/mime/data；响应上限分别为 64 MB 和 8 MB。HTTP 错误状态由插件解释，凭据注入、网络边界和取消由底座执行，失败不会自动重试。
 
-目录维护位于 ZhiPenTu/qingzuo-market。发布者生成双平台目录片段，市场验证原始 Release 制品后签名并提出 PR，合并后上架。目录条目的 api 是可选兼容范围，旧条目默认 ^1.0.0，不兼容插件在界面和安装入口均被阻止。
+目录维护位于 ZhiPenTu/qingzuo-market。发布者生成双平台目录片段，市场验证原始 Release 制品后签名并自动更新目录。目录条目的 api 是可选兼容范围，旧条目默认 ^1.0.0，不兼容插件在界面和安装入口均被阻止。
 
 官方制品需 Ed25519 签名与 SHA-256。使用 `COMMERCE_PLUGIN_SIGNING_KEY` 环境变量运行 `npm run plugin -- sign <artifact>`，不要将私钥写入源码或插件包。目录每个条目仅保留最新版本及其变更日志；每个平台记录 URL、哈希和签名。示例结构由 `scripts/market-artifacts.mjs` 生成。
 
