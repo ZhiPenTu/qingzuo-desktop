@@ -273,12 +273,12 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .plugin-notes .release-notes { padding-bottom: 12px; }
 .plugin-card.is-updating { border-color: color-mix(in oklch, var(--primary) 70%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent), 0 4px 20px -4px color-mix(in oklch, var(--primary) 20%, transparent); transition: border-color .3s ease, box-shadow .3s ease; }
 .plugin-update-progress { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.plugin-update-bar { position: relative; width: 100%; height: 4px; background: var(--muted); border-radius: 9999px; overflow: hidden; }
-.plugin-update-shimmer { position: absolute; top: 0; bottom: 0; left: 0; width: 40%; border-radius: 9999px; background: linear-gradient(90deg, color-mix(in oklch, var(--primary) 20%, transparent) 0%, var(--primary) 50%, color-mix(in oklch, var(--primary) 20%, transparent) 100%); animation: plugin-bar-flow 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+/* indeterminate 条必须落在 track 内部，否则会横跨整块内容。 */
+[data-slot="progress-shimmer"] { position: absolute; inset-block: 0; left: 0; width: 40%; border-radius: 9999px; background: linear-gradient(90deg, color-mix(in oklch, var(--primary) 20%, transparent) 0%, var(--primary) 50%, color-mix(in oklch, var(--primary) 20%, transparent) 100%); animation: plugin-bar-flow 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
 .plugin-update-hint { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--primary); font-weight: 500; }
 .plugin-update-hint svg { width: 13px; height: 13px; }
 @keyframes plugin-bar-flow { 0% { transform: translateX(-100%); } 50% { transform: translateX(130%); } 100% { transform: translateX(260%); } }
-@media (prefers-reduced-motion: reduce) { .plugin-update-shimmer { animation: none; width: 100%; opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { [data-slot="progress-shimmer"] { animation: none; width: 100%; opacity: 0.6; } }
 .plugin-card > [data-slot="card-footer"] { background: transparent; flex-wrap: wrap; gap: 6px; padding-block: 12px; margin-top: auto; }
 .plugin-version { color: var(--muted-foreground); font-size: 12px; margin-right: auto; }
 .plugin-installed { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); font-size: 11px; }

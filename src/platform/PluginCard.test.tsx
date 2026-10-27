@@ -37,7 +37,12 @@ describe('PluginCard installation state', () => {
     const { container } = render(<PluginCard entry={installed} installed={installed} mode="plugins" disabled={false} ready={true} install={job('verifying')} onOpen={vi.fn()} onAction={onAction} />);
     expect(screen.getByText('正在校验插件签名…')).toBeTruthy();
     expect(screen.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(false);
-    expect(container.querySelector('.plugin-update-shimmer')).toBeTruthy();
+    const track = container.querySelector('[data-slot="progress-track"]');
+    const shimmer = container.querySelector('[data-slot="progress-shimmer"]');
+    expect(shimmer).toBeTruthy();
+    // 动画条必须被 track 裁剪，不能挂在 Progress 根节点上横跨整块内容。
+    expect(shimmer?.parentElement).toBe(track);
+    expect(container.querySelectorAll('[data-slot="progress-shimmer"]')).toHaveLength(1);
     for (const name of ['停用', '恢复版本', '卸载']) {
       const button = screen.getByRole('button', { name });
       expect(button.hasAttribute('disabled')).toBe(true);

@@ -5,8 +5,9 @@ function Progress({
   className,
   children,
   value,
+  indeterminate = false,
   ...props
-}: ProgressPrimitive.Root.Props) {
+}: ProgressPrimitive.Root.Props & { indeterminate?: boolean }) {
   return (
     <ProgressPrimitive.Root
       value={value}
@@ -17,6 +18,7 @@ function Progress({
       {children}
       <ProgressTrack>
         <ProgressIndicator />
+        {indeterminate ? <span data-slot="progress-shimmer" aria-hidden="true" /> : null}
       </ProgressTrack>
     </ProgressPrimitive.Root>
   )
@@ -26,7 +28,7 @@ function ProgressTrack({ className, ...props }: ProgressPrimitive.Track.Props) {
   return (
     <ProgressPrimitive.Track
       className={cn(
-        "relative flex h-1 w-full items-center overflow-x-hidden rounded-full bg-muted",
+        "relative flex h-1 w-full items-center overflow-hidden rounded-full bg-muted",
         className
       )}
       data-slot="progress-track"
