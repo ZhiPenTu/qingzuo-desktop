@@ -390,7 +390,7 @@ export default function Platform() {
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
         LabelEdit 已独立发布。原有配置和文件保留，重新安装需要联网下载一次。<Button variant="outline" size="sm" disabled={busy || migrationRunning} onClick={() => act('market.install', { id: status.migration!.id })}>恢复 LabelEdit</Button><Button variant="ghost" size="sm" disabled={busy || migrationRunning} onClick={() => act('migration.dismiss')}>稍后从市场安装</Button>
         {migrationRunning ? <div className="plugin-update-progress" role="status" aria-label="LabelEdit 恢复状态" aria-live="polite" aria-busy="true">
-          <Progress value={migrationProgress} className="relative" aria-label="LabelEdit 恢复进度">{migrationProgress === null ? <div className="plugin-update-shimmer" aria-hidden="true" /> : null}</Progress>
+          <Progress value={migrationProgress} indeterminate={migrationProgress === null} className="relative" aria-label="LabelEdit 恢复进度" />
           <span className="plugin-update-hint"><LoaderCircle className="animate-spin" />{migrationPhase}{migrationProgress !== null ? ` ${Math.floor(migrationProgress)}%` : ''}</span>
           {migrationInstall?.status === 'downloading' && (migrationInstall.transferred > 0 || migrationInstall.total > 0) ? <span className="plugin-update-hint">{(migrationInstall.transferred / 1024 ** 2).toFixed(1)} MB{migrationInstall.total > 0 ? ` / ${(migrationInstall.total / 1024 ** 2).toFixed(1)} MB` : ''}</span> : null}
         </div> : null}

@@ -63,9 +63,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {mode === 'plugins' && entry.releaseNotes ? <details className="plugin-notes"><summary>版本说明<ChevronDown /></summary><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></details> : null}
       {installed?.error ? <p role="alert" className="text-destructive">{installed.error}</p> : null}
       {updating ? <div className="plugin-update-progress" role="status" aria-busy="true" aria-live="polite">
-        <Progress value={progress} className="relative overflow-hidden" aria-label={`${entry.title} 安装进度`}>
-          {progress === null ? <div className="plugin-update-shimmer" aria-hidden="true" /> : null}
-        </Progress>
+        <Progress value={progress} indeterminate={progress === null} className="relative" aria-label={`${entry.title} 安装进度`} />
         <span className="plugin-update-hint"><LoaderCircle className="animate-spin" />{phase}{progress !== null ? ` ${Math.floor(progress)}%` : ''}</span>
         {install?.status === 'downloading' && (install.transferred > 0 || install.total > 0) ? <span className="plugin-update-hint">{megabytes(install.transferred)}{install.total > 0 ? ` / ${megabytes(install.total)}` : ''}</span> : null}
       </div> : null}
