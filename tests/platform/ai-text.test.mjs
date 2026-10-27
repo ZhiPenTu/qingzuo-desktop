@@ -62,11 +62,39 @@ test('complete maps service failures to explicit errors', async () => {
   await assert.rejects(empty.complete({ messages }), /没有返回内容/);
 });
 
-test('plugin manifests declare text AI capability against API 1.4', () => {
-  assert.equal(API_VERSION, '1.4.0');
+test('plugin manifests declare text AI capability against API 1.5', () => {
+  assert.equal(API_VERSION, '1.5.0');
+  // 1.5 只增加可选的图片片段，声明 ^1.4.0 的旧插件仍然兼容。
   const manifest = { commerce: { manifestVersion: 1, id: 'official.shein-full', title: '希音全托管铺货', description: '采集与翻译', ui: 'ui/index.html', api: '^1.4.0', permissions: { ai: ['image-edit', 'text'] } }, version: '0.2.0' };
   const validated = validateManifest(manifest);
   assert.deepEqual(validated.permissions.ai, ['image-edit', 'text']);
   manifest.commerce.permissions.ai = ['vision'];
   assert.throws(() => validateManifest(manifest), /AI 权限无效/);
+});
+
+const PNG = 'data:image/png;base64,' + Buffer.from('fake-png-bytes').toString('base64');
+const withImage = url => [{ role: 'user', content: [{ type: 'text', text: '给出 3 个标题' }, { type: 'image_url', image_url: { url } }] }];
+
+test('complete forwards an image part next to the prompt', async () => {
+  const requests = [];
+  const ai = runtime({ request: async (base, endpoint, options) => { requests.push(options); return completion('{"titles":[]}'); } });
+  const messages = withImage(PNG);
+  await ai.complete({ messages });
+  assert.deepEqual(JSON.parse(requests[0].body).messages, messages);
+  const remote = withImage('https://img.example.test/main.jpg');
+  await ai.complete({ messages: remote });
+  assert.deepEqual(JSON.parse(requests[1].body).messages, remote);
+});
+
+test('complete rejects image sources the model service must not fetch', async () => {
+  let calls = 0;
+  const ai = runtime({ request: async () => { calls++; return completion('x'); } });
+  for (const url of ['http://img.example.test/a.png', 'file:///tmp/a.png', 'data:text/plain;base64,AAAA', 'data:image/gif;base64,AAAA', 'https://user:pass@img.example.test/a.png']) {
+    await assert.rejects(ai.complete({ messages: withImage(url) }), /消息图片无效/);
+  }
+  const tooMany = [{ role: 'user', content: Array.from({ length: 5 }, () => ({ type: 'image_url', image_url: { url: PNG } })) }];
+  await assert.rejects(ai.complete({ messages: tooMany }), /最多 4 张图片/);
+  const unknownPart = [{ role: 'user', content: [{ type: 'file', file: {} }] }];
+  await assert.rejects(ai.complete({ messages: unknownPart }), /消息内容无效/);
+  assert.equal(calls, 0);
 });

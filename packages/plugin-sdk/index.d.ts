@@ -47,7 +47,9 @@ export interface ImageModel { id: string; source?: ImageSource; provider: 'googl
 export interface BatchInput { source?: ImageSource; modelId: string; parameters?: { size?: string; ratio?: string; quality?: string }; prompt: string; concurrency?: number; items: { token: string; prompt?: string }[] }
 export interface TextModel { id: string; title: string }
 export interface TextModelCatalog { models: TextModel[]; defaultModel: string }
-export interface CompleteOptions { model?: string; messages: { role: 'system' | 'user' | 'assistant'; content: string }[]; temperature?: number; responseFormat?: { type: 'text' | 'json_object' } }
+/** 文本补全的消息片段：文字，或一张供模型理解的图片（https 地址或 png/jpeg/webp 的 base64 data URL）。 */
+export type MessagePart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+export interface CompleteOptions { model?: string; messages: { role: 'system' | 'user' | 'assistant'; content: string | MessagePart[] }[]; temperature?: number; responseFormat?: { type: 'text' | 'json_object' } }
 export interface CompleteResult { content: string; model: string }
 export interface ImageBatch { schemaVersion: 1; id: string; owner: string; revision: number; created: number; state: 'draft' | 'running' | 'canceling' | 'interrupted' | 'finished' | 'canceled'; source?: ImageSource; modelId: string; parameters: Record<string, string>; concurrency: number; items: { id: string; name: string; mime: string; prompt: string; state: 'pending' | 'running' | 'unknown' | 'failed' | 'save-failed' | 'succeeded'; error: string | null; output: string | null; outputMime?: string }[] }
 export interface AssistantStatus { id?: string; state: 'idle' | 'running'; history: { role: 'user' | 'assistant'; text: string }[]; error?: string | null }

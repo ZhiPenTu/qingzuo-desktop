@@ -59,6 +59,31 @@ SDK 1.3.0 为「在指定网站上采集结构化数据」补齐五组主进程�
 
 插件页面仍拿不到密钥与页面 HTML，只能拿到结构化结果和摘要。旧底座通过 `api: '^1.3.0'` 拒绝安装并提示升级。
 
+### API 1.5 图片输入
+
+SDK 1.5.0 让文本补全可以带上图片，用于「看图写文案」这类需要同时看图和读参数的场景，模型与密钥仍然复用底座配置：
+
+- **消息片段**：`messages[].content` 既可以是字符串，也可以是片段数组，片段为 `{ type: 'text', text }` 或 `{ type: 'image_url', image_url: { url } }`。单条消息最多 4 张图片，整个请求不超过 8 MB。
+- **图片来源**：只接受 `https:` 地址，或 `png` / `jpeg` / `webp` 的 base64 data URL；`file:`、`http:`、带账号密码的地址一律拒绝。图片字节由插件自己准备（例如 `files.read(token)`），底座不代读本地文件。
+- **模型要求**：只有支持图片输入的文本模型才能识别图片，模型不支持时由模型服务返回错误。
+- **兼容性**：纯文本调用方式不变，声明 `api: '^1.4.0'` 的插件继续可用；需要图片输入时声明 `api: '^1.5.0'`。
+
+示例：
+
+```js
+const image = await client.files.read(token);
+const result = await client.ai.complete({
+  messages: [{
+    role: 'user',
+    content: [
+      { type: 'text', text: '结合图片和商品信息，给出 3 个英文标题。' },
+      { type: 'image_url', image_url: { url: 'data:' + image.mime + ';base64,' + image.data } },
+    ],
+  }],
+  responseFormat: { type: 'json_object' },
+});
+```
+
 ### API 1.4 本地预览
 
 SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中配置的 OpenAI 兼容代理，全部能力要求显式清单权限：

@@ -23,7 +23,7 @@
 
 具体步骤见 [Harness 整组升级验证](docs/harness-upgrades.md)。`Check and validate upstream upgrades` 工作流提供定期检查和手动双平台候选验证，报告保存在 Actions 制品中。
 
-SDK 源码位于 packages/plugin-sdk，版本 1.4.0，运行时 API 1.4.0。插件 API、独立测试入口和发布说明见 docs/plugin-development.md 和 docs/release-guide.md。
+SDK 源码位于 packages/plugin-sdk，版本 1.5.0，运行时 API 1.5.0。插件 API、独立测试入口和发布说明见 docs/plugin-development.md 和 docs/release-guide.md。
 
 支持 macOS 15+ Apple Silicon、Windows 10+ x64。Harness 固定 0.2.1-alpha.1，插件代码运行在隔离上下文中。
 
