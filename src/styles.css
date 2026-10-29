@@ -266,13 +266,15 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .dark .plugin-image .commerce-tool-icon { color: #ebc780; background: #443821; }
 .plugin-capabilities { margin: 0 0 12px 56px; font-size: 11px; color: var(--muted-foreground); }
 .plugin-capabilities span { padding: 0 8px; }
-.plugin-notes { border-top: 1px solid var(--border); font-size: 12px; }
-.plugin-notes summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; cursor: pointer; list-style: none; color: var(--muted-foreground); }
-.plugin-notes summary::-webkit-details-marker { display: none; }
-.plugin-notes summary svg { width: 15px; height: 15px; transition: transform .15s; }
-.plugin-notes[open] summary svg { transform: rotate(180deg); }
-.plugin-notes summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 4px; }
-.plugin-notes .release-notes { padding-bottom: 12px; }
+.plugin-notes-toggle { height: 22px; padding-inline: 5px; color: var(--muted-foreground); font-size: 10px; }
+.plugin-notes-toggle svg { width: 12px; height: 12px; transition: transform .15s; }
+.plugin-notes-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.plugin-notes-panel { margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in oklch, var(--secondary) 45%, transparent); color: var(--muted-foreground); font-size: 11px; line-height: 1.6; animation: plugin-notes-reveal .16s ease-out; }
+.plugin-notes-panel > :first-child { margin-top: 0; }
+.plugin-notes-panel > :last-child { margin-bottom: 0; }
+.plugin-notes-panel a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+@keyframes plugin-notes-reveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .plugin-notes-panel { animation: none; } }
 .plugin-card.is-updating { border-color: color-mix(in oklch, var(--primary) 70%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent), 0 4px 20px -4px color-mix(in oklch, var(--primary) 20%, transparent); transition: border-color .3s ease, box-shadow .3s ease; }
 .plugin-update-progress { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
 /* indeterminate 条必须落在 track 内部，否则会横跨整块内容。 */
@@ -297,9 +299,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .market-grid .plugin-info [data-slot="card-description"] { display: -webkit-box; overflow: hidden; font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .market-grid .plugin-capabilities { margin: 0 0 8px; font-size: 10px; line-height: 1.5; }
 .market-grid .plugin-capabilities span { padding-inline: 5px; }
-.market-grid .plugin-notes { font-size: 11px; }
-.market-grid .plugin-notes summary { padding-block: 7px; }
-.market-grid .plugin-notes summary svg { width: 13px; height: 13px; }
 .market-grid .plugin-card > [data-slot="card-footer"] { gap: 6px; padding-block: 9px; }
 .market-grid .plugin-market-meta { gap: 7px; }
 .market-grid .plugin-version { font-size: 10px; }
@@ -320,7 +319,6 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .plugin-row .plugin-info [data-slot="card-title"] { font-size: 16px; margin-bottom: 4px; }
 .plugin-row > [data-slot="card-content"] { grid-column: 1; padding: 0 0 0 64px; }
 .plugin-row > [data-slot="card-footer"] { grid-column: 2; grid-row: 1 / span 2; border: 0; padding: 0; margin: 0; align-self: center; max-width: 360px; }
-.plugin-row .plugin-notes { margin-top: 10px; }
 .workspace-discover { display: flex; align-items: center; gap: 18px; width: 100%; border: 1px dashed var(--border); border-radius: 12px; padding: 20px 24px; text-align: left; background: transparent; cursor: pointer; transition: background .15s; }
 .workspace-discover:hover { background: var(--accent); }
 .workspace-discover:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
