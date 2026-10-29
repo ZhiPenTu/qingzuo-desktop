@@ -581,6 +581,18 @@ h1 {
   flex-shrink: 0;
 }
 
+.plugin-mark.has-image {
+  overflow: hidden;
+  background: transparent;
+}
+
+.plugin-mark.has-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .plugin-headings {
   display: flex;
   flex-direction: column;

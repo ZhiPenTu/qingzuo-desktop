@@ -27,7 +27,8 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 
 | `catalog.json` 字段 | 页面显示 |
 | --- | --- |
-| `title` | 卡片标题与图标文字（中文标题改用 `id` 词首字母，避免多个插件标记相同） |
+| `icon` | 卡片品牌图标；缺失或格式无效时回退到文字标记 |
+| `title` | 卡片标题与文字标记（中文标题改用 `id` 词首字母，避免多个插件标记相同） |
 | `version` | 标题右侧版本徽标 |
 | `category` | 副标题，同时用于顶部分类筛选按钮 |
 | `description` | 卡片正文 |

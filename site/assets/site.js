@@ -310,6 +310,12 @@
       .toUpperCase();
   }
 
+  function pluginIcon(plugin) {
+    var icon = plugin && plugin.icon;
+    if (typeof icon !== 'string' || icon.length > 49152) return null;
+    return icon.indexOf('data:image/png;base64,') === 0 ? icon : null;
+  }
+
   // 标题是中文时（如「AI 批图」「AI 抠图」）改用插件 id 的词首字母，
   // 否则多个插件会拿到同一个标记。
   function pluginMark(plugin) {
@@ -347,7 +353,18 @@
     }
 
     var top = el('div', 'plugin-card-top');
-    top.appendChild(el('span', 'plugin-mark', pluginMark(plugin)));
+    var mark = el('span', 'plugin-mark');
+    var icon = pluginIcon(plugin);
+    if (icon) {
+      mark.classList.add('has-image');
+      var image = document.createElement('img');
+      image.src = icon;
+      image.alt = '';
+      mark.appendChild(image);
+    } else {
+      mark.textContent = pluginMark(plugin);
+    }
+    top.appendChild(mark);
     var headings = el('span', 'plugin-headings');
     var title = el('span', 'plugin-title');
     title.appendChild(document.createTextNode(plugin.title || plugin.id || '未命名插件'));
