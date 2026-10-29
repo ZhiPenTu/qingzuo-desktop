@@ -42,9 +42,10 @@ const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPag
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
 // Tools keep the space they need to lay out; the browser pane gives way first.
-// Keep this at the shell window's own minWidth minus the sidebar: a wider floor
-// would clamp the pane to its minimum on small windows and leave no room to drag.
 const TOOL_PANE_MIN_WIDTH = 620;
+// Reserving the full tool floor on a narrow window would pin the pane to its own
+// minimum and leave nothing to drag, so the reservation shrinks with the window.
+const BROWSER_PANE_DRAG_ROOM = 160;
 const BROWSER_PANE_MAX_WIDTH = 2400;
 const BROWSER_PANE_DEFAULT_WIDTH = 640;
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
@@ -260,7 +261,9 @@ export default function Platform() {
   const browserPaneLimits = () => {
     const bodyWidth = document.querySelector<HTMLElement>('.commerce-body')?.getBoundingClientRect().width || window.innerWidth;
     const sidebarWidth = document.querySelector<HTMLElement>('.commerce-sidebar')?.getBoundingClientRect().width || (sidebarCollapsed ? 72 : 208);
-    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, bodyWidth - sidebarWidth - TOOL_PANE_MIN_WIDTH) };
+    const available = bodyWidth - sidebarWidth;
+    const reserved = Math.min(TOOL_PANE_MIN_WIDTH, Math.max(0, available - BROWSER_PANE_MIN_WIDTH - BROWSER_PANE_DRAG_ROOM));
+    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, Math.round(available - reserved)) };
   };
   const defaultBrowserPaneWidth = () => {
     const { min, max } = browserPaneLimits();

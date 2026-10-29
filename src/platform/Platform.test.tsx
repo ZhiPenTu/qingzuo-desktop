@@ -295,14 +295,35 @@ it('keeps the tool area usable and re-clamps the browser pane when the window si
 
     const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
     const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
-    // 1280 - 208(sidebar) - 620(tool area) leaves 452px, so the saved 980px preference is clamped down.
-    expect(pane?.style.flexBasis).toBe('452px');
-    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(452);
+    // 1280 - 208(sidebar) leaves 1072px; the tool area keeps 552px so the pane still
+    // has 160px to drag, clamping the saved 980px preference down to 520px.
+    expect(pane?.style.flexBasis).toBe('520px');
+    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(520);
 
     window.innerWidth = 2000;
     fireEvent(window, new Event('resize'));
     await waitFor(() => expect(pane?.style.flexBasis).toBe('980px'));
     expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(1172);
+  } finally {
+    window.innerWidth = originalWidth;
+  }
+});
+
+it('keeps room to resize the browser pane on narrow windows instead of pinning it to the minimum', async () => {
+  const originalWidth = window.innerWidth;
+  // Narrow windows cannot reserve the full tool-area floor without pinning the
+  // pane to its 360px minimum, which would leave no width to drag.
+  window.innerWidth = 1100;
+  try {
+    const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+    fixture(undefined, true, false, [], browser);
+    render(<Platform />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开浏览器面板' }));
+    await screen.findByRole('tablist', { name: '浏览器标签页' });
+    const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
+    const max = Number(resizer.getAttribute('aria-valuemax'));
+    expect(max).toBeGreaterThan(360);
+    expect(max - 360).toBeGreaterThanOrEqual(160);
   } finally {
     window.innerWidth = originalWidth;
   }
