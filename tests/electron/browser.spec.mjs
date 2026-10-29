@@ -10,7 +10,7 @@ async function fixtureServer() {
     const page = new URL(request.url, 'http://127.0.0.1').pathname;
     if (page === '/media.mp4') { response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '13' }); response.end('fixture-video'); return; }
     if (page === '/image.jpg') { response.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': '13' }); response.end('fixture-image'); return; }
-    if (page === '/cookie') response.setHeader('set-cookie', 'browser_fixture=ok; Path=/');
+    if (page === '/cookie') response.setHeader('set-cookie', ['browser_fixture=ok; Path=/', 'browser_session=kept; Path=/; SameSite=Lax']);
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     if (page === '/media') { response.end('<!doctype html><title>媒体页</title><main><article><h1>测试视频</h1><video src="/media.mp4" poster="/image.jpg"></video></article><article><h1>测试图片</h1><img width="320" height="180" src="/image.jpg"></article></main>'); return; }
     response.end(`<!doctype html><title>${page === '/page2' ? '第二页' : '第一页'}</title><main>${page === '/page2' ? '页面二' : '页面一'}<button id="popup" onclick="window.open('/page2', '_blank')">打开第二页</button></main>`);
@@ -95,10 +95,13 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     await expect(relaunched.getByText('工具服务已就绪', { exact: true })).toBeVisible();
     await relaunched.getByRole('button', { name: '打开浏览器', exact: true }).click();
     const relaunchedStatus = await relaunched.evaluate(() => window.commerceDesktop.invoke('browser.status'));
-    const relaunchedUrl = fixture.base + '/cookie';
+    // A page that sets nothing: the cookies below can only be there because the
+    // previous run kept them, including the one without an expiry.
+    const relaunchedUrl = fixture.base + '/page1';
     await relaunched.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: relaunchedStatus.tabs[0].id, url: relaunchedUrl });
     const relaunchedPage = await browserPage(app, relaunchedUrl);
     await expect.poll(() => relaunchedPage.evaluate(() => document.cookie)).toContain('browser_fixture=ok');
+    await expect.poll(() => relaunchedPage.evaluate(() => document.cookie)).toContain('browser_session=kept');
     await expect(relaunched.evaluate(({ id }) => window.commerceDesktop.invoke('browser.navigate', { id, url: 'file:///tmp/blocked.html' }), { id: relaunchedStatus.tabs[0].id })).rejects.toThrow(/HTTP 或 HTTPS/);
   } finally {
     await app?.close();

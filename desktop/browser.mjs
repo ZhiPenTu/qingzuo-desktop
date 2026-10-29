@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { access } from 'node:fs/promises';
+import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { dialog, session, WebContentsView } from 'electron';
+import { dialog, safeStorage, session, WebContentsView } from 'electron';
 import { isAllowedBrowserUrl, normalizeBrowserUrl, ownedBrowserTabs } from './browser-policy.mjs';
 import { allowedBrowserOrigin } from './security.mjs';
 import { buildActionScript, buildSnapshotScript, buildWaitScript, validateAction, validateWait } from './browser-automation.mjs';
@@ -19,6 +19,22 @@ import {
 
 const BROWSER_PARTITION = 'persist:commerce-browser';
 const MAX_DOWNLOADS = 100;
+// Sites often issue their login cookie without an expiry, and Chromium drops
+// those the moment the app exits. A desktop browser is expected to stay signed
+// in, so session cookies are mirrored to disk and re-applied on the next launch.
+const SESSION_COOKIE_TTL = 30 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_WRITE_DELAY = 500;
+const SAME_SITE_VALUES = new Set(['unspecified', 'no_restriction', 'lax', 'strict']);
+
+function cookieKey(cookie) {
+  return `${cookie.domain}|${cookie.path}|${cookie.name}`;
+}
+
+function cookieAddress(cookie) {
+  const host = cookie.domain.replace(/^\./, '');
+  const path = typeof cookie.path === 'string' && cookie.path.startsWith('/') ? cookie.path : '/';
+  return `${cookie.secure ? 'https' : 'http'}://${host}${path}`;
+}
 
 function publicTab(tab) {
   return {
@@ -45,7 +61,7 @@ function publicDownload(task) {
 }
 
 export class BrowserRuntime {
-  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {}, files = null, storage = null }) {
+  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {}, files = null, storage = null, cookieStore = null }) {
     this.window = window;
     this.changed = changed;
     this.event = event;
@@ -54,6 +70,10 @@ export class BrowserRuntime {
     this.resizeMove = resizeMove;
     this.files = files;
     this.storage = storage;
+    this.cookieStore = cookieStore;
+    this.sessionCookies = new Map();
+    this.cookieStoreDirty = false;
+    this.cookieWriteTimer = null;
     this.browserSession = null;
     this.tabs = new Map();
     this.activeTabId = null;
@@ -79,7 +99,113 @@ export class BrowserRuntime {
       callback({});
     });
     this.browserSession = browserSession;
+    await this.restoreSessionCookies(browserSession);
+    this.trackSessionCookies(browserSession);
     return browserSession;
+  }
+
+  async readSessionCookies() {
+    const saved = JSON.parse(await readFile(this.cookieStore, 'utf8'));
+    if (!saved?.encrypted) return Array.isArray(saved?.cookies) ? saved.cookies : [];
+    const entries = JSON.parse(safeStorage.decryptString(Buffer.from(String(saved.encrypted), 'base64')));
+    return Array.isArray(entries) ? entries : [];
+  }
+
+  async restoreSessionCookies(browserSession) {
+    if (!this.cookieStore) return;
+    let entries;
+    try { entries = await this.readSessionCookies(); }
+    catch { return; }
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry || typeof entry.name !== 'string' || !entry.name || typeof entry.value !== 'string') continue;
+      if (typeof entry.domain !== 'string' || !entry.domain) continue;
+      if (!Number.isFinite(entry.savedAt) || now - entry.savedAt > SESSION_COOKIE_TTL) continue;
+      const cookie = {
+        url: cookieAddress(entry),
+        name: entry.name,
+        value: entry.value,
+        domain: entry.domain,
+        path: typeof entry.path === 'string' && entry.path.startsWith('/') ? entry.path : '/',
+        secure: Boolean(entry.secure),
+        httpOnly: Boolean(entry.httpOnly),
+        ...(SAME_SITE_VALUES.has(entry.sameSite) ? { sameSite: entry.sameSite } : {}),
+      };
+      try { await browserSession.cookies.set(cookie); }
+      catch { /* a cookie whose domain no longer matches is simply skipped */ }
+    }
+  }
+
+  trackSessionCookies(browserSession) {
+    browserSession.cookies.on('changed', (_event, cookie, _cause, removed) => {
+      if (!cookie || typeof cookie.name !== 'string') return;
+      const key = cookieKey(cookie);
+      // Partitioned cookies belong to the frame that stored them, so they are
+      // left to Chromium instead of being replayed as first-party cookies.
+      if (!removed && cookie.session && !cookie.partitionKey) {
+        this.sessionCookies.set(key, {
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain,
+          path: cookie.path,
+          secure: Boolean(cookie.secure),
+          httpOnly: Boolean(cookie.httpOnly),
+          sameSite: cookie.sameSite,
+          savedAt: Date.now(),
+        });
+      } else {
+        this.sessionCookies.delete(key);
+      }
+      this.cookieStoreDirty = true;
+      this.scheduleCookieWrite();
+    });
+  }
+
+  scheduleCookieWrite() {
+    if (!this.cookieStore || this.cookieWriteTimer) return;
+    this.cookieWriteTimer = setTimeout(() => {
+      this.cookieWriteTimer = null;
+      void this.writeSessionCookies();
+    }, SESSION_COOKIE_WRITE_DELAY);
+    this.cookieWriteTimer.unref?.();
+  }
+
+  async writeSessionCookies() {
+    // Nothing was ever stored and nothing is pending: skip the write entirely so
+    // quitting an app that never used the browser stays free of keychain work.
+    if (!this.cookieStore || (!this.cookieStoreDirty && !this.sessionCookies.size)) return;
+    const cookies = [...this.sessionCookies.values()];
+    const plain = JSON.stringify(cookies);
+    let payload = JSON.stringify({ version: 1, cookies });
+    try {
+      // Login cookies are credentials: prefer the OS keychain when it is
+      // available, and only fall back to the plain cookie list otherwise.
+      if (safeStorage.isEncryptionAvailable()) payload = JSON.stringify({ version: 1, encrypted: safeStorage.encryptString(plain).toString('base64') });
+    } catch { /* keep the plain payload */ }
+    const staging = this.cookieStore + '.tmp';
+    try {
+      await writeFile(staging, payload, { mode: 0o600 });
+      await rename(staging, this.cookieStore);
+      this.cookieStoreDirty = false;
+    } catch (error) {
+      console.error('Browser cookie store failed:', error.message);
+    }
+  }
+
+  // Quitting must never wait on cookie storage or the OS keychain, so the flush
+  // below is bounded and whatever is left simply stays for the next launch.
+  async flushCookies(timeout = 3000) {
+    if (!this.browserSession) return;
+    await Promise.race([
+      (async () => {
+        await this.writeSessionCookies();
+        await this.browserSession?.cookies.flushStore().catch(() => {});
+      })().catch(() => {}),
+      new Promise(resolve => {
+        const delay = setTimeout(resolve, timeout);
+        delay.unref?.();
+      }),
+    ]);
   }
 
   status({ includeCandidates = true, includeDownloads = true } = {}) {
@@ -569,6 +695,8 @@ export class BrowserRuntime {
 
   async shutdown() {
     this.closeWorkspace();
+    if (this.cookieWriteTimer) { clearTimeout(this.cookieWriteTimer); this.cookieWriteTimer = null; }
+    await this.flushCookies();
     await this.browserSession?.closeAllConnections().catch(() => {});
   }
 }
