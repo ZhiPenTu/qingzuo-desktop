@@ -39,7 +39,7 @@ const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let window, manager, workers, files, credentials, network, host, browserRuntime, storage, quitting = false, quitReady = false, shutdownPromise, hostReady;
-const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, systems = [], kernelError = null;
+const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, surfaceEpoch = 0, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
 let browserResizeState = null;
@@ -102,6 +102,10 @@ function assertFrame(event, shellOnly = false) {
 }
 function validateCall(method, args) { if (typeof method !== 'string' || method.length > 80 || (JSON.stringify(args) ?? '').length > 38_000_000) throw new Error('请求无效或过大。'); }
 function hidePluginViews() { for (const v of views.values()) v.setVisible(false); visible = null; }
+// The shell, not the plugin, decides which native surface may be on screen. Any
+// request that hides the surface also cancels in-flight opens so a slow tool can
+// never reveal itself over the page the user moved on to.
+function invalidateSurface() { surfaceEpoch += 1; hidePluginViews(); }
 async function closeView(id) {
   viewEpochs.set(id,(viewEpochs.get(id) ?? 0)+1);
   const view = views.get(id); if (view) { views.delete(id); if (!view.webContents.isDestroyed()) { view.webContents.send('commerce:dispose'); owners.delete(view.webContents.id); if (window && !window.isDestroyed()) window.contentView.removeChildView(view); view.webContents.close(); } }
@@ -131,13 +135,16 @@ async function servePlugin(request, id) {
 }
 function openView(id, settings = false) {
   const epoch=viewEpochs.get(id) ?? 0;
-  const operation=(viewQueues.get(id) ?? Promise.resolve()).catch(()=>{}).then(()=>loadView(id,settings,epoch));
+  // Opening a tool takes over the surface: an older open that is still loading
+  // must not reveal itself afterwards.
+  const surface = ++surfaceEpoch;
+  const operation=(viewQueues.get(id) ?? Promise.resolve()).catch(()=>{}).then(()=>loadView(id,settings,epoch,surface));
   viewQueues.set(id,operation);
   const clear=()=>{if(viewQueues.get(id)===operation)viewQueues.delete(id);};
   void operation.then(clear,clear);return operation;
 }
 function assertViewEpoch(id,epoch) {if(quitting || (viewEpochs.get(id) ?? 0)!==epoch)throw new Error('工具打开已取消。');}
-async function loadView(id, settings, epoch) {
+async function loadView(id, settings, epoch, surface) {
   while (toolSyncPromise) await toolSyncPromise;
   const plugin = await manager.get(id); if (!plugin.enabled || plugin.missing.length) throw new Error('插件已停用或缺少依赖。');
   pluginInstallService.assertAvailable(id);
@@ -213,6 +220,9 @@ async function loadView(id, settings, epoch) {
   assertViewEpoch(id,epoch);
   const destination = 'commerce-plugin://' + id + '/' + (settings ? plugin.settings?.entry || plugin.ui : plugin.ui);
   if (views.get(id).webContents.getURL() !== destination) await views.get(id).webContents.loadURL(destination);
+  // The user left this tool (or opened another one) while it was loading, so a
+  // later request already owns the surface. Keep every native view hidden.
+  if (surface !== surfaceEpoch) return sanitizePlugin(plugin);
   hidePluginViews(); visible = id;
   // Selecting an already-open tool tab while the browser pane stays mounted
   // may not trigger a new renderer resize. Reveal its existing native surface
@@ -377,9 +387,24 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
-  if (method === 'view.hide') { stopBrowserResize(); hidePluginViews(); return; }
+  if (method === 'view.hide') { stopBrowserResize(); invalidateSurface(); return; }
   if (method === 'view.close') { await closeView(args.id); changed(); return; }
-  if (method === 'view.bounds') { const view = views.get(visible); if (view) { const {width,height} = window.getContentBounds(); if (['x','y','width','height'].every(k => Number.isFinite(args[k]) && args[k] >= 0) && args.x+args.width <= width+2 && args.y+args.height <= height+2) { view.setBounds(Object.fromEntries(['x','y','width','height'].map(k => [k,Math.floor(args[k])]))); view.setVisible(true); } } return; }
+  if (method === 'view.bounds') {
+    // The mounted tool surface drives the native view directly, so a stale or
+    // out-of-range rectangle is clamped onto the window instead of dropped.
+    const target = typeof args.id === 'string' ? args.id : visible;
+    const view = target ? views.get(target) : undefined;
+    if (!view || !['x','y','width','height'].every(k => Number.isFinite(args[k]))) return;
+    const {width,height} = window.getContentBounds();
+    const x = Math.max(0, Math.min(Math.floor(args.x), width - 1));
+    const y = Math.max(0, Math.min(Math.floor(args.y), height - 1));
+    const next = { x, y, width: Math.max(1, Math.min(Math.floor(args.width), width - x)), height: Math.max(1, Math.min(Math.floor(args.height), height - y)) };
+    for (const [id, other] of views) if (id !== target) other.setVisible(false);
+    visible = target;
+    view.setBounds(next);
+    view.setVisible(true);
+    return;
+  }
   const service = method.split('.')[0];
   if (!['plugins','market','updates'].includes(service)) throw new Error('平台操作不受支持。');
   // The catalogue is native HTTP work, not a short kernel request. Installation

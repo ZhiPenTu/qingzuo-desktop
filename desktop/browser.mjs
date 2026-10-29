@@ -553,9 +553,13 @@ export class BrowserRuntime {
   bounds(bounds) {
     const tab = this.activeTab();
     const view = tab?.view;
-    if (!view || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(bounds?.[key]) && bounds[key] >= 0)) return;
-    const nextBounds = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Math.floor(bounds[key])]));
-    view.setBounds(nextBounds);
+    if (!view || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(bounds?.[key]))) return;
+    // Clamp instead of dropping: the page can report a rectangle that is a few
+    // pixels past the window while a pane animation is running.
+    const area = this.window.getContentBounds();
+    const x = Math.max(0, Math.min(Math.floor(bounds.x), area.width - 1));
+    const y = Math.max(0, Math.min(Math.floor(bounds.y), area.height - 1));
+    view.setBounds({ x, y, width: Math.max(1, Math.min(Math.floor(bounds.width), area.width - x)), height: Math.max(1, Math.min(Math.floor(bounds.height), area.height - y)) });
     view.setVisible(true);
     void releaseBrowserLayout(view.webContents).catch(() => {});
   }
