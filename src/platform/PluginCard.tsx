@@ -10,7 +10,7 @@ import gte from 'semver/functions/gte';
 const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'));
 
 export interface ToolEntry {
-  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; api?: string; compatible?: boolean; stats?: { downloads?: number };
+  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; stats?: { downloads?: number };
 }
 export interface Plugin extends ToolEntry {
   enabled: boolean; source: string; local: boolean; missing: string[]; settings?: { title: string }; error?: string;
@@ -48,7 +48,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const retry = () => onAction('market.install', { id: entry.id });
   return <Card className={cn('plugin-card', mode !== 'market' && 'plugin-row', isCutout && 'plugin-image', updating && 'is-updating')}>
     <CardHeader>
-      <span className="commerce-tool-icon"><Icon /></span>
+      <span className={cn('commerce-tool-icon', entry.icon && 'has-image')}>{entry.icon ? <img src={entry.icon} alt="" /> : <Icon />}</span>
       <div className="plugin-info">
         <span className="plugin-category">{toolCategory(entry)}</span>
         <CardTitle role="heading" aria-level={2}>{entry.title}</CardTitle>

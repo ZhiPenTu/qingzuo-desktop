@@ -84,4 +84,12 @@ describe('PluginCard installation state', () => {
     rerender(<PluginCard entry={{ ...entry, stats: { downloads: 0 } }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
     expect(screen.queryByLabelText(/累计下载/)).toBeNull();
   });
+
+  it('renders the plugin-provided brand icon instead of the category fallback', () => {
+    const icon = 'data:image/png;base64,iVBORw0KGgo=';
+    const { container } = render(<PluginCard entry={{ ...entry, icon }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    const image = container.querySelector('.commerce-tool-icon.has-image img');
+    expect(image?.getAttribute('src')).toBe(icon);
+    expect(container.querySelector('.commerce-tool-icon svg')).toBeNull();
+  });
 });
