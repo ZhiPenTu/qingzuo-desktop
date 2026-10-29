@@ -13,7 +13,7 @@ export interface StorageFile { token: string; name: string; size: number; mime: 
 export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void; onBrowser?(callback: (event: BrowserEvent) => void): () => void }
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
-  ui: string; category?: string; releaseNotes?: string;
+  ui: string; category?: string; releaseNotes?: string; icon?: string;
   permissions: { files?: boolean; storage?: boolean; credentials?: string[]; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('assistant' | 'image-edit')[]; browser?: ('detect' | 'download' | 'automate')[] };
   services?: { provides?: string[]; requires?: string[] };
   assistant?: { tools: { name: string; title: string; description: string; service: string; method: string; parameters: AssistantToolSchema }[] };

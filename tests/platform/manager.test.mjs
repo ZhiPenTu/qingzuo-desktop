@@ -93,7 +93,7 @@ test('path traversal and symlink package entries are rejected before extraction'
   } finally {await rm(root,{recursive:true,force:true});}
 });
 test('incompatible APIs, reserved identifiers and unsupported platforms are rejected', () => {
-  for (const commerce of [{ api: '^2' }, { id: 'system.market' }, { ui: '../index.html' }, { permissions: { network: ['http://localhost'] } }, { backend: { type: 'executable', entry: {} } }]) {
+  for (const commerce of [{ api: '^2' }, { id: 'system.market' }, { ui: '../index.html' }, { icon: 'https://example.com/icon.png' }, { icon: 'data:image/png;base64,AAAA' }, { permissions: { network: ['http://localhost'] } }, { backend: { type: 'executable', entry: {} } }]) {
     const zip = new AdmZip(archive('0.1.0', commerce)); assert.throws(() => validateManifest(JSON.parse(zip.readAsText('package.json'))));
   }
 });

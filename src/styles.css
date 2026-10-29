@@ -260,6 +260,8 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .plugin-info [data-slot="card-description"] { font-size: 12px; line-height: 1.6; }
 .commerce-tool-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; color: var(--primary); background: var(--secondary); flex-shrink: 0; }
 .commerce-tool-icon svg { width: 22px; height: 22px; }
+.commerce-tool-icon.has-image { overflow: hidden; background: transparent; }
+.commerce-tool-icon.has-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .plugin-image .commerce-tool-icon { color: #956219; background: #faf0dd; }
 .dark .plugin-image .commerce-tool-icon { color: #ebc780; background: #443821; }
 .plugin-capabilities { margin: 0 0 12px 56px; font-size: 11px; color: var(--muted-foreground); }

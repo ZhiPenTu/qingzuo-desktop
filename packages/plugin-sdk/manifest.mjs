@@ -5,6 +5,15 @@ import { validateToolSchema } from './tool-schema-core.mjs';
 export const API_VERSION = '1.5.0';
 export const TARGET = process.platform + '-' + process.arch;
 export const RESERVED_HEADERS = ['authorization', 'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-connection', 'te', 'trailer'];
+export function validatePluginIcon(value) {
+  const prefix = 'data:image/png;base64,';
+  if (typeof value !== 'string' || !value.startsWith(prefix)) throw new Error('插件图标格式无效。');
+  const encoded = value.slice(prefix.length);
+  if (!encoded || encoded.length > 49152 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('插件图标格式无效。');
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length < 8 || bytes.length > 36864 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('插件图标格式无效。');
+  return value;
+}
 export function safeRelative(value) {
   if (typeof value !== 'string' || !value || value.includes('\\') || value.includes(':') || value.includes('\0') || path.posix.isAbsolute(value)) throw new Error('插件路径无效。');
   const parts = value.split('/');
@@ -16,6 +25,7 @@ export function validateManifest(pkg, target = TARGET) {
   if (!m || m.manifestVersion !== 1 || !/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/.test(m.id) || m.id.startsWith('system.') || m.id.length > 96) throw new Error('插件标识或清单格式无效。');
   if (!semver.valid(pkg.version) || !semver.satisfies(API_VERSION, m.api || '')) throw new Error('插件 API 版本不兼容。');
   if (typeof m.title !== 'string' || !m.title.trim() || m.title.length > 80 || typeof m.description !== 'string' || m.description.length > 2000) throw new Error('插件名称与说明无效。');
+  if (m.icon !== undefined) validatePluginIcon(m.icon);
   safeRelative(m.ui);
   if (m.settings) { if (typeof m.settings.title !== 'string') throw new Error('插件设置无效。'); safeRelative(m.settings.entry); }
   const permissions = m.permissions ?? {};

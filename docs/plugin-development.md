@@ -15,7 +15,7 @@ npm run plugin -- pack my-tool my-tool.ecplugin
 
 在插件管理中导入 ZIP 格式的 `.ecplugin`。导入时显示本地来源和隔离说明。无需重新构建或发布底座。模板包含已构建网页和 SDK 副本；普通用户无需安装开发运行时。Native 模板由底座内置 Node 运行，采用逐行 JSON RPC。生产环境不运行包内 npm/Python 安装脚本，依赖须由开发者构建到 UI/worker 制品内；`node_modules` 和 `.env*` 不会被打包。
 
-`package.json.commerce` 声明 `manifestVersion: 1`、全局唯一 `id`、`title`、`description`、`api: ^1.0.0`、相对 `ui`、可选 `settings`、`permissions`、`services.provides/requires` 与 `backend`。本地程序以 `backend.entry.darwin-arm64` / `win32-x64` 声明入口。禁止绝对路径、符号链接、目录穿越、系统插件 ID、安装脚本执行和同名服务覆盖。
+`package.json.commerce` 声明 `manifestVersion: 1`、全局唯一 `id`、`title`、`description`、`api: ^1.0.0`、相对 `ui`、可选 `icon`、`settings`、`permissions`、`services.provides/requires` 与 `backend`。`icon` 使用不超过 36 KB 的 PNG data URL，由市场、工具中心和插件管理统一显示；未提供时回退到分类图标。本地程序以 `backend.entry.darwin-arm64` / `win32-x64` 声明入口。禁止绝对路径、符号链接、目录穿越、系统插件 ID、安装脚本执行和同名服务覆盖。
 
 原生构建工具生成的库和框架别名需在打包前转成普通文件及目录。LabelEdit 构建脚本只复制 PyInstaller 输出目录内部的资源，逐层校验目录别名；外部链接、循环链接及无效链接会使构建失败。安装器继续拒绝所有 ZIP 符号链接。
 
