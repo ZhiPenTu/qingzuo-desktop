@@ -42,7 +42,9 @@ const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPag
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
 // Tools keep the space they need to lay out; the browser pane gives way first.
-const TOOL_PANE_MIN_WIDTH = 720;
+// Keep this at the shell window's own minWidth minus the sidebar: a wider floor
+// would clamp the pane to its minimum on small windows and leave no room to drag.
+const TOOL_PANE_MIN_WIDTH = 620;
 const BROWSER_PANE_MAX_WIDTH = 2400;
 const BROWSER_PANE_DEFAULT_WIDTH = 640;
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };

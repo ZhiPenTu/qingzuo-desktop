@@ -295,14 +295,14 @@ it('keeps the tool area usable and re-clamps the browser pane when the window si
 
     const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
     const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
-    // 1280 - 208(sidebar) - 720(tool area) leaves 352px, so the pane stops at its 360px minimum.
-    expect(pane?.style.flexBasis).toBe('360px');
-    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(360);
+    // 1280 - 208(sidebar) - 620(tool area) leaves 452px, so the saved 980px preference is clamped down.
+    expect(pane?.style.flexBasis).toBe('452px');
+    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(452);
 
     window.innerWidth = 2000;
     fireEvent(window, new Event('resize'));
     await waitFor(() => expect(pane?.style.flexBasis).toBe('980px'));
-    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(1072);
+    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(1172);
   } finally {
     window.innerWidth = originalWidth;
   }
