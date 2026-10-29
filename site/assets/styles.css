@@ -537,15 +537,15 @@ h1 {
 
 .plugin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .plugin-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 18px;
+  gap: 8px;
+  padding: 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -563,19 +563,19 @@ h1 {
 .plugin-card-top {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 9px;
 }
 
 .plugin-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   background: var(--secondary);
   color: var(--secondary-foreground);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
   letter-spacing: -0.2px;
   flex-shrink: 0;
@@ -591,30 +591,35 @@ h1 {
 .plugin-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plugin-version {
-  padding: 1px 7px;
+  padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
 }
 
 .plugin-category {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .plugin-desc {
   margin: 0;
   flex: 1;
   color: var(--foreground);
-  font-size: 13px;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .plugin-card {
@@ -624,15 +629,15 @@ h1 {
 .plugin-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .plugin-platform {
-  padding: 1px 7px;
+  padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 999px;
 }
@@ -640,7 +645,7 @@ h1 {
 .plugin-downloads {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
+  padding: 1px 5px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--secondary) 72%, transparent);
   color: var(--muted-foreground);
@@ -649,10 +654,10 @@ h1 {
 
 .plugin-repo {
   margin: 0;
-  padding-top: 10px;
+  padding-top: 7px;
   border-top: 1px solid var(--border);
   color: var(--primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -748,6 +753,10 @@ h1 {
 
 /* 小屏 */
 @media (max-width: 900px) {
+  .plugin-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .hero-inner {
     grid-template-columns: minmax(0, 1fr);
     gap: 36px;
@@ -795,7 +804,17 @@ h1 {
   }
 }
 
+@media (max-width: 700px) {
+  .plugin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 560px) {
+  .plugin-grid {
+    grid-template-columns: 1fr;
+  }
+
   .shell {
     padding: 0 18px;
   }

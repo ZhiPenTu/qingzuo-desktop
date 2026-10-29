@@ -52,7 +52,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       <div className="plugin-info">
         <span className="plugin-category">{toolCategory(entry)}</span>
         <CardTitle role="heading" aria-level={2}>{entry.title}</CardTitle>
-        <CardDescription>{entry.description}</CardDescription>
+        <CardDescription title={entry.description}>{entry.description}</CardDescription>
       </div>
     </CardHeader>
     <CardContent>
@@ -78,7 +78,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {failed ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{install.error || '插件安装失败，请重试。'}{mode !== 'market' ? <Button variant="outline" size="sm" disabled={disabled} onClick={retry}>{retryLabel}</Button> : null}</AlertDescription></Alert> : null}
     </CardContent>
     <CardFooter>
-      {mode === 'market' ? <><span className="plugin-market-meta">{downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}<span className="plugin-version">v{entry.version}</span></span>{current ? <span className="plugin-installed"><Check />已安装</span> : null}<Button disabled={unavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : mode === 'plugins' ? <>
+      {mode === 'market' ? <><span className="plugin-market-meta">{downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}<span className="plugin-version">v{entry.version}</span></span><Button size="sm" disabled={unavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : mode === 'plugins' ? <>
         {updateAvailable ? <Button disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
         <Button variant="outline" disabled={unavailable} onClick={() => onAction('plugins.enable', { id: entry.id, enabled: !installed?.enabled })}>{installed?.enabled ? '停用' : '启用'}</Button>
         {installed?.settings ? <Button variant="outline" disabled={unavailable || !installed.enabled} onClick={() => onOpen(true)}>插件设置</Button> : null}
