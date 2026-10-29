@@ -11,6 +11,18 @@ async function fixtureServer() {
     if (page === '/media.mp4') { response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '13' }); response.end('fixture-video'); return; }
     if (page === '/image.jpg') { response.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': '13' }); response.end('fixture-image'); return; }
     if (page === '/cookie') response.setHeader('set-cookie', ['browser_fixture=ok; Path=/', 'browser_session=kept; Path=/; SameSite=Lax']);
+    if (page === '/slow') {
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end('<!doctype html><title>慢速页</title><main>慢速页面</main>');
+      }, 500);
+      return;
+    }
+    if (page === '/stop') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end('<!doctype html><title>中止页</title><script>window.stop()</script>');
+      return;
+    }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     if (page === '/media') { response.end('<!doctype html><title>媒体页</title><main><article><h1>测试视频</h1><video src="/media.mp4" poster="/image.jpg"></video></article><article><h1>测试图片</h1><img width="320" height="180" src="/image.jpg"></article></main>'); return; }
     response.end(`<!doctype html><title>${page === '/page2' ? '第二页' : '第一页'}</title><main>${page === '/page2' ? '页面二' : '页面一'}<button id="popup" onclick="window.open('/page2', '_blank')">打开第二页</button></main>`);
@@ -141,6 +153,39 @@ test('detects media incrementally and downloads selected candidates through the 
     await shell.evaluate(candidateId => window.commerceDesktop.invoke('browser.download', { candidateIds: [candidateId], mode: 'single' }), videoId);
     await expect.poll(async () => (await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'))).downloads.filter(task => task.status === 'completed').length).toBeGreaterThanOrEqual(3);
     expect((await readFile(singlePath)).toString()).toBe('fixture-video');
+  } finally {
+    await app?.close();
+    fixture.server.closeAllConnections();
+    await new Promise(resolve => fixture.server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('ignores a navigation aborted by a newer page but reports a real load abort', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-browser-navigation-'));
+  const fixture = await fixtureServer();
+  let app;
+  try {
+    app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
+    const shell = await app.firstWindow();
+    await expect(shell.getByText('工具服务已就绪', { exact: true })).toBeVisible();
+    await shell.getByRole('button', { name: '打开浏览器', exact: true }).click();
+    const browser = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    const id = browser.tabs[0].id;
+
+    let supersededError = null;
+    const supersededNavigation = shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id, url: fixture.base + '/slow' })
+      .catch(error => { supersededError = error; });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const finalUrl = fixture.base + '/page2';
+    await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id, url: finalUrl });
+    await supersededNavigation;
+    expect(supersededError).toBeNull();
+    const finalPage = await browserPage(app, finalUrl);
+    await expect(finalPage.getByText('页面二', { exact: false })).toBeVisible();
+
+    await expect(shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id, url: fixture.base + '/stop' }))
+      .rejects.toThrow('页面加载已中断，请重试。');
   } finally {
     await app?.close();
     fixture.server.closeAllConnections();

@@ -26,6 +26,15 @@ const SESSION_COOKIE_TTL = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_WRITE_DELAY = 500;
 const SAME_SITE_VALUES = new Set(['unspecified', 'no_restriction', 'lax', 'strict']);
 
+function isNavigationAbort(error) {
+  return error?.code === 'ERR_ABORTED' || error?.errno === -3 || /(?:ERR_ABORTED|\(-3\))/.test(error?.message || '');
+}
+
+function navigationFailure(error) {
+  console.error('Browser navigation failed:', error?.message || error);
+  return new Error(isNavigationAbort(error) ? '页面加载已中断，请重试。' : '页面加载失败，请检查网络后重试。');
+}
+
 function cookieKey(cookie) {
   return `${cookie.domain}|${cookie.path}|${cookie.name}`;
 }
@@ -329,7 +338,7 @@ export class BrowserRuntime {
 
   async newTab(url) {
     await this.ensureSession();
-    const tab = { id: 'browser-' + (++this.sequence) + '-' + randomUUID().slice(0, 8), title: '新标签页', url: '', loading: false, view: null };
+    const tab = { id: 'browser-' + (++this.sequence) + '-' + randomUUID().slice(0, 8), title: '新标签页', url: '', loading: false, navigationSequence: 0, view: null };
     this.tabs.set(tab.id, tab);
     this.candidates.set(tab.id, new Map());
     this.activeTabId = tab.id;
@@ -370,6 +379,9 @@ export class BrowserRuntime {
       catch { event.preventDefault(); }
     });
     view.webContents.on('will-attach-webview', event => event.preventDefault());
+    view.webContents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace && isAllowedBrowserUrl(url)) tab.navigationSequence += 1;
+    });
     view.webContents.on('did-start-loading', () => { tab.loading = true; this.notify({ type: 'loading', tabId: tab.id }); });
     view.webContents.on('did-stop-loading', () => { tab.loading = false; this.updateTab(tab); this.notify({ type: 'status', tabId: tab.id }); });
     view.webContents.on('did-navigate', () => { this.resetCandidates(tab.id); this.updateTab(tab); this.notify({ type: 'candidates', tabId: tab.id }); });
@@ -471,7 +483,15 @@ export class BrowserRuntime {
     this.hide();
     this.activeTabId = id;
     view.setVisible(false);
-    await view.webContents.loadURL(address);
+    const navigationSequence = tab.navigationSequence;
+    try { await view.webContents.loadURL(address); }
+    catch (error) {
+      const superseded = isNavigationAbort(error)
+        && !view.webContents.isDestroyed()
+        && tab.navigationSequence > navigationSequence + 1
+        && isAllowedBrowserUrl(tab.url);
+      if (!superseded) throw navigationFailure(error);
+    }
     this.notify({ type: 'status', tabId: id });
     return publicTab(tab);
   }
