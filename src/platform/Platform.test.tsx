@@ -282,6 +282,32 @@ it('restores browser pane width from storage and clears on double-click', async 
   }
 });
 
+it('keeps the tool area usable and re-clamps the browser pane when the window size changes', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 1280;
+  try {
+    window.localStorage.setItem('qingzuo.browserPaneWidth', '980');
+    const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
+    fixture(undefined, true, false, [], browser);
+    render(<Platform />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开浏览器面板' }));
+    await screen.findByRole('tablist', { name: '浏览器标签页' });
+
+    const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
+    const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
+    // 1280 - 208(sidebar) - 720(tool area) leaves 352px, so the pane stops at its 360px minimum.
+    expect(pane?.style.flexBasis).toBe('360px');
+    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(360);
+
+    window.innerWidth = 2000;
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(pane?.style.flexBasis).toBe('980px'));
+    expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(1072);
+  } finally {
+    window.innerWidth = originalWidth;
+  }
+});
+
 it('scales default browser pane width responsively on ultra-wide screens without 1360px cap', async () => {
   const originalWidth = window.innerWidth;
   window.innerWidth = 3840;

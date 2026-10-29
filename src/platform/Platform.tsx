@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
@@ -41,7 +41,9 @@ const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as 
 const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
-const BROWSER_MAIN_MIN_WIDTH = 320;
+// Tools keep the space they need to lay out; the browser pane gives way first.
+const TOOL_PANE_MIN_WIDTH = 720;
+const BROWSER_PANE_MAX_WIDTH = 2400;
 const BROWSER_PANE_DEFAULT_WIDTH = 640;
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
 const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
@@ -61,6 +63,8 @@ export default function Platform() {
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
   const [page, setPage] = useState<Page | string>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [surfaceRevision, setSurfaceRevision] = useState(0);
   const [browserPaneWidth, setBrowserPaneWidth] = useState<number | null>(() => {
     try {
       const saved = window.localStorage.getItem('qingzuo.browserPaneWidth');
@@ -118,6 +122,11 @@ export default function Platform() {
       try { window.localStorage.setItem('qingzuo.browserPaneWidth', String(next)); } catch { /* storage is optional */ }
     }
   }), []);
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   useEffect(() => window.commerceDesktop?.onBrowserPane?.(() => setBrowserPaneOpen(true)), []);
   const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
@@ -222,7 +231,12 @@ export default function Platform() {
     try {
       if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
       if (isShellPage(next)) await window.commerceDesktop?.invoke('view.hide');
-      else await run('view.open', { id: next, settings });
+      else {
+        await run('view.open', { id: next, settings });
+        // Re-opening the tool that is already on screen changes no layout, so the
+        // surface has to report its size again after the native view returns.
+        setSurfaceRevision(value => value + 1);
+      }
       setPage(next); setQuery(''); setCategory('all');
     } catch (e) { setError(formatError(e)); }
   }
@@ -244,13 +258,16 @@ export default function Platform() {
   const browserPaneLimits = () => {
     const bodyWidth = document.querySelector<HTMLElement>('.commerce-body')?.getBoundingClientRect().width || window.innerWidth;
     const sidebarWidth = document.querySelector<HTMLElement>('.commerce-sidebar')?.getBoundingClientRect().width || (sidebarCollapsed ? 72 : 208);
-    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, bodyWidth - sidebarWidth - BROWSER_MAIN_MIN_WIDTH) };
+    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, bodyWidth - sidebarWidth - TOOL_PANE_MIN_WIDTH) };
+  };
+  const defaultBrowserPaneWidth = () => {
+    const { min, max } = browserPaneLimits();
+    const preferred = Math.min(BROWSER_PANE_MAX_WIDTH, Math.round(viewportWidth * 0.48)) || BROWSER_PANE_DEFAULT_WIDTH;
+    return Math.round(Math.min(max, Math.max(min, preferred)));
   };
   const currentBrowserPaneWidth = () => {
     const width = browserPaneRef.current?.getBoundingClientRect().width;
-    const limits = browserPaneLimits();
-    const defaultWidth = Math.min(limits.max, Math.max(limits.min, Math.min(2400, Math.round(window.innerWidth * 0.48)) || BROWSER_PANE_DEFAULT_WIDTH));
-    return width && width > 0 ? width : defaultWidth;
+    return width && width > 0 ? width : defaultBrowserPaneWidth();
   };
   const setBrowserPaneWidthWithinBounds = (width: number) => {
     const { min, max } = browserPaneLimits();
@@ -326,10 +343,10 @@ export default function Platform() {
   useEffect(() => {
     const element = surface.current;
     if (!element || isShellPage(page) || typeof ResizeObserver === 'undefined') return;
-    const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
+    const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { id: page, x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
-  }, [page]);
+  }, [page, surfaceRevision]);
   const plugins = status?.plugins ?? [];
   const installFor = (id: string): PluginInstallState | undefined => startingPluginId === id ? { id, version: null, status: 'checking', progress: null, transferred: 0, total: 0, error: null } : status?.pluginInstalls?.find(job => job.id === id);
   const migrationInstall = status?.migration ? installFor(status.migration.id) : undefined;
@@ -355,6 +372,12 @@ export default function Platform() {
     try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
     return next;
   });
+  // Keep the tool area usable: the browser pane never takes more than the window
+  // can spare, and it is re-clamped whenever the window itself changes size.
+  const browserPaneSize = (() => {
+    const { min, max } = browserPaneLimits();
+    return { min, max, width: Math.round(Math.min(max, Math.max(min, browserPaneWidth ?? defaultBrowserPaneWidth()))) };
+  })();
   const renderWorkspaceTabs = () => status?.tabs.length ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
     <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate('home')}>
       <Boxes className="commerce-tab-icon" /><span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
@@ -481,16 +504,16 @@ export default function Platform() {
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       </div>
       </div>
-      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={browserPaneWidth ? { flexBasis: `${Math.min(browserPaneLimits().max, Math.max(browserPaneLimits().min, browserPaneWidth))}px` } : undefined}>
+      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={{ '--commerce-browser-pane-width': `${browserPaneSize.width}px`, flexBasis: browserPaneWidth ? `${browserPaneSize.width}px` : undefined } as CSSProperties}>
         <div
           className="commerce-browser-resizer"
           role="separator"
           tabIndex={0}
           aria-label="调整浏览器面板宽度"
           aria-orientation="vertical"
-          aria-valuemin={browserPaneLimits().min}
-          aria-valuemax={browserPaneLimits().max}
-          aria-valuenow={Math.round(browserPaneWidth ? Math.min(browserPaneLimits().max, Math.max(browserPaneLimits().min, browserPaneWidth)) : currentBrowserPaneWidth())}
+          aria-valuemin={browserPaneSize.min}
+          aria-valuemax={browserPaneSize.max}
+          aria-valuenow={browserPaneSize.width}
           onPointerDown={beginBrowserResize}
           onPointerMove={moveBrowserResize}
           onPointerUp={endBrowserResize}

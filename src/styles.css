@@ -208,7 +208,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-windowbar-sidebar-toggle svg { width: 16px; height: 16px; }
 .commerce-windowbar-browser-toggle { flex-shrink: 0; color: var(--muted-foreground); -webkit-app-region: no-drag; }
 .commerce-windowbar-browser-toggle svg { width: 17px; height: 17px; }
-.commerce-browser-pane { position: relative; display: flex; flex: 0 0 clamp(420px, 48vw, 2400px); min-width: 360px; min-height: 0; flex-direction: column; border-left: 1px solid var(--border); background: var(--background); box-shadow: -12px 0 28px color-mix(in srgb, var(--foreground) 7%, transparent); animation: browser-pane-in .18s ease-out; }
+.commerce-browser-pane { position: relative; display: flex; flex: 0 0 var(--commerce-browser-pane-width, clamp(420px, 48vw, 2400px)); min-width: 360px; min-height: 0; flex-direction: column; border-left: 1px solid var(--border); background: var(--background); box-shadow: -12px 0 28px color-mix(in srgb, var(--foreground) 7%, transparent); animation: browser-pane-in .18s ease-out; }
 .commerce-browser-pane .browser-workspace { min-width: 0; }
 .commerce-browser-resizer { position: absolute; z-index: 2; top: 0; bottom: 0; left: -10px; width: 10px; cursor: col-resize; touch-action: none; user-select: none; }
 .commerce-browser-resizer::before { position: absolute; top: 50%; right: 2px; width: 2px; height: 28px; border-radius: 999px; background: transparent; content: ''; transform: translateY(-50%); transition: background .15s ease, height .15s ease; }
@@ -662,14 +662,12 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .commerce-content-inner { max-width: 1360px; }
   .commerce-search { max-width: 360px; }
   .market-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .commerce-browser-pane { flex-basis: clamp(600px, 48vw, 2000px); }
 }
 
 @media (min-width: 2200px) {
   .commerce-windowbar-tabs { max-width: min(1600px, 70vw); }
   .commerce-content-inner { max-width: 1620px; }
   .market-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .commerce-browser-pane { flex-basis: clamp(720px, 48vw, 2400px); }
 }
 
 @media (min-width: 3000px) {
@@ -677,5 +675,4 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .commerce-content-inner { max-width: 2000px; }
   .commerce-search { max-width: 440px; }
   .market-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .commerce-browser-pane { flex-basis: clamp(960px, 48vw, 2600px); }
 }
