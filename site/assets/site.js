@@ -242,13 +242,19 @@
   // 因此市场上架新插件后官网自动出现，无需改动页面。
   var MARKET_URL =
     'https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json';
-  var MARKET_CACHE_KEY = 'qingzuo.site.market.v1';
+  var MARKET_CACHE_KEY = 'qingzuo.site.market.v2';
   var PLATFORM_LABELS_MARKET = {
     'darwin-arm64': 'macOS',
     'win32-x64': 'Windows',
   };
 
   var marketState = { plugins: [], category: '全部', query: '' };
+  var exactNumber = new Intl.NumberFormat('zh-CN');
+  var compactNumber = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: 1,
+  });
 
   function readMarketCache() {
     try {
@@ -283,6 +289,15 @@
       if (match) return 'https://github.com/' + match[1] + '/' + match[2];
     }
     return null;
+  }
+
+  function pluginDownloads(plugin) {
+    var value = plugin && plugin.stats && plugin.stats.downloads;
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+
+  function formatDownloadCount(value) {
+    return value >= 1000 ? compactNumber.format(value) : exactNumber.format(value);
   }
 
   function initials(words) {
@@ -351,6 +366,14 @@
         el('span', 'plugin-platform', PLATFORM_LABELS_MARKET[key] || key)
       );
     });
+    var downloads = pluginDownloads(plugin);
+    if (downloads !== null) {
+      var exact = exactNumber.format(downloads) + ' 次';
+      var downloadNode = el('span', 'plugin-downloads', '↓ ' + formatDownloadCount(downloads));
+      downloadNode.title = '累计下载 ' + exact;
+      downloadNode.setAttribute('aria-label', '累计下载 ' + exact);
+      meta.insertBefore(downloadNode, meta.firstChild);
+    }
     if (meta.childNodes.length) card.appendChild(meta);
 
     card.appendChild(el('p', 'plugin-repo', repo ? '查看插件仓库' : '暂无公开仓库'));

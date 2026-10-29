@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginCard, type Plugin } from './PluginCard';
+import { PluginCard, formatDownloadCount, type Plugin } from './PluginCard';
 import type { PluginInstallState } from './commerce';
 
 const entry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', version: '0.2.0', category: '标签与文档' };
@@ -75,5 +75,13 @@ describe('PluginCard installation state', () => {
     rerender(<PluginCard entry={entry} installed={{ ...installed, version: '0.3.0' }} mode="plugins" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
     expect(container.querySelector('.plugin-state')?.textContent).toContain('v0.3.0');
     expect(screen.queryByRole('button', { name: '更新插件' })).toBeNull();
+  });
+
+  it('shows compact cumulative downloads only when a positive market value exists', () => {
+    expect([999, 1234, 31000, 1250000].map(formatDownloadCount)).toEqual(['999', '1.2K', '31K', '1.3M']);
+    const { rerender } = render(<PluginCard entry={{ ...entry, stats: { downloads: 31000 } }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(screen.getByLabelText('累计下载 31,000 次').textContent).toContain('31K');
+    rerender(<PluginCard entry={{ ...entry, stats: { downloads: 0 } }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(screen.queryByLabelText(/累计下载/)).toBeNull();
   });
 });

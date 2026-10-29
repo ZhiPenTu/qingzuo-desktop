@@ -637,6 +637,16 @@ h1 {
   border-radius: 999px;
 }
 
+.plugin-downloads {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--secondary) 72%, transparent);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
 .plugin-repo {
   margin: 0;
   padding-top: 10px;

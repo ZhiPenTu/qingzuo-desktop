@@ -9,3 +9,7 @@ test('market API ranges default to 1.0 and mark future APIs incompatible', () =>
  assert.equal(entries[0].compatible,true);assert.equal(entries[1].compatible,false);
  assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,api:'invalid'}]}));
 });
+test('market download stats are optional but must be non-negative safe integers', () => {
+ assert.equal(validateCatalog({schemaVersion:1,plugins:[{...entry,stats:{downloads:31000}}]})[0].stats.downloads,31000);
+ for(const stats of [{downloads:-1},{downloads:1.5},{downloads:'31K'},{downloads:Number.MAX_SAFE_INTEGER+1},[]]) assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,stats}]}));
+});

@@ -7,6 +7,7 @@ export function validateCatalog(value) {
   if(!/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/.test(item.id)||item.id.startsWith('system.')||identities.has(item.id)||!semver.valid(item.version)||typeof item.title!=='string'||!item.title.trim()||item.title.length>80||typeof item.description!=='string'||item.description.length>2000||item.releaseNotes!==undefined&&(typeof item.releaseNotes!=='string'||item.releaseNotes.length>64000)||!item.artifacts||typeof item.artifacts!=='object')throw new Error('市场插件条目无效。');
   identities.add(item.id);
   if (item.api !== undefined && (typeof item.api !== 'string' || !semver.validRange(item.api))) throw new Error('市场 API 范围无效。');
+  if (item.stats !== undefined && (!item.stats || typeof item.stats !== 'object' || Array.isArray(item.stats) || item.stats.downloads !== undefined && (!Number.isSafeInteger(item.stats.downloads) || item.stats.downloads < 0))) throw new Error('市场插件统计无效。');
   for(const [platform,artifact] of Object.entries(item.artifacts)){
    if(!['darwin-arm64','win32-x64'].includes(platform)||typeof artifact.signature!=='string'||artifact.signature.length>128||!/^[a-f0-9]{64}$/.test(artifact.sha256))throw new Error('市场制品信息无效。');
    const url=new URL(artifact.url);if(url.protocol!=='https:'||url.username||url.password)throw new Error('市场下载地址无效。');

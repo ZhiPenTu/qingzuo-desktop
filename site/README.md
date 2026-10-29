@@ -21,6 +21,8 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 
 这与桌面端插件市场使用的地址相同（见 `scripts/prepare-platform.mjs` 的 `COMMERCE_MARKET_URL` 默认值），因此**市场上架新插件后，官网自动出现该插件，无需改动任何代码**。市场流程是「合并目录即上架」，不依赖底座安装包重发。
 
+目录中的可选 `stats.downloads` 会显示为插件的累计下载量。该数据来自 GitHub Release 制品下载计数，包含重复下载，不等同于唯一用户或安装量。
+
 目录字段到页面元素的映射：
 
 | `catalog.json` 字段 | 页面显示 |

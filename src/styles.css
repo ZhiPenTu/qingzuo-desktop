@@ -280,7 +280,10 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 @keyframes plugin-bar-flow { 0% { transform: translateX(-100%); } 50% { transform: translateX(130%); } 100% { transform: translateX(260%); } }
 @media (prefers-reduced-motion: reduce) { [data-slot="progress-shimmer"] { animation: none; width: 100%; opacity: 0.6; } }
 .plugin-card > [data-slot="card-footer"] { background: transparent; flex-wrap: wrap; gap: 6px; padding-block: 12px; margin-top: auto; }
-.plugin-version { color: var(--muted-foreground); font-size: 12px; margin-right: auto; }
+.plugin-market-meta { display: inline-flex; align-items: center; gap: 10px; margin-right: auto; }
+.plugin-version { color: var(--muted-foreground); font-size: 12px; }
+.plugin-downloads { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+.plugin-downloads svg { width: 13px; height: 13px; }
 .plugin-installed { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); font-size: 11px; }
 .plugin-installed svg { width: 14px; height: 14px; }
 .plugin-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
