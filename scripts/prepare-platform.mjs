@@ -1,15 +1,18 @@
-import { cp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { desktopSigningMode } from '../desktop/distribution.mjs';
 const root = process.cwd(), generated = path.join(root, 'resources/generated');
+const previousMarket = await readFile(path.join(generated, 'market.json'), 'utf8')
+  .then(JSON.parse)
+  .catch(() => ({}));
 await rm(generated, { recursive: true, force: true });
 await mkdir(generated, { recursive: true });
 const binary = 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : '');
 await cp(path.join(root, 'native/sandbox/target/release', binary), path.join(generated, binary));
 await writeFile(path.join(generated, 'market.json'), JSON.stringify({
-  url: process.env.COMMERCE_MARKET_URL || 'https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json',
-  publicKey: process.env.COMMERCE_MARKET_PUBLIC_KEY || process.env.COMMERCE_PLUGIN_PUBLIC_KEY || '',
-  updatePublicKey: process.env.COMMERCE_PLUGIN_PUBLIC_KEY || '',
+  url: process.env.COMMERCE_MARKET_URL || previousMarket.url || 'https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json',
+  publicKey: process.env.COMMERCE_MARKET_PUBLIC_KEY || process.env.COMMERCE_PLUGIN_PUBLIC_KEY || previousMarket.publicKey || '',
+  updatePublicKey: process.env.COMMERCE_PLUGIN_PUBLIC_KEY || previousMarket.updatePublicKey || '',
 }));
 await writeFile(path.join(generated, 'distribution.json'), JSON.stringify({ signing: desktopSigningMode(), preview: process.env.QINGZUO_LOCAL_PREVIEW === '1' }));
 await cp(path.join(root, 'node_modules/@deepseek-ai/dsh/LICENSE'), path.join(generated, 'DeepSeek-Harness-LICENSE')).catch(async () => {

@@ -2,54 +2,56 @@ use serde::Deserialize;
 use std::io::{self, Read};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Request { op: String, account: String, value: Option<String> }
+pub struct Request { op: String, account: String, value: Option<String>, store: Option<String> }
 pub fn run() -> Result<i32, Box<dyn std::error::Error>> {
     let mut input = String::new(); io::stdin().take(16384).read_to_string(&mut input)?;
     let request: Request = serde_json::from_str(&input)?;
     if !["set", "get", "clear"].contains(&request.op.as_str()) || request.account.len() > 256 || !request.account.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".:-".contains(c)) { return Err("invalid credential request".into()); }
-    #[cfg(target_os = "macos")] let result = mac::execute(&request)?;
+    #[cfg(target_os = "macos")] let result = local::execute(&request)?;
     #[cfg(windows)] let result = windows::execute(&request)?;
     #[cfg(not(any(target_os = "macos", windows)))] let result: Option<String> = return Err("credentials unavailable".into());
     println!("{}", serde_json::json!({"value": result})); Ok(0)
 }
 #[cfg(target_os = "macos")]
-mod mac {
+mod local {
     use super::Request;
-    use core_foundation_sys::{base::*, dictionary::*, string::*, data::*, number::*};
-    use std::{ptr::null, ffi::{CString, c_void}};
-    #[link(name = "Security", kind = "framework")]
-    extern "C" {
-        static kSecClass: CFStringRef; static kSecClassGenericPassword: CFStringRef;
-        static kSecAttrService: CFStringRef; static kSecAttrAccount: CFStringRef;
-        static kSecValueData: CFStringRef; static kSecReturnData: CFStringRef;
-        fn SecItemAdd(query: CFDictionaryRef, result: *mut CFTypeRef) -> i32;
-        fn SecItemCopyMatching(query: CFDictionaryRef, result: *mut CFTypeRef) -> i32;
-        fn SecItemUpdate(query: CFDictionaryRef, attributes: CFDictionaryRef) -> i32;
-        fn SecItemDelete(query: CFDictionaryRef) -> i32;
-    }
-    struct Owned(CFTypeRef); impl Drop for Owned { fn drop(&mut self) { if !self.0.is_null() { unsafe { CFRelease(self.0); } } } }
-    unsafe fn string(value: &str) -> Owned { let text = CString::new(value).unwrap(); Owned(CFStringCreateWithCString(null(), text.as_ptr(), kCFStringEncodingUTF8) as CFTypeRef) }
-    unsafe fn dictionary() -> Owned { Owned(CFDictionaryCreateMutable(null(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) as CFTypeRef) }
-    unsafe fn insert(dict: &Owned, key: CFStringRef, value: CFTypeRef) { CFDictionarySetValue(dict.0 as CFMutableDictionaryRef, key as *const c_void, value); }
-    pub fn execute(r: &Request) -> Result<Option<String>, Box<dyn std::error::Error>> { unsafe {
-        let query = dictionary(); let service = string("com.commerce.plugins"); let account = string(&r.account);
-        insert(&query, kSecClass, kSecClassGenericPassword as CFTypeRef); insert(&query, kSecAttrService, service.0); insert(&query, kSecAttrAccount, account.0);
-        let status;
-        if r.op == "get" {
-            insert(&query, kSecReturnData, kCFBooleanTrue as CFTypeRef); let mut value = null(); status = SecItemCopyMatching(query.0 as CFDictionaryRef, &mut value);
-            let owned = Owned(value); if status == -25300 { return Ok(None); }
-            if status != 0 { return Err(format!("keychain status {status}").into()); }
-            let data = owned.0 as CFDataRef; let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(data), CFDataGetLength(data) as usize); return Ok(Some(String::from_utf8(bytes.to_vec())?));
-        } else if r.op == "clear" { status = SecItemDelete(query.0 as CFDictionaryRef); }
-        else {
-            let value = r.value.as_ref().ok_or("missing secret")?; if value.len() > 4096 { return Err("secret too large".into()); }
-            let data = Owned(CFDataCreate(null(), value.as_ptr(), value.len() as isize) as CFTypeRef);
-            let attributes = dictionary(); insert(&attributes, kSecValueData, data.0);
-            let updated = SecItemUpdate(query.0 as CFDictionaryRef, attributes.0 as CFDictionaryRef);
-            if updated == -25300 { insert(&query, kSecValueData, data.0); status = SecItemAdd(query.0 as CFDictionaryRef, std::ptr::null_mut()); } else { status = updated; }
+    use serde_json::{Map, Value};
+    use std::{fs::{self, OpenOptions}, io::{self, Write}, os::unix::fs::{OpenOptionsExt, PermissionsExt}, path::Path, time::{SystemTime, UNIX_EPOCH}};
+    pub fn execute(r: &Request) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let path = Path::new(r.store.as_deref().ok_or("credential store path required")?);
+        if !path.is_absolute() { return Err("credential store path must be absolute".into()); }
+        let parent = path.parent().ok_or("credential store path has no parent")?;
+        fs::create_dir_all(parent)?; fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let lock = OpenOptions::new().create(true).read(true).write(true).mode(0o600).open(path.with_extension("lock"))?;
+        lock.lock()?;
+        let mut entries: Map<String, Value> = match fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Map::new(),
+            Err(error) => return Err(error.into()),
+        };
+        let result = match r.op.as_str() {
+            "get" => entries.get(&r.account).and_then(Value::as_str).map(str::to_owned),
+            "clear" => { entries.remove(&r.account); None }
+            "set" => {
+                let value = r.value.as_ref().ok_or("missing secret")?;
+                if value.len() > 4096 { return Err("secret too large".into()); }
+                entries.insert(r.account.clone(), Value::String(value.clone())); None
+            }
+            _ => unreachable!(),
+        };
+        if r.op != "get" {
+            if entries.is_empty() {
+                match fs::remove_file(path) { Ok(()) => {}, Err(error) if error.kind() == io::ErrorKind::NotFound => {}, Err(error) => return Err(error.into()) }
+            } else {
+                let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+                let temporary = path.with_extension(format!("{}-{stamp}.tmp", std::process::id()));
+                let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+                file.write_all(&serde_json::to_vec(&entries)?)?; file.sync_all()?;
+                fs::rename(&temporary, path)?; fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+            }
         }
-        if status != 0 && status != -25300 { return Err(format!("keychain status {status}").into()); } Ok(None)
-    } }
+        Ok(result)
+    }
 }
 #[cfg(windows)]
 mod windows {

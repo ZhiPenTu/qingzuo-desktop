@@ -93,7 +93,7 @@ test('page automation is origin scoped, snapshot stays redacted, stored files su
   };
   const openTool = async shell => {
     await shell.getByRole('button', { name: '工具中心', exact: true }).click();
-    await shell.locator('[data-slot="card"]').filter({ has: shell.getByRole('heading', { name: '页面采集验收', exact: true }) }).getByRole('button', { name: '打开工具', exact: true }).click();
+    await shell.locator('[data-slot="card"]').filter({ has: shell.getByRole('heading', { name: '页面采集验收', exact: true }) }).getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://local.browser-automation/'))).toBe(true);
     return app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://local.browser-automation/'));
   };

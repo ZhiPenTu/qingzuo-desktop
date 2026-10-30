@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, Plus, X, Search, ShieldCheck, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,14 +17,14 @@ import { recordError, getLatestError, type CapturedError } from './error-tracker
 import { useTheme } from '../theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 import brandIcon from '@/assets/qingzuo.png';
-import workspaceArt from '@/assets/workspace.png';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
 import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
 const AIChat = lazy(() => import('./AIChat'));
-type Page = 'home' | 'market' | 'plugins' | 'chat' | 'ai' | 'settings';
+type Page = 'home' | 'chat' | 'ai' | 'settings';
+type ToolTab = 'installed' | 'all';
 interface ComponentUpdateState {
   status: string;
   currentVersion?: string;
@@ -37,8 +37,8 @@ interface ComponentUpdateState {
   error?: string | null;
 }
 interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
-const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
-const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
+const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'settings', title: '设置', icon: Settings }] as const;
+const shellPageIds = ['home', 'chat', 'ai', 'settings'] as const;
 const isShellPage = (id: string): id is Page => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
@@ -79,9 +79,7 @@ const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
 const shellIconFor = (id: string) => (id === 'ai' ? Sparkles : navigation.find(item => item.id === id)?.icon ?? Boxes);
 const pageCopy = {
-  home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
-  market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
-  plugins: ['每一件工具，都井井有条。', '管理已安装工具的状态、设置和版本。'],
+  home: ['工具中心', '安装、管理和发现工具，都在一个地方。'],
   ai: ['AI 设置', '选择服务商，连接后即可开始对话。'],
   chat: ['AI 对话', '说一句话，让工具替你完成。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，管理轻作与已安装的工具。'],
@@ -90,6 +88,7 @@ export default function Platform() {
   const desktop = Boolean(window.commerceDesktop);
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
   const [page, setPage] = useState<Page | string>('home');
+  const [toolTab, setToolTab] = useState<ToolTab>('installed');
   const [lastShellPage, setLastShellPage] = useState<Page>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
   const [, setViewportWidth] = useState(() => window.innerWidth);
@@ -255,7 +254,7 @@ export default function Platform() {
   };
   async function navigate(next: string, settings = false) {
     try {
-      if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
+      if (page === 'home' && toolTab === 'all' && next !== 'home') { marketCache.current = null; marketRequest.current++; }
       if (isShellPage(next)) {
         await window.commerceDesktop?.invoke('view.hide');
         setLastShellPage(next);
@@ -356,11 +355,11 @@ export default function Platform() {
     return items;
   }, [status?.downloadSource?.source]);
   useEffect(() => {
-    if (page !== 'market') return;
+    if (page !== 'home' || toolTab !== 'all') return;
     let active = true;
     void loadMarket().catch(e => { if (active) { setMarketMessage(formatError(e)); setMarketState('error'); } });
-    return () => { active = false; marketCache.current = null; marketRequest.current++; };
-  }, [page, marketRevision, loadMarket]);
+    return () => { active = false; marketRequest.current++; };
+  }, [page, toolTab, marketRevision, loadMarket]);
   const checkPluginUpdates = async () => {
     if (pluginCheckBusy || !desktop) return;
     setPluginCheckBusy(true); setPluginCheckError(null);
@@ -386,10 +385,11 @@ export default function Platform() {
     const candidate = marketById.get(plugin.id);
     try { return Boolean(candidate && gt(candidate.version, plugin.version)); } catch { return false; }
   }), [plugins, marketById]);
-  const entries = page === 'market' ? market : page === 'plugins' ? plugins.map(plugin => {
+  const installedEntries = useMemo(() => plugins.map(plugin => {
     const candidate = marketById.get(plugin.id);
     return candidate ? { ...candidate, enabled: plugin.enabled, source: plugin.source, local: plugin.local, missing: plugin.missing, settings: plugin.settings, error: plugin.error } as Plugin : plugin;
-  }) : plugins;
+  }), [plugins, marketById]);
+  const entries = toolTab === 'all' ? market : installedEntries;
   const categories = useMemo(() => [...new Set(entries.map(toolCategory))], [entries]);
   const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
   const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
@@ -399,6 +399,12 @@ export default function Platform() {
   const ShellTabIcon = shellIconFor(shellTabPage);
   const shellTabIconSrc = shellTabPage === 'chat' ? aiChatIcon : undefined;
   const copy = pageCopy[page as Page];
+  const selectToolTab = (next: ToolTab) => {
+    if (next !== 'all') { marketCache.current = null; marketRequest.current++; }
+    setToolTab(next);
+    setQuery('');
+    setCategory('all');
+  };
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
     try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
@@ -449,21 +455,33 @@ export default function Platform() {
       {status?.kernel.error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{status.kernel.error}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => act('kernel.retry')}>重新启动工具服务</Button><Button variant="outline" size="sm" onClick={() => openIssueReport(status.kernel.error, '工具服务')}>反馈报错</Button></div></AlertDescription></Alert> : null}
       {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className="commerce-content-inner">
         <div className="commerce-heading"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
-        {page === 'home' ? <section className="workspace-feature"><img src={workspaceArt} alt="" /><div><h2>开始你的下一件小事</h2><p>{plugins.length ? <>从编辑一张标签，到处理一张商品图片。<br />让重复的工作更简单，把时间留给创作。</> : <>推荐 LabelEdit：PDF 编辑与文字识别。<br />推荐 AI 抠图：处理商品图片，按需安装。</>}</p><div className="workspace-feature-actions"><Button onClick={() => void navigate('market')}><Store data-icon="inline-start" />浏览插件市场<ArrowRight data-icon="inline-end" /></Button><Button variant="outline" onClick={() => void openBrowserPane()}><Globe data-icon="inline-start" />打开浏览器</Button></div></div></section> : null}
-        {['home', 'market', 'plugins'].includes(page) ? <>
-          <div className="tool-section-heading"><div><h2>{page === 'home' ? '我的工具' : title}</h2><span>{entries.length} 款工具</span></div><div className="commerce-page-actions"><InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup>{page === 'market' ? <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button> : null}</div></div>
-          {page === 'plugins' ? <div className="plugin-check-toolbar" role="status">
-            <div><strong>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</strong>{marketCheckedAt ? <span>上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}</div>
-            <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
-          </div> : null}
-          {page === 'plugins' && pluginCheckError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{pluginCheckError}</AlertDescription></Alert> : null}
-          {page === 'market' && categories.length ? <div className="market-filters" role="group" aria-label="工具分类">{['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部工具' : item}</Button>)}</div> : null}
-          {page === 'market' && marketState === 'loading' ? <div className="market-loading" role="status"><LoaderCircle className="animate-spin" />正在加载插件目录…</div> : page === 'market' && (marketState === 'error' || marketState === 'unavailable') ? <Empty className="market-empty"><EmptyHeader><Store /><EmptyTitle>{marketState === 'error' ? '暂时无法加载插件市场' : desktop ? '插件目录尚未就绪' : '在桌面应用中发现更多工具'}</EmptyTitle><EmptyDescription>{marketMessage}</EmptyDescription></EmptyHeader>{desktop ? <Button variant="outline" onClick={() => setMarketRevision(value => value + 1)}><RefreshCw data-icon="inline-start" />重新加载</Button> : null}</Empty> : <>
-            <div className={cn('commerce-grid', page === 'market' ? 'market-grid' : 'tool-list')}>{results.map(entry => <PluginCard key={entry.id} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode={page as 'home' | 'market' | 'plugins'} disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
-            {!results.length ? <Empty><EmptyHeader><Search /><EmptyTitle>{query || category !== 'all' ? '没有找到工具' : '这里还没有工具'}</EmptyTitle><EmptyDescription>{query || category !== 'all' ? '换个关键词或分类，试试其他工具。' : '前往插件市场，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query || category !== 'all' ? <Button variant="outline" onClick={() => { setQuery(''); setCategory('all'); }}>清除筛选</Button> : null}</Empty> : null}
-          </>}
-          {page === 'home' ? <button className="workspace-discover" onClick={() => void navigate('market')}><span className="discover-icon"><Plus /></span><span><strong>去插件市场，发现更多顺手工具</strong><small>按需扩展你的工作台，工具可以独立安装与更新。</small></span><ArrowRight /></button> : null}
-          <div className="commerce-info"><ShieldCheck /><div><strong>{page === 'market' ? '每个工具都会先校验来源' : '你的工作台，由你掌握'}</strong><p>{page === 'market' ? '市场里的工具都来自已校验的发布目录，安装前会自动检查一遍。' : '本地工具在本机处理文件，联网工具按你的授权访问服务。'}</p></div></div>
+        {page === 'home' ? <>
+          <div className="tool-center-bar">
+            <div className="tool-tabs" role="tablist" aria-label="工具视图">
+              <button type="button" role="tab" id="tool-tab-installed" aria-selected={toolTab === 'installed'} aria-controls="tool-panel-installed" className={cn('tool-tab', toolTab === 'installed' && 'is-active')} onClick={() => selectToolTab('installed')}>已安装<span className="tool-tab-count" aria-hidden="true">{plugins.length}</span></button>
+              <button type="button" role="tab" id="tool-tab-all" aria-selected={toolTab === 'all'} aria-controls="tool-panel-all" className={cn('tool-tab', toolTab === 'all' && 'is-active')} onClick={() => selectToolTab('all')}>全部{marketState === 'ready' ? <span className="tool-tab-count" aria-hidden="true">{market.length}</span> : null}</button>
+            </div>
+            <div className="commerce-page-actions">
+              <InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup>
+              {toolTab === 'all' ? <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button> : null}
+              <Button variant="outline" size="sm" onClick={() => void openBrowserPane()}><Globe data-icon="inline-start" />打开浏览器</Button>
+            </div>
+          </div>
+          {toolTab === 'installed' ? <div id="tool-panel-installed" role="tabpanel" aria-labelledby="tool-tab-installed" className="tool-tab-panel">
+            <div className="plugin-check-toolbar" role="status">
+              <div><strong>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</strong>{marketCheckedAt ? <span>上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}</div>
+              <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
+            </div>
+            {pluginCheckError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{pluginCheckError}</AlertDescription></Alert> : null}
+            <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`installed:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="installed" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
+            {!results.length ? <Empty><EmptyHeader><Boxes /><EmptyTitle>{query ? '没有找到工具' : '还没有安装工具'}</EmptyTitle><EmptyDescription>{query ? '换个关键词试试。' : '从全部工具中挑选，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query ? <Button variant="outline" onClick={() => setQuery('')}>清除筛选</Button> : <Button variant="outline" onClick={() => selectToolTab('all')}>浏览全部工具<ArrowRight data-icon="inline-end" /></Button>}</Empty> : null}
+          </div> : <div id="tool-panel-all" role="tabpanel" aria-labelledby="tool-tab-all" className="tool-tab-panel">
+            {categories.length ? <div className="market-filters" role="group" aria-label="工具分类">{['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部分类' : item}</Button>)}</div> : null}
+            {marketState === 'loading' ? <div className="market-loading" role="status"><LoaderCircle className="animate-spin" />正在加载插件目录…</div> : marketState === 'error' || marketState === 'unavailable' ? <Empty className="market-empty"><EmptyHeader><Store /><EmptyTitle>{marketState === 'error' ? '暂时无法加载插件市场' : desktop ? '插件目录尚未就绪' : '在桌面应用中发现更多工具'}</EmptyTitle><EmptyDescription>{marketMessage}</EmptyDescription></EmptyHeader>{desktop ? <Button variant="outline" onClick={() => setMarketRevision(value => value + 1)}><RefreshCw data-icon="inline-start" />重新加载</Button> : null}</Empty> : <>
+              <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`all:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="catalog" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
+              {!results.length ? <Empty><EmptyHeader><Search /><EmptyTitle>{query || category !== 'all' ? '没有找到工具' : '这里还没有工具'}</EmptyTitle><EmptyDescription>{query || category !== 'all' ? '换个关键词或分类，试试其他工具。' : '稍后再来看看，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query || category !== 'all' ? <Button variant="outline" onClick={() => { setQuery(''); setCategory('all'); }}>清除筛选</Button> : null}</Empty> : null}
+            </>}
+          </div>}
         </> : null}
         {page === 'ai' ? <AISettings onOpenChat={() => void navigate('chat')} /> : null}
         {page === 'settings' ? <div className="commerce-settings">

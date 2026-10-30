@@ -148,6 +148,51 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
   }
 });
 
+test('closing an inactive browser tab keeps the selected page visible', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-browser-close-tab-'));
+  const fixture = await fixtureServer();
+  let app;
+  try {
+    app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + path.join(temporary, 'profile')] });
+    const shell = await app.firstWindow();
+    await expect(shell.getByText('工具服务已就绪', { exact: true })).toBeVisible();
+    await shell.getByRole('button', { name: '打开浏览器', exact: true }).click();
+    const initial = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    const firstId = initial.tabs[0].id;
+    const firstUrl = fixture.base + '/page1';
+    const secondUrl = fixture.base + '/page2';
+    await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: firstId, url: firstUrl });
+    const firstPage = await browserPage(app, firstUrl);
+    await expect(firstPage.getByText('页面一', { exact: false })).toBeVisible();
+
+    const second = await shell.evaluate(url => window.commerceDesktop.invoke('browser.newTab', { url }), secondUrl);
+    await browserPage(app, secondUrl);
+    await shell.evaluate(id => window.commerceDesktop.invoke('browser.activate', { id }), firstId);
+    const activeView = () => app.evaluate(({ BrowserWindow }, url) => {
+      const view = BrowserWindow.getAllWindows()[0].contentView.children.find(candidate => candidate.webContents?.getURL?.() === url);
+      return view ? { visible: view.getVisible(), bounds: view.getBounds() } : null;
+    }, firstUrl);
+    await expect.poll(async () => (await activeView())?.visible).toBe(true);
+
+    await shell.getByRole('tab', { name: /第二页/ }).getByRole('button', { name: /关闭第二页/ }).click();
+    const remaining = await shell.evaluate(() => window.commerceDesktop.invoke('browser.status'));
+    expect(remaining.tabs).toHaveLength(1);
+    expect(remaining.activeTabId).toBe(firstId);
+    expect(remaining.tabs[0].id).toBe(firstId);
+    await expect.poll(async () => (await activeView())?.visible).toBe(true);
+    const surface = await shell.locator('.browser-surface').boundingBox();
+    const bounds = (await activeView())?.bounds;
+    expect(Math.abs((bounds?.width || 0) - (surface?.width || 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((bounds?.height || 0) - (surface?.height || 0))).toBeLessThanOrEqual(1);
+    await expect(firstPage.getByText('页面一', { exact: false })).toBeVisible();
+  } finally {
+    await app?.close();
+    fixture.server.closeAllConnections();
+    await new Promise(resolve => fixture.server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
 test('detects media incrementally and downloads selected candidates through the browser session', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-browser-media-'));
   const fixture = await fixtureServer();
@@ -240,7 +285,7 @@ test('keeps the tool and browser surfaces visible while switching between them',
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await shell.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
     await shell.getByRole('button', { name: '工具中心', exact: true }).click();
-    await shell.getByRole('button', { name: '打开工具', exact: true }).click();
+    await shell.getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://local.fixture-native/'))).toBe(true);
 
     await shell.getByRole('button', { name: '打开浏览器面板', exact: true }).click();

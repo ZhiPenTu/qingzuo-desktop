@@ -52,7 +52,7 @@ test('leaving a tool while it reloads keeps the native surface hidden', async ()
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
 
     await page.getByRole('button', { name: '工具中心', exact: true }).click();
-    await page.getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '打开', exact: true }).click();
     await page.getByRole('tab', { name: /Surface fixture/ }).waitFor();
     await expect.poll(async () => (await surfaceState(application)).some(view => view.visible)).toBe(true);
 
