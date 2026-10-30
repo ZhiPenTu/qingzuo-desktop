@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg-removebg" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#72F3C9"/><stop offset=".5" stop-color="#17C995"/><stop offset="1" stop-color="#087C68"/>
+    </linearGradient>
+    <radialGradient id="glow-removebg" cx="0" cy="0" r="1" gradientTransform="translate(78 55) rotate(45) scale(150)">
+      <stop stop-color="#fff" stop-opacity=".52"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="white-removebg" x1="80" y1="54" x2="180" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <filter id="shadow-removebg" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#15203D" flood-opacity=".24"/>
+    </filter>
+    <filter id="soft-removebg" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="tile-removebg"><rect x="8" y="8" width="240" height="240" rx="58"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#18243E" opacity=".18" filter="url(#shadow-removebg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg-removebg)"/>
+  <g clip-path="url(#tile-removebg)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#glow-removebg)"/>
+    <path d="M-4 183C55 146 104 158 157 184c43 21 77 20 108 4v72H-4z" fill="#fff" opacity=".09"/>
+    <path d="M25 37C62 12 130 8 179 20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".14"/>
+    
+  <g filter="url(#shadow-removebg)">
+    <rect x="49" y="61" width="158" height="137" rx="27" fill="#fff" opacity=".96"/>
+    <g clip-path="url(#remove-grid-removebg)">
+      <defs><clipPath id="remove-grid-removebg"><rect x="60" y="72" width="136" height="115" rx="18"/></clipPath></defs>
+      <rect x="60" y="72" width="136" height="115" fill="#EAF7F3"/>
+      <rect x="60" y="72" width="24" height="24" fill="#F5FCF9"/><rect x="84" y="72" width="24" height="24" fill="#C9E9DF"/><rect x="108" y="72" width="24" height="24" fill="#F5FCF9"/><rect x="132" y="72" width="24" height="24" fill="#C9E9DF"/><rect x="156" y="72" width="24" height="24" fill="#F5FCF9"/><rect x="180" y="72" width="24" height="24" fill="#C9E9DF"/><rect x="60" y="96" width="24" height="24" fill="#C9E9DF"/><rect x="84" y="96" width="24" height="24" fill="#F5FCF9"/><rect x="108" y="96" width="24" height="24" fill="#C9E9DF"/><rect x="132" y="96" width="24" height="24" fill="#F5FCF9"/><rect x="156" y="96" width="24" height="24" fill="#C9E9DF"/><rect x="180" y="96" width="24" height="24" fill="#F5FCF9"/><rect x="60" y="120" width="24" height="24" fill="#F5FCF9"/><rect x="84" y="120" width="24" height="24" fill="#C9E9DF"/><rect x="108" y="120" width="24" height="24" fill="#F5FCF9"/><rect x="132" y="120" width="24" height="24" fill="#C9E9DF"/><rect x="156" y="120" width="24" height="24" fill="#F5FCF9"/><rect x="180" y="120" width="24" height="24" fill="#C9E9DF"/><rect x="60" y="144" width="24" height="24" fill="#C9E9DF"/><rect x="84" y="144" width="24" height="24" fill="#F5FCF9"/><rect x="108" y="144" width="24" height="24" fill="#C9E9DF"/><rect x="132" y="144" width="24" height="24" fill="#F5FCF9"/><rect x="156" y="144" width="24" height="24" fill="#C9E9DF"/><rect x="180" y="144" width="24" height="24" fill="#F5FCF9"/><rect x="60" y="168" width="24" height="24" fill="#F5FCF9"/><rect x="84" y="168" width="24" height="24" fill="#C9E9DF"/><rect x="108" y="168" width="24" height="24" fill="#F5FCF9"/><rect x="132" y="168" width="24" height="24" fill="#C9E9DF"/><rect x="156" y="168" width="24" height="24" fill="#F5FCF9"/><rect x="180" y="168" width="24" height="24" fill="#C9E9DF"/>
+    </g>
+    <path d="M115 117h29v-16h15v-12h-15v-9h-29v9h-15v12h15z" fill="#FF7A59"/>
+    <path d="M100 115h58a12 12 0 0 1 12 12v42a12 12 0 0 1-12 12h-58a12 12 0 0 1-12-12v-42a12 12 0 0 1 12-12z" fill="#18B98C"/>
+    <path d="M108 126h42" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".75"/>
+    <circle cx="185" cy="83" r="16" fill="#fff"/>
+    <path d="M185 74v18M176 83h18" stroke="#16B78B" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <path d="M54 51c2 10 6 14 16 16-10 2-14 6-16 16-2-10-6-14-16-16 10-2 14-6 16-16z" fill="#fff"/>
+
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="2"/>
+</svg>

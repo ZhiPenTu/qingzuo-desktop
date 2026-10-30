@@ -104,4 +104,11 @@ describe('PluginCard installation state', () => {
     expect(image?.getAttribute('src')).toBe(icon);
     expect(container.querySelector('.commerce-tool-icon svg')).toBeNull();
   });
+
+  it('uses built-in official brand icons when an older installed plugin lacks manifest.icon', () => {
+    const { container } = render(<PluginCard entry={entry} mode="home" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    const image = container.querySelector('.commerce-tool-icon.has-image img');
+    expect(image?.getAttribute('src')).toBeTruthy();
+    expect(container.querySelector('.commerce-tool-icon svg')).toBeNull();
+  });
 });
