@@ -33,7 +33,7 @@ try {
   await mkdir('output/electron-tests', { recursive: true });
   await page.screenshot({ path: 'output/electron-tests/packaged-home.png' });
   expect(status.plugins).toEqual([]);
-  await expect(page.getByText('这里还没有工具')).toBeVisible();
+  await expect(page.getByText('还没有安装工具')).toBeVisible();
   const { readdir } = await import('node:fs/promises');
   const resources = process.platform === 'darwin' ? path.join(installedRoot, 'Contents/Resources/commerce') : path.join(installedRoot, 'resources/commerce');
   expect(await readdir(resources)).not.toContain('plugins');

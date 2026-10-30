@@ -532,7 +532,7 @@ migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
 downloadSources = new DownloadSourceService({ root: app.getPath('userData'), changed });
 await downloadSources.initialize();
-credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':');
+credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':', path.join(app.getPath('userData'), 'credentials-vault.json'));
 storage = new PluginStorage(path.join(app.getPath('userData'), 'plugin-storage'));
 await storage.initialize();
 files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog, { persistent: storage });

@@ -62,8 +62,8 @@ function setupFailure(error, models = []) {
   if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
     return { ok: false, code: 'network_timeout', message: '连接超时，请检查网络后重试。', ...(models.length ? { models } : {}) };
   }
-  if (/凭据|钥匙串|keychain/i.test(error?.message ?? '')) {
-    return { ok: false, code: 'credential_error', message: '无法安全保存访问密钥，请检查系统钥匙串后重试。', ...(models.length ? { models } : {}) };
+  if (/凭据|credential/i.test(error?.message ?? '')) {
+    return { ok: false, code: 'credential_error', message: '无法保存访问密钥，请检查应用数据目录权限后重试。', ...(models.length ? { models } : {}) };
   }
   return { ok: false, code: 'network_error', message: '无法连接 AI 服务，请检查网络或服务地址后重试。', ...(models.length ? { models } : {}) };
 }
@@ -156,13 +156,13 @@ export class ProxyRuntime {
         try {
           previousKey = await this.credentials.get('system.ai', 'external');
         } catch {
-          throw new AISetupError('credential_error', '无法读取系统钥匙串，请检查系统权限后重试。');
+          throw new AISetupError('credential_error', '无法读取已保存的访问密钥，请重新填写。');
         }
         keyChanged = true;
         try {
           await this.credentials.set('system.ai', 'external', apiKey);
         } catch {
-          throw new AISetupError('credential_error', '无法安全保存访问密钥，请检查系统钥匙串后重试。');
+          throw new AISetupError('credential_error', '无法保存访问密钥，请检查应用数据目录权限后重试。');
         }
       }
       this.settings = { schemaVersion: 1, mode: 'external', address, model, verified: [model] };
