@@ -45,7 +45,14 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.removeItem('qingzuo.sidebarCollapsed'); window.localStorage.removeItem('qingzuo.browserPaneWidth'); delete window.commerceDesktop; });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  window.localStorage.removeItem('qingzuo.sidebarCollapsed');
+  window.localStorage.removeItem('qingzuo.browserPaneRatio');
+  window.localStorage.removeItem('qingzuo.browserPaneWidth');
+  delete window.commerceDesktop;
+});
 
 it('keeps backend progress after acknowledgment, restores it across pages, and completes on the installed state', async () => {
   const { invoke, emit } = fixture();
@@ -264,11 +271,11 @@ it('keeps the sidebar toggle in the topbar and switches its accessible state', a
 });
 
 
-it('restores browser pane width from storage and clears on double-click', async () => {
+it('restores the browser pane ratio from storage and clears it on double-click', async () => {
   const originalWidth = window.innerWidth;
   window.innerWidth = 1920;
   try {
-    window.localStorage.setItem('qingzuo.browserPaneWidth', '980');
+    window.localStorage.setItem('qingzuo.browserPaneRatio', '0.5');
     const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
     fixture(undefined, true, false, [], browser);
     render(<Platform />);
@@ -276,23 +283,25 @@ it('restores browser pane width from storage and clears on double-click', async 
     await screen.findByRole('tablist', { name: '浏览器标签页' });
     const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
     expect(pane).toBeTruthy();
-    expect(pane?.style.flexBasis).toBe('980px');
+    expect(pane?.style.flexBasis).toBe('856px');
 
     const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
-    expect(resizer.getAttribute('aria-valuenow')).toBe('980');
+    expect(resizer.getAttribute('aria-valuenow')).toBe('856');
 
     fireEvent.doubleClick(resizer);
     expect(pane?.style.flexBasis).toBe('');
+    expect(window.localStorage.getItem('qingzuo.browserPaneRatio')).toBeNull();
     expect(window.localStorage.getItem('qingzuo.browserPaneWidth')).toBeNull();
   } finally {
     window.innerWidth = originalWidth;
   }
 });
 
-it('keeps the tool area usable and re-clamps the browser pane when the window size changes', async () => {
+it('scales the browser pane proportionally when the window or sidebar size changes', async () => {
   const originalWidth = window.innerWidth;
   window.innerWidth = 1280;
   try {
+    window.localStorage.setItem('qingzuo.browserPaneRatio', '0.5');
     window.localStorage.setItem('qingzuo.browserPaneWidth', '980');
     const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '新标签页', url: '', loading: false, canGoBack: false, canGoForward: false }] };
     fixture(undefined, true, false, [], browser);
@@ -302,15 +311,19 @@ it('keeps the tool area usable and re-clamps the browser pane when the window si
 
     const pane = document.querySelector<HTMLElement>('.commerce-browser-pane');
     const resizer = screen.getByRole('separator', { name: '调整浏览器面板宽度' });
-    // 1280 - 208(sidebar) leaves 1072px; the tool area keeps 552px so the pane still
-    // has 160px to drag, clamping the saved 980px preference down to 520px.
+    // 1280 - 208(sidebar) leaves 1072px; 50% would be 536px, but the narrow
+    // window still reserves room for the tool area and the drag target.
     expect(pane?.style.flexBasis).toBe('520px');
     expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(520);
+    expect(window.localStorage.getItem('qingzuo.browserPaneWidth')).toBeNull();
 
     window.innerWidth = 2000;
     fireEvent(window, new Event('resize'));
-    await waitFor(() => expect(pane?.style.flexBasis).toBe('980px'));
+    // The same 50% preference now expands with the available workspace.
+    await waitFor(() => expect(pane?.style.flexBasis).toBe('896px'));
     expect(Number(resizer.getAttribute('aria-valuemax'))).toBe(1172);
+    fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }));
+    await waitFor(() => expect(pane?.style.flexBasis).toBe('964px'));
   } finally {
     window.innerWidth = originalWidth;
   }

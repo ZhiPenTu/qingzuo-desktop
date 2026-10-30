@@ -47,8 +47,31 @@ const TOOL_PANE_MIN_WIDTH = 620;
 // Reserving the full tool floor on a narrow window would pin the pane to its own
 // minimum and leave nothing to drag, so the reservation shrinks with the window.
 const BROWSER_PANE_DRAG_ROOM = 160;
-const BROWSER_PANE_MAX_WIDTH = 2400;
-const BROWSER_PANE_DEFAULT_WIDTH = 640;
+const BROWSER_PANE_DEFAULT_RATIO = 0.48;
+const BROWSER_PANE_MIN_RATIO = 0.15;
+const BROWSER_PANE_MAX_RATIO = 0.85;
+const BROWSER_PANE_RATIO_KEY = 'qingzuo.browserPaneRatio';
+const LEGACY_BROWSER_PANE_WIDTH_KEY = 'qingzuo.browserPaneWidth';
+const clampBrowserPaneRatio = (ratio: number) => Math.min(BROWSER_PANE_MAX_RATIO, Math.max(BROWSER_PANE_MIN_RATIO, ratio));
+const browserPaneAvailableWidth = (collapsed: boolean) => {
+  const sidebarWidth = collapsed ? 72 : window.innerWidth <= 420 ? 58 : window.innerWidth <= 760 ? 70 : window.innerWidth <= 1100 ? 182 : 208;
+  return Math.max(1, window.innerWidth - sidebarWidth);
+};
+const browserPaneLimitsForWidth = (available: number) => {
+  const reserved = Math.min(TOOL_PANE_MIN_WIDTH, Math.max(0, available - BROWSER_PANE_MIN_WIDTH - BROWSER_PANE_DRAG_ROOM));
+  return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, Math.round(available - reserved)), available };
+};
+const readBrowserPaneRatio = () => {
+  try {
+    const saved = Number.parseFloat(window.localStorage.getItem(BROWSER_PANE_RATIO_KEY) ?? '');
+    return Number.isFinite(saved) && saved > 0 && saved < 1 ? clampBrowserPaneRatio(saved) : null;
+  } catch {
+    return null;
+  }
+};
+const persistBrowserPaneRatio = (ratio: number) => {
+  try { window.localStorage.setItem(BROWSER_PANE_RATIO_KEY, String(ratio)); } catch { /* storage is optional */ }
+};
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
 const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
@@ -69,17 +92,9 @@ export default function Platform() {
   const [page, setPage] = useState<Page | string>('home');
   const [lastShellPage, setLastShellPage] = useState<Page>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [, setViewportWidth] = useState(() => window.innerWidth);
   const [surfaceRevision, setSurfaceRevision] = useState(0);
-  const [browserPaneWidth, setBrowserPaneWidth] = useState<number | null>(() => {
-    try {
-      const saved = window.localStorage.getItem('qingzuo.browserPaneWidth');
-      const parsed = saved ? parseInt(saved, 10) : null;
-      return parsed && Number.isFinite(parsed) && parsed >= BROWSER_PANE_MIN_WIDTH ? parsed : null;
-    } catch {
-      return null;
-    }
-  });
+  const [browserPaneRatio, setBrowserPaneRatio] = useState<number | null>(readBrowserPaneRatio);
   const [browserPaneResizing, setBrowserPaneResizing] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
@@ -123,11 +138,16 @@ export default function Platform() {
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
   useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => {
     if (Number.isFinite(width)) {
-      const next = Math.round(width);
-      setBrowserPaneWidth(next);
-      try { window.localStorage.setItem('qingzuo.browserPaneWidth', String(next)); } catch { /* storage is optional */ }
+      let collapsed = false;
+      try { collapsed = window.localStorage.getItem('qingzuo.sidebarCollapsed') === '1'; } catch { /* storage is optional */ }
+      const next = clampBrowserPaneRatio(width / browserPaneAvailableWidth(collapsed));
+      setBrowserPaneRatio(next);
+      persistBrowserPaneRatio(next);
     }
   }), []);
+  useEffect(() => {
+    try { window.localStorage.removeItem(LEGACY_BROWSER_PANE_WIDTH_KEY); } catch { /* storage is optional */ }
+  }, []);
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
@@ -265,26 +285,23 @@ export default function Platform() {
     }
   };
   const browserPaneLimits = () => {
-    const bodyWidth = document.querySelector<HTMLElement>('.commerce-body')?.getBoundingClientRect().width || window.innerWidth;
-    const sidebarWidth = document.querySelector<HTMLElement>('.commerce-sidebar')?.getBoundingClientRect().width || (sidebarCollapsed ? 72 : 208);
-    const available = bodyWidth - sidebarWidth;
-    const reserved = Math.min(TOOL_PANE_MIN_WIDTH, Math.max(0, available - BROWSER_PANE_MIN_WIDTH - BROWSER_PANE_DRAG_ROOM));
-    return { min: BROWSER_PANE_MIN_WIDTH, max: Math.max(BROWSER_PANE_MIN_WIDTH, Math.round(available - reserved)) };
+    return browserPaneLimitsForWidth(browserPaneAvailableWidth(sidebarCollapsed));
   };
-  const defaultBrowserPaneWidth = () => {
-    const { min, max } = browserPaneLimits();
-    const preferred = Math.min(BROWSER_PANE_MAX_WIDTH, Math.round(viewportWidth * 0.48)) || BROWSER_PANE_DEFAULT_WIDTH;
-    return Math.round(Math.min(max, Math.max(min, preferred)));
-  };
+  const browserPaneSize = (() => {
+    const { min, max, available } = browserPaneLimits();
+    const preferred = Math.round(available * (browserPaneRatio ?? BROWSER_PANE_DEFAULT_RATIO));
+    return { min, max, width: Math.round(Math.min(max, Math.max(min, preferred))) };
+  })();
   const currentBrowserPaneWidth = () => {
     const width = browserPaneRef.current?.getBoundingClientRect().width;
-    return width && width > 0 ? width : defaultBrowserPaneWidth();
+    return width && width > 0 ? width : browserPaneSize.width;
   };
   const setBrowserPaneWidthWithinBounds = (width: number) => {
-    const { min, max } = browserPaneLimits();
+    const { min, max, available } = browserPaneLimits();
     const next = Math.round(Math.min(max, Math.max(min, width)));
-    setBrowserPaneWidth(next);
-    try { window.localStorage.setItem('qingzuo.browserPaneWidth', String(next)); } catch { /* storage is optional */ }
+    const ratio = clampBrowserPaneRatio(next / available);
+    setBrowserPaneRatio(ratio);
+    persistBrowserPaneRatio(ratio);
   };
   const beginBrowserResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
@@ -387,12 +404,6 @@ export default function Platform() {
     try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
     return next;
   });
-  // Keep the tool area usable: the browser pane never takes more than the window
-  // can spare, and it is re-clamped whenever the window itself changes size.
-  const browserPaneSize = (() => {
-    const { min, max } = browserPaneLimits();
-    return { min, max, width: Math.round(Math.min(max, Math.max(min, browserPaneWidth ?? defaultBrowserPaneWidth()))) };
-  })();
   const renderWorkspaceTabs = () => status?.tabs.length ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
     {!browserPaneOpen ? <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate(shellTabPage)}>
       {shellTabIconSrc ? <img src={shellTabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <ShellTabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{shellTabTitle}</span>
@@ -520,7 +531,7 @@ export default function Platform() {
       </div></main> : <div ref={surface} className={cn('commerce-plugin-surface', !status.kernel.ready && 'opacity-50')} />}
       </div>
       </div>
-      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={{ '--commerce-browser-pane-width': `${browserPaneSize.width}px`, flexBasis: browserPaneWidth ? `${browserPaneSize.width}px` : undefined } as CSSProperties}>
+      {browserPaneOpen ? <aside ref={browserPaneRef} className={cn('commerce-browser-pane', browserPaneResizing && 'is-resizing')} aria-label="浏览器面板" style={{ '--commerce-browser-pane-width': `${browserPaneSize.width}px`, flexBasis: browserPaneRatio !== null ? `${browserPaneSize.width}px` : undefined } as CSSProperties}>
         <div
           className="commerce-browser-resizer"
           role="separator"
@@ -537,8 +548,11 @@ export default function Platform() {
           onLostPointerCapture={endBrowserResize}
           onKeyDown={handleBrowserResizeKeyDown}
           onDoubleClick={() => {
-            setBrowserPaneWidth(null);
-            try { window.localStorage.removeItem('qingzuo.browserPaneWidth'); } catch { /* storage is optional */ }
+            setBrowserPaneRatio(null);
+            try {
+              window.localStorage.removeItem(BROWSER_PANE_RATIO_KEY);
+              window.localStorage.removeItem(LEGACY_BROWSER_PANE_WIDTH_KEY);
+            } catch { /* storage is optional */ }
           }}
         />
         <BrowserWorkspace showTabs={false} status={status?.browser ?? emptyBrowser} busy={busy} onAction={run} />

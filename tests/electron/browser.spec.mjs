@@ -1,7 +1,7 @@
 import { test, expect, _electron } from '@playwright/test';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -71,6 +71,25 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     expect(narrowedPane?.width || 0).toBeLessThan((initialPane?.width || 0) - 40);
     await divider.press('ArrowLeft');
     await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeGreaterThan((narrowedPane?.width || 0) + 10);
+    const workspaceBefore = await shell.locator('.commerce-body').boundingBox();
+    const sidebarBefore = await shell.locator('.commerce-sidebar').boundingBox();
+    const paneBeforeMaximize = await pane.boundingBox();
+    const ratioBeforeMaximize = (paneBeforeMaximize?.width || 0) / ((workspaceBefore?.width || 0) - (sidebarBefore?.width || 0));
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(2000, 1250));
+    await expect.poll(async () => (await pane.boundingBox())?.width || 0).toBeGreaterThan((paneBeforeMaximize?.width || 0) + 150);
+    const workspaceAfter = await shell.locator('.commerce-body').boundingBox();
+    const sidebarAfter = await shell.locator('.commerce-sidebar').boundingBox();
+    const paneAfterMaximize = await pane.boundingBox();
+    const ratioAfterMaximize = (paneAfterMaximize?.width || 0) / ((workspaceAfter?.width || 0) - (sidebarAfter?.width || 0));
+    expect(ratioAfterMaximize).toBeCloseTo(ratioBeforeMaximize, 2);
+    await expect.poll(async () => {
+      const surface = await shell.locator('.browser-surface').boundingBox();
+      const bounds = await app.evaluate(({ BrowserWindow }, prefix) => {
+        const view = BrowserWindow.getAllWindows()[0].contentView.children.find(candidate => candidate.webContents?.getURL?.().startsWith(prefix));
+        return view?.getBounds?.();
+      }, fixture.base);
+      return Math.abs((bounds?.width || 0) - (surface?.width || 0));
+    }).toBeLessThanOrEqual(1);
     await expect(shell.locator('.commerce-sidebar')).toHaveCount(1);
     await shell.getByRole('button', { name: '收起侧边栏', exact: true }).click();
     await expect(shell.locator('.commerce-sidebar.is-collapsed')).toHaveCount(1);
@@ -101,6 +120,12 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     const cookiePage = await browserPage(app, cookieUrl);
     await expect.poll(() => cookiePage.evaluate(() => document.cookie)).toContain('browser_fixture=ok');
     await app.close(); app = undefined;
+    const cookieStore = path.join(profile, 'browser-session-cookies.json');
+    const cookiePayload = JSON.parse(await readFile(cookieStore, 'utf8'));
+    expect(Array.isArray(cookiePayload.cookies)).toBe(true);
+    expect(cookiePayload.cookies.length).toBeGreaterThan(0);
+    expect(cookiePayload.encrypted).toBeUndefined();
+    if (process.platform !== 'win32') expect((await stat(cookieStore)).mode & 0o777).toBe(0o600);
 
     app = await _electron.launch({ args: [process.cwd(), '--user-data-dir=' + profile] });
     const relaunched = await app.firstWindow();

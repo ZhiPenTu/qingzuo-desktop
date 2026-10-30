@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { dialog, safeStorage, session, WebContentsView } from 'electron';
+import { dialog, session, WebContentsView } from 'electron';
 import { isAllowedBrowserUrl, normalizeBrowserUrl, ownedBrowserTabs } from './browser-policy.mjs';
 import { allowedBrowserOrigin } from './security.mjs';
 import { buildActionScript, buildSnapshotScript, buildWaitScript, validateAction, validateWait } from './browser-automation.mjs';
@@ -115,9 +115,10 @@ export class BrowserRuntime {
 
   async readSessionCookies() {
     const saved = JSON.parse(await readFile(this.cookieStore, 'utf8'));
-    if (!saved?.encrypted) return Array.isArray(saved?.cookies) ? saved.cookies : [];
-    const entries = JSON.parse(safeStorage.decryptString(Buffer.from(String(saved.encrypted), 'base64')));
-    return Array.isArray(entries) ? entries : [];
+    // Older builds encrypted this file through safeStorage, which can make
+    // macOS ask for the login keychain password. Those files are intentionally
+    // ignored; the next cookie update replaces them with the 0600 JSON format.
+    return Array.isArray(saved?.cookies) ? saved.cookies : [];
   }
 
   async restoreSessionCookies(browserSession) {
@@ -181,16 +182,14 @@ export class BrowserRuntime {
 
   async writeSessionCookies() {
     // Nothing was ever stored and nothing is pending: skip the write entirely so
-    // quitting an app that never used the browser stays free of keychain work.
+    // quitting an app that never used the browser does not create a cookie file.
     if (!this.cookieStore || (!this.cookieStoreDirty && !this.sessionCookies.size)) return;
     const cookies = [...this.sessionCookies.values()];
-    const plain = JSON.stringify(cookies);
-    let payload = JSON.stringify({ version: 1, cookies });
-    try {
-      // Login cookies are credentials: prefer the OS keychain when it is
-      // available, and only fall back to the plain cookie list otherwise.
-      if (safeStorage.isEncryptionAvailable()) payload = JSON.stringify({ version: 1, encrypted: safeStorage.encryptString(plain).toString('base64') });
-    } catch { /* keep the plain payload */ }
+    // Keep session cookies in the user-only app data file. Using safeStorage
+    // here triggers a macOS Keychain prompt whenever Electron's credential
+    // identity changes, while the cookie file itself is already protected by
+    // the per-user application data directory and 0600 permissions.
+    const payload = JSON.stringify({ version: 1, cookies });
     const staging = this.cookieStore + '.tmp';
     try {
       await writeFile(staging, payload, { mode: 0o600 });
