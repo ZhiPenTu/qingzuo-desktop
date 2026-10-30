@@ -80,7 +80,7 @@ flowchart TB
 | [AI 批图](https://github.com/ZhiPenTu/qingzuo-plugin-ai-image) | 批量图片编辑与保存 |
 | [插件市场](https://github.com/ZhiPenTu/qingzuo-market) | 插件目录、签名制品与发布记录 |
 
-开发新插件可从 `npm run plugin -- create my-tool` 开始，接口、权限、签名和端到端测试见 [插件开发文档](docs/plugin-development.md)。
+开发新插件可从 `npm run plugin -- create my-tool` 开始，接口、权限、签名和端到端测试见 [插件开发文档](docs/plugin-development.md)。插件界面须沿用底座的暖白、墨绿与深绿灰配色，不得另起品牌主色；完整 token 和明暗模式规则见[插件配色规范](docs/plugin-development.md#第三方界面配色)。
 
 ## 本地开发
 

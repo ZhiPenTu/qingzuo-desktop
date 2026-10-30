@@ -31,6 +31,101 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 本地程序只可读取插件制品和必要运行时，写入私有任务目录。文件选择器由宿主授权，文件字节由文件令牌或受控 RPC 传入。输出由选择器保存。直接联网、访问其他插件数据与系统凭据、启动其他程序均被系统沙箱阻止；沙箱不可用时拒绝运行。
 
+## 第三方界面配色
+
+插件虽然独立渲染，也应像轻作工作台中的一个工具，而不是嵌进来的另一套产品。界面以暖白或深绿灰中性表面为主，墨绿/薄荷绿只承担主操作、当前选择和焦点。插件使用 `--qz-*` 局部语义变量，不假定能读取宿主 CSS 变量。
+
+当前隔离页面不会继承底座的强制主题，默认使用 `prefers-color-scheme` 跟随系统。宿主后续提供明确的主题值时，插件应优先使用宿主值。
+
+```css
+:root {
+  color-scheme: light;
+  --qz-bg: #f7f8f4;
+  --qz-surface: #ffffff;
+  --qz-overlay: #ffffff;
+  --qz-canvas: #e9ede7;
+  --qz-text: #20312a;
+  --qz-text-muted: #69756e;
+  --qz-primary: #28654a;
+  --qz-on-primary: #ffffff;
+  --qz-selection: #e4eee5;
+  --qz-on-selection: #28654a;
+  --qz-muted: #f0f3ed;
+  --qz-hover: #edf2eb;
+  --qz-border: #dfe5de;
+  --qz-input-border: #d7dfd5;
+  --qz-focus: #28654a;
+  --qz-danger: #b42318;
+  --qz-boundary-strong: #69756e;
+
+  --qz-success: #28654a;
+  --qz-success-surface: #e4eee5;
+  --qz-warning: #956219;
+  --qz-warning-surface: #faf0dd;
+  --qz-danger-surface: #f8e9e8;
+  --qz-info: #20312a;
+  --qz-info-surface: #edf2eb;
+
+  --qz-chart-1: #28654a;
+  --qz-chart-2: #956219;
+  --qz-chart-3: #466b7a;
+  --qz-chart-4: #a14f3f;
+  --qz-chart-5: #52645a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --qz-bg: #19211d;
+    --qz-surface: #202923;
+    --qz-overlay: #253129;
+    --qz-canvas: #121a15;
+    --qz-text: #edf3ee;
+    --qz-text-muted: #a6b5aa;
+    --qz-primary: #99d8ad;
+    --qz-on-primary: #173222;
+    --qz-selection: #2c4233;
+    --qz-on-selection: #bde6c8;
+    --qz-muted: #253029;
+    --qz-hover: #2b382f;
+    --qz-border: #36453a;
+    --qz-input-border: #425447;
+    --qz-focus: #99d8ad;
+    --qz-danger: #f87171;
+    --qz-boundary-strong: #a6b5aa;
+
+    --qz-success: #bde6c8;
+    --qz-success-surface: #2c4233;
+    --qz-warning: #ebc780;
+    --qz-warning-surface: #443821;
+    --qz-danger-surface: #36302b;
+    --qz-info: #edf3ee;
+    --qz-info-surface: #2b382f;
+
+    --qz-chart-1: #99d8ad;
+    --qz-chart-2: #ebc780;
+    --qz-chart-3: #8eb9c7;
+    --qz-chart-4: #e69a86;
+    --qz-chart-5: #b2c0b6;
+  }
+}
+```
+
+使用规则：
+
+- 页面和工具内容使用 `--qz-bg`，卡片、列表和面板使用 `--qz-surface`；同一层级不要反复嵌套不同底色。
+- 一个区域只设置一个主操作。次要操作使用边框或幽灵按钮，不要整页铺满绿色按钮。
+- 普通卡片使用 `1px solid var(--qz-border)` 和间距分组，不使用装饰性投影、玻璃拟态或多层浮起卡片。
+- 状态必须同时提供图标或文字。信息提示优先使用中性色，不要新增通用蓝色。
+- 图表按 `--qz-chart-1` 至 `--qz-chart-5` 顺序取色，并提供直接标签、图例或不同线型；面积填充不超过同色 `16%` 不透明度。
+- 键盘焦点使用 `2px` 的 `--qz-focus` 环。输入框不能只靠浅边框识别，应同时有可见标签。
+- `--qz-text-muted` 不得直接放在 `--qz-canvas` 或 `--qz-muted` 上；普通文字使用 `--qz-text`。
+- 禁止引入紫色、靛蓝、霓虹色或与底座无关的品牌主色。
+- 禁止装饰性渐变、光晕、彩色玻璃背景和过量卡片阴影。
+- 禁止为插件自行添加第二套顶栏、品牌 Hero、启动页或应用 Logo 来模拟独立产品。
+- 禁止重新着色产品截图、第三方 Logo 和用户媒体内容。
+- 禁止直接在隔离页面依赖宿主 `--primary`、`.dark` 或主题状态。
+
 ## 市场发布与升级
 
 ### API 1.3 本地预览
