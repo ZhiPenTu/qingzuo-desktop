@@ -394,9 +394,9 @@ export default function Platform() {
     return { min, max, width: Math.round(Math.min(max, Math.max(min, browserPaneWidth ?? defaultBrowserPaneWidth()))) };
   })();
   const renderWorkspaceTabs = () => status?.tabs.length ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
-    <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate(shellTabPage)}>
+    {!browserPaneOpen ? <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate(shellTabPage)}>
       {shellTabIconSrc ? <img src={shellTabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <ShellTabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{shellTabTitle}</span>
-    </button>
+    </button> : null}
     {status.tabs.map(id => {
       const plugin = plugins.find(p => p.id === id); const marketPlugin = marketById.get(id); const TabIcon = tabIconFor(id); const tabIconSrc = resolvePluginIcon(id, plugin?.icon ?? marketPlugin?.icon); const toolTitle = plugin?.title ?? marketPlugin?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
       return <div key={id} role="tab" tabIndex={0} aria-selected={isActive} className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')} onClick={() => { if (!isInstalling) void navigate(id); }} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}>
@@ -407,12 +407,16 @@ export default function Platform() {
   </div> : <span className="commerce-windowbar-context">{title}</span>;
   return <div className="commerce-shell">
     <div className="commerce-windowbar">
-      <div className="commerce-windowbar-title"><img src={brandIcon} alt="" /><span>轻作 · Qingzuo</span></div>
-      <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
-      {renderWorkspaceTabs()}
-      <div className="commerce-windowbar-drag" aria-hidden="true" />
-      {browserPaneOpen && status?.browser?.open ? <BrowserTabStrip embedded status={status.browser} busy={busy} onAction={run} /> : null}
-      <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label={browserPaneOpen ? '隐藏浏览器面板' : '打开浏览器面板'} title={browserPaneOpen ? '隐藏浏览器面板' : '打开浏览器面板'} onClick={() => void (browserPaneOpen ? hideBrowserPane() : openBrowserPane())}>{browserPaneOpen ? <PanelRightClose /> : <PanelRightOpen />}</Button>
+      <div className="commerce-windowbar-left">
+        <div className="commerce-windowbar-title"><img src={brandIcon} alt="" /><span>轻作 · Qingzuo</span></div>
+        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+        {renderWorkspaceTabs()}
+        <div className="commerce-windowbar-drag" aria-hidden="true" />
+      </div>
+      {browserPaneOpen && status?.browser?.open ? <div className="commerce-windowbar-browser-pane" style={{ '--commerce-browser-pane-width': `${browserPaneSize.width}px` } as CSSProperties}>
+        <BrowserTabStrip embedded status={status.browser} busy={busy} onAction={run} />
+        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="隐藏浏览器面板" title="隐藏浏览器面板" onClick={() => void hideBrowserPane()}><PanelRightClose /></Button>
+      </div> : <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="打开浏览器面板" title="打开浏览器面板" onClick={() => void openBrowserPane()}><PanelRightOpen /></Button>}
     </div>
     <div className="commerce-body">
       <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>

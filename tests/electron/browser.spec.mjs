@@ -203,7 +203,7 @@ test('keeps the tool and browser surfaces visible while switching between them',
   await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
   const fixtureUrl = `http://127.0.0.1:${fixture.address().port}/`;
   let app;
-  const visibleViews = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children.map(view => ({ visible: view.getVisible?.(), url: view.webContents?.getURL?.() })));
+  const visibleViews = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children.map(view => ({ visible: view.getVisible?.(), url: view.webContents?.getURL?.(), bounds: view.getBounds?.() })));
   try {
     const cli = path.resolve('packages/plugin-sdk/cli.mjs');
     execFileSync(process.execPath, [cli, 'create', 'fixture-native', '--native'], { cwd: temporary });
@@ -224,6 +224,23 @@ test('keeps the tool and browser surfaces visible while switching between them',
     await shell.evaluate(({ id, url }) => window.commerceDesktop.invoke('browser.navigate', { id, url }), { id: browser.tabs[0].id, url: fixtureUrl });
     const browserContent = await browserPage(app, fixtureUrl);
     await expect(browserContent.getByText('Browser fixture content', { exact: true })).toBeVisible();
+
+    const toolTabs = shell.getByRole('tablist', { name: '已打开的工具' });
+    await expect(toolTabs.getByRole('tab', { name: '工具中心', exact: true })).toHaveCount(0);
+    await expect(toolTabs.getByRole('tab', { name: /fixture-native/ })).toHaveCount(1);
+    await expect(shell.getByRole('tablist', { name: '浏览器标签页' })).toBeVisible();
+
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(2000, 1250));
+    await expect.poll(async () => {
+      const pane = await shell.locator('.commerce-browser-pane').boundingBox();
+      const tabs = await shell.locator('.commerce-windowbar-browser-pane').boundingBox();
+      return pane && tabs ? Math.abs(pane.x - tabs.x) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(1);
+    await expect.poll(async () => {
+      const surface = await shell.locator('.browser-surface').boundingBox();
+      const views = await visibleViews();
+      return Math.abs((views.find(view => view.visible && view.url?.startsWith('http://127.0.0.1:'))?.bounds?.width || 0) - (surface?.width || 0));
+    }).toBeLessThanOrEqual(1);
 
     const assertBothViewsVisible = async () => {
       const views = await visibleViews();

@@ -190,7 +190,8 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 /* Qingzuo: the workspace and its tools share one quiet, readable system. */
 .commerce-shell { display: flex; flex-direction: column; height: 100dvh; color: var(--foreground); background: var(--background); }
 .commerce-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
-.commerce-windowbar { position: relative; z-index: 20; display: flex; align-items: center; gap: 14px; height: 52px; flex-shrink: 0; padding: 0 18px 0 88px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--background) 96%, var(--card)); -webkit-app-region: drag; user-select: none; }
+.commerce-windowbar { position: relative; z-index: 20; display: flex; align-items: center; height: 52px; flex-shrink: 0; padding-left: 88px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--background) 96%, var(--card)); -webkit-app-region: drag; user-select: none; }
+.commerce-windowbar-left { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; padding-right: 14px; }
 .commerce-windowbar-title { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--foreground); font-size: 13px; font-weight: 600; letter-spacing: -.1px; -webkit-app-region: no-drag; }
 .commerce-windowbar-title img { width: 25px; height: 25px; border-radius: 6px; }
 .commerce-windowbar-tabs { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: min(760px, 62vw); overflow-x: auto; scrollbar-width: none; -webkit-app-region: no-drag; }
@@ -203,6 +204,9 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-windowbar-sidebar-toggle svg { width: 16px; height: 16px; }
 .commerce-windowbar-browser-toggle { flex-shrink: 0; color: var(--muted-foreground); -webkit-app-region: no-drag; }
 .commerce-windowbar-browser-toggle svg { width: 17px; height: 17px; }
+.commerce-windowbar > .commerce-windowbar-browser-toggle { margin-right: 18px; }
+.commerce-windowbar-browser-pane { display: flex; align-items: center; gap: 8px; flex: 0 0 var(--commerce-browser-pane-width); width: var(--commerce-browser-pane-width); min-width: 0; height: 100%; padding: 0 18px 0 14px; }
+.commerce-windowbar-browser-pane .browser-tabs-windowbar { flex: 1; width: 100%; max-width: none; min-width: 0; }
 .commerce-browser-pane { position: relative; display: flex; flex: 0 0 var(--commerce-browser-pane-width, clamp(420px, 48vw, 2400px)); min-width: 360px; min-height: 0; flex-direction: column; border-left: 1px solid var(--border); background: var(--background); box-shadow: -12px 0 28px color-mix(in srgb, var(--foreground) 7%, transparent); animation: browser-pane-in .18s ease-out; }
 .commerce-browser-pane .browser-workspace { min-width: 0; }
 .commerce-browser-resizer { position: absolute; z-index: 2; top: 0; bottom: 0; left: -10px; width: 10px; cursor: col-resize; touch-action: none; user-select: none; }
@@ -692,7 +696,10 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
   .plugin-row { padding: 18px 20px; }
 }
 @media (max-width: 760px) {
-  .commerce-windowbar { height: 48px; padding-left: 76px; gap: 9px; }
+  .commerce-windowbar { height: 48px; padding-left: 76px; padding-right: 9px; }
+  .commerce-windowbar-left { gap: 9px; padding-right: 0; }
+  .commerce-windowbar-browser-pane { flex: 1; width: auto; padding: 0; }
+  .commerce-windowbar > .commerce-windowbar-browser-toggle { margin-right: 0; }
   .commerce-windowbar-title span { display: none; }
   .commerce-windowbar-title img { width: 28px; height: 28px; }
   .commerce-windowbar-tabs { max-width: 62vw; }

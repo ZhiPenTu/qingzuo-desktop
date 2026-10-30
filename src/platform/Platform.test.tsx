@@ -375,6 +375,23 @@ it('opens the browser in a right-side pane with independent left and right contr
   expect(invoke.mock.calls.some(([method]) => method === 'browser.hide')).toBe(true);
 });
 
+it('shows only tool tabs on the left and browser tabs on the right while split', async () => {
+  const browser: BrowserStatus = { open: true, activeTabId: 'browser-1', candidates: [], downloads: [], tabs: [{ id: 'browser-1', title: '商品页', url: 'https://shop.example/item', loading: false, canGoBack: false, canGoForward: false }] };
+  fixture(undefined, true, false, [entry.id], browser);
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+
+  fireEvent.click(screen.getByRole('button', { name: '打开工具' }));
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'LabelEdit' }).getAttribute('aria-selected')).toBe('true'));
+  fireEvent.click(screen.getByRole('button', { name: '打开浏览器面板' }));
+  const toolTabs = await screen.findByRole('tablist', { name: '已打开的工具' });
+  const browserTabs = await screen.findByRole('tablist', { name: '浏览器标签页' });
+
+  expect(toolTabs.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('LabelEdit');
+  expect(toolTabs.textContent).not.toContain('工具中心');
+  expect(browserTabs.textContent).toContain('商品页');
+});
+
 it('shows feedback action on error alert and opens issue reporting dialog', async () => {
   const { invoke } = fixture();
   const baseImpl = invoke.getMockImplementation()!;
