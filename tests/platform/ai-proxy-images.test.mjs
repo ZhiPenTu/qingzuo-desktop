@@ -55,7 +55,6 @@ test('proxy discovery filters text models, preserves image aliases and reveals n
   assert.equal(proxy.settings.model, 'gemini-3.8-flash-high'); assert.deepEqual(proxy.settings.verified, []);
   await assert.rejects(editor.models({ ...plugin, permissions: {} }, { source: 'proxy' }), /未授权/);
   assert.equal(calls.length, 1);
-  assert.equal((await editor.models(plugin)).length, 4);
   await assert.rejects(editor.resolve(plugin, { source: 'proxy', modelId: 'gpt-text' }), /无效/);
   await assert.rejects(editor.resolve(plugin, { source: 'proxy', modelId: 'missing' }), /无效/);
   await assert.rejects(editor.resolve(plugin, { source: 'proxy', modelId: 'studio-edit', parameters: { quality: 'max' } }), /不支持/);

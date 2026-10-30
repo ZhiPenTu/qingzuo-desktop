@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { AI_PROVIDERS, DEFAULT_PROXY_ADDRESS, friendlyModelName, isChatModel, normalizeAIAddress, providerForAddress, type AIModel } from './ai-providers';
 
 interface ProxyStatus {
@@ -47,9 +48,20 @@ interface SetupFailure {
 }
 
 type SetupResult = SetupSuccess | SetupFailure;
+type ImageProviderId = 'google' | 'openai';
+
+interface SharedImageStatus {
+  google: { configured: boolean; source: 'dedicated' | 'inherited' | 'legacy' | 'none' };
+  openai: { configured: boolean; source: 'dedicated' | 'inherited' | 'legacy' | 'none' };
+  proxy: { configured: boolean };
+}
 
 const CUSTOM_PROVIDER_ID = 'custom';
 const providerIcons = { deepseek: BrainCircuit, openai: Sparkles, siliconflow: Layers3 } as const;
+const imageProviders = [
+  { id: 'google', name: 'Google 官方', keyUrl: 'https://aistudio.google.com/app/apikey' },
+  { id: 'openai', name: 'OpenAI 官方', keyUrl: 'https://platform.openai.com/api-keys' },
+] as const;
 
 function statusReady(status: ProxyStatus | null) {
   if (!status || !status.model) return false;
@@ -67,7 +79,7 @@ function unexpectedSetupFailure(reason: unknown): SetupFailure {
   return { ok: false, code: 'network_error', message: '无法连接 AI 服务，请检查网络或服务地址后重试。' };
 }
 
-export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: { imageAvailable?: boolean; onOpenImage?: () => void; onOpenChat?: () => void }) {
+export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   const [status, setStatus] = useState<ProxyStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -81,6 +93,12 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
   const [busy, setBusy] = useState(false);
   const [setupError, setSetupError] = useState<SetupFailure | null>(null);
   const [recoveryModels, setRecoveryModels] = useState<AIModel[]>([]);
+  const [imageStatus, setImageStatus] = useState<SharedImageStatus | null>(null);
+  const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
+  const [imageKeys, setImageKeys] = useState<Record<ImageProviderId, string>>({ google: '', openai: '' });
+  const [imageKeyVisible, setImageKeyVisible] = useState<Record<ImageProviderId, boolean>>({ google: false, openai: false });
+  const [imageBusy, setImageBusy] = useState<ImageProviderId | null>(null);
+  const [imageError, setImageError] = useState('');
   const operation = useRef(false);
 
   const invoke = useCallback(async <Value,>(method: string, args?: unknown) => {
@@ -115,7 +133,16 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
     }
   }, [hydrate, invoke]);
 
-  useEffect(() => { void loadStatus(); }, [loadStatus]);
+  const loadImageStatus = useCallback(async () => {
+    setImageError('');
+    try {
+      setImageStatus(await invoke<SharedImageStatus>('imageStatus'));
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, [invoke]);
+
+  useEffect(() => { void loadStatus(); void loadImageStatus(); }, [loadStatus, loadImageStatus]);
 
   const provider = AI_PROVIDERS.find(item => item.id === providerId) ?? null;
   const providerName = provider?.name ?? '自定义服务';
@@ -153,6 +180,31 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
       await window.commerceDesktop?.invoke('openExternal', { url: provider.keyUrl });
     } catch (reason) {
       setSetupError(unexpectedSetupFailure(reason));
+    }
+  }
+
+  async function openImageKeyPage(url: string) {
+    try {
+      await window.commerceDesktop?.invoke('openExternal', { url });
+    } catch {
+      setImageError('无法打开服务商页面，请稍后重试。');
+    }
+  }
+
+  async function configureImage(provider: ImageProviderId, clear = false) {
+    if (imageBusy) return;
+    const apiKey = imageKeys[provider].trim();
+    if (!clear && !apiKey) return;
+    setImageBusy(provider);
+    setImageError('');
+    try {
+      const next = await invoke<SharedImageStatus>('configureImage', { provider, ...(clear ? { clear: true } : { apiKey }) });
+      setImageStatus(next);
+      setImageKeys(value => ({ ...value, [provider]: '' }));
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setImageBusy(null);
     }
   }
 
@@ -223,14 +275,6 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
         </div>
       </section>
 
-      <Card id="ai-image" className="ai-image-entry">
-        <CardHeader>
-          <CardTitle role="heading" aria-level={2}><Image className="ai-section-icon" />图像编辑</CardTitle>
-          <CardDescription>需要处理或生成图片时，再单独配置图像服务。</CardDescription>
-          <CardAction><Button variant="outline" disabled={!imageAvailable} onClick={onOpenImage}>{imageAvailable ? '配置图像服务' : '需要安装 AI 批图'}</Button></CardAction>
-        </CardHeader>
-        {!imageAvailable ? <CardContent><p className="text-sm text-muted-foreground">安装并启用「AI 批图」后即可配置。</p></CardContent> : null}
-      </Card>
     </> : <>
       {partial ? <div className="ai-partial-note" role="status"><AlertCircle /><div><strong>已保存，尚未启用</strong><span>{status?.model ? `已选择 ${friendlyModelName(status.address, status.model)}，还需要完成连接验证。` : '还需要完成连接验证才能开始对话。'}</span></div></div> : null}
 
@@ -317,5 +361,49 @@ export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: 
         </Card>
       </form>
     </>}
+
+    <Card className="ai-shared-image">
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}><Image className="ai-section-icon" />共享图像能力</CardTitle>
+        <CardDescription>所有图像工具共用这里的服务，不需要重复填写密钥。</CardDescription>
+        <CardAction><Button variant="outline" onClick={() => setImageSettingsOpen(value => !value)}>{imageSettingsOpen ? '收起配置' : '配置共享密钥'}</Button></CardAction>
+      </CardHeader>
+      <CardContent className="ai-shared-image-content">
+        <div className="ai-image-provider-status">
+          {imageProviders.map(item => {
+            const value = imageStatus?.[item.id];
+            const label = !value ? '读取中' : value.source === 'inherited' ? '沿用上方连接' : value.configured ? '已配置' : '未配置';
+            return <div key={item.id} className="ai-image-provider-row">
+              <div><strong>{item.name}</strong><span>{value?.source === 'legacy' ? '正在使用旧版保存的密钥' : item.id === 'openai' ? '可自动沿用上方 OpenAI 连接' : '用于 Google / Gemini 图像模型'}</span></div>
+              <span className={cn('ai-image-provider-state', value?.configured && 'is-configured')}>{label}</span>
+            </div>;
+          })}
+          <div className="ai-image-provider-row">
+            <div><strong>兼容服务</strong><span>沿用上方连接；可用图片模型取决于服务商支持。</span></div>
+            <span className={cn('ai-image-provider-state', imageStatus?.proxy.configured && 'is-configured')}>{!imageStatus ? '读取中' : imageStatus.proxy.configured ? '已配置' : '未配置'}</span>
+          </div>
+        </div>
+        {imageError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{imageError}</AlertDescription></Alert> : null}
+        {imageSettingsOpen ? <div className="ai-image-key-settings">
+          {imageProviders.map(item => {
+            const state = imageStatus?.[item.id];
+            return <div key={item.id} className="ai-image-key-row">
+              <Field>
+                <FieldLabel htmlFor={'ai-image-key-' + item.id}>{item.name}访问密钥</FieldLabel>
+                <div className="ai-secret-field">
+                  <Input id={'ai-image-key-' + item.id} type={imageKeyVisible[item.id] ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={imageKeys[item.id]} disabled={imageBusy === item.id} onChange={event => { setImageKeys(value => ({ ...value, [item.id]: event.target.value })); setImageError(''); }} placeholder={state?.configured ? '留空继续使用已保存的配置' : '粘贴访问密钥'} />
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={imageKeyVisible[item.id] ? '隐藏' + item.name + '访问密钥' : '显示' + item.name + '访问密钥'} onClick={() => setImageKeyVisible(value => ({ ...value, [item.id]: !value[item.id] }))}>{imageKeyVisible[item.id] ? <EyeOff /> : <Eye />}</Button>
+                </div>
+              </Field>
+              <div className="ai-image-key-actions">
+                <Button size="sm" disabled={imageBusy === item.id || !imageKeys[item.id].trim()} onClick={() => void configureImage(item.id)}>{imageBusy === item.id ? <LoaderCircle className="animate-spin" /> : null}保存</Button>
+                {state?.source === 'dedicated' || state?.source === 'legacy' ? <Button size="sm" variant="ghost" disabled={imageBusy === item.id} onClick={() => void configureImage(item.id, true)}>清除</Button> : null}
+                <Button size="sm" variant="ghost" onClick={() => void openImageKeyPage(item.keyUrl)}>如何获取<ExternalLink data-icon="inline-end" /></Button>
+              </div>
+            </div>;
+          })}
+        </div> : null}
+      </CardContent>
+    </Card>
   </div>;
 }

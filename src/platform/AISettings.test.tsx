@@ -14,15 +14,27 @@ interface MockStatus {
 
 const unconfigured: MockStatus = { mode: 'external', address: 'http://127.0.0.1:8317', model: '', running: true, verified: [], error: null };
 const enabled: MockStatus = { mode: 'external', address: 'https://api.deepseek.com', model: 'deepseek-flash', running: true, verified: ['deepseek-flash'], ready: true, error: null };
+const unconfiguredImages = {
+  google: { configured: false, source: 'none' },
+  openai: { configured: false, source: 'none' },
+  proxy: { configured: false },
+};
 
-function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown } = {}) {
+function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
   let status = structuredClone(options.status ?? unconfigured);
+  let imageStatus = structuredClone(options.imageStatus ?? unconfiguredImages);
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>): Promise<unknown> => {
     if (method === 'ai.status') return structuredClone(status);
     if (method === 'ai.setup') {
       if (options.setup) return options.setup(args ?? {});
       status = { ...enabled, address: String(args?.address ?? enabled.address), model: String(args?.model || 'deepseek-flash'), verified: [String(args?.model || 'deepseek-flash')] };
       return { ok: true, status: structuredClone(status) };
+    }
+    if (method === 'ai.imageStatus') return structuredClone(imageStatus);
+    if (method === 'ai.configureImage') {
+      if (options.configureImage) return options.configureImage(args ?? {});
+      imageStatus = { ...imageStatus, [String(args?.provider)]: { configured: true, source: 'dedicated' } };
+      return structuredClone(imageStatus);
     }
     if (method === 'openExternal') return true;
     throw new Error('unexpected method ' + method);
@@ -45,6 +57,8 @@ it('starts on a single-page provider wizard without the old configuration hierar
   expect(screen.queryByRole('button', { name: '代理连接' })).toBeNull();
   expect(screen.queryByLabelText('AI 助手状态')).toBeNull();
   expect(screen.queryByRole('heading', { name: '图像编辑' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '共享图像能力' })).toBeTruthy();
+  expect(screen.queryByText(/AI 批图/)).toBeNull();
 });
 
 it('shows the key on demand and opens the provider key page', async () => {
@@ -61,8 +75,8 @@ it('shows the key on demand and opens the provider key page', async () => {
 });
 
 it('connects and enables the assistant with one action using the provider recommendation', async () => {
-  const invoke = mockDesktop(); const onOpenChat = vi.fn(), onOpenImage = vi.fn();
-  render(<AISettings imageAvailable onOpenChat={onOpenChat} onOpenImage={onOpenImage} />);
+  const invoke = mockDesktop(); const onOpenChat = vi.fn();
+  render(<AISettings onOpenChat={onOpenChat} />);
   fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
   fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
   await screen.findByLabelText('AI 助手状态');
@@ -70,8 +84,45 @@ it('connects and enables the assistant with one action using the provider recomm
   expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
   expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '开始 AI 对话' }));
-  fireEvent.click(screen.getByRole('button', { name: '配置图像服务' }));
-  expect(onOpenChat).toHaveBeenCalledOnce(); expect(onOpenImage).toHaveBeenCalledOnce();
+  expect(onOpenChat).toHaveBeenCalledOnce();
+});
+
+it('configures shared image credentials without naming a plugin', async () => {
+  const invoke = mockDesktop(); render(<AISettings />);
+  await screen.findByRole('heading', { name: '共享图像能力' });
+  expect(screen.getByText('兼容服务').closest('.ai-image-provider-row')?.textContent).toContain('未配置');
+  fireEvent.click(screen.getByRole('button', { name: '配置共享密钥' }));
+  const key = await screen.findByLabelText('Google 官方访问密钥') as HTMLInputElement;
+  expect(key.type).toBe('password');
+  fireEvent.change(key, { target: { value: 'image-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '显示Google 官方访问密钥' }));
+  expect(key.type).toBe('text');
+  fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0]);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.configureImage', { provider: 'google', apiKey: 'image-secret' }));
+  await screen.findByText('已配置');
+  expect(screen.queryByText(/AI 批图/)).toBeNull();
+});
+
+it('shows a shared compatible connection and lets an old image key be cleared', async () => {
+  const invoke = mockDesktop({
+    imageStatus: {
+      google: { configured: true, source: 'legacy' },
+      openai: { configured: true, source: 'inherited' },
+      proxy: { configured: true },
+    },
+    configureImage: () => ({
+      google: { configured: false, source: 'none' },
+      openai: { configured: true, source: 'inherited' },
+      proxy: { configured: true },
+    }),
+  });
+  render(<AISettings />);
+  await waitFor(() => expect(screen.getByText('兼容服务').closest('.ai-image-provider-row')?.textContent).toContain('已配置'));
+  expect(screen.getByText('正在使用旧版保存的密钥')).toBeTruthy();
+  expect(screen.getByText('沿用上方连接')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '配置共享密钥' }));
+  fireEvent.click(screen.getByRole('button', { name: '清除' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.configureImage', { provider: 'google', clear: true }));
 });
 
 it('shows a concise enabled state and lets the user replace the service', async () => {
@@ -147,6 +198,7 @@ it('supports a custom OpenAI-compatible address and explicit model', async () =>
 it('retries a failed settings read without replacing the saved configuration', async () => {
   let attempts = 0;
   const invoke = vi.fn(async (method: string) => {
+    if (method === 'ai.imageStatus') return unconfiguredImages;
     if (method !== 'ai.status') throw new Error('unexpected');
     attempts++;
     if (attempts === 1) throw new Error('fixture read failure');

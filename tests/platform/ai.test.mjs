@@ -11,7 +11,7 @@ import { ProxyRuntime, proxyAddress } from '../../desktop/ai-proxy.mjs';
 import { bootCommerceKernel } from '../../desktop/kernel.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jAdkAAAAASUVORK5CYII=', 'base64');
-const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit', 'assistant'], network: ['https://api.openai.com', 'https://generativelanguage.googleapis.com'], credentials: ['google-image', 'openai-image'] } };
+const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit', 'assistant'] } };
 const foreign = { ...plugin, id: 'local.foreign' };
 const credentials = { get: async () => 'fixture-key', set: async () => {} };
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -28,7 +28,7 @@ async function fixture(context, edit = async () => ({ bytes: png, mime: 'image/p
 const input = (token, count = 1, concurrency = 2) => ({ modelId: 'gemini-nano-banana-2.1', prompt: '统一白底', concurrency, items: Array.from({ length: count }, (_, index) => ({ token, ...(index === 1 ? { prompt: '第二张增加阴影' } : {}) })) });
 async function start(runtime, batch, grant, retryFailed = false) { await runtime.start(plugin, { id: batch.id, revision: batch.revision, directoryToken: grant.token, retryFailed }); await runtime.running.get(batch.id)?.done; return runtime.get(plugin, batch.id); }
 
-test('official image adapters send one original, exact models, isolated keys and parse image bytes', async () => {
+test('official image adapters use shared host credentials and parse image bytes', async () => {
   const requests = [], secrets = [];
   const editor = new ImageEditor({ get: async (...args) => { secrets.push(args); return 'fixture-key'; } }, async (url, options) => {
     requests.push({ url, ...options });
@@ -40,10 +40,50 @@ test('official image adapters send one original, exact models, isolated keys and
   assert.equal(requests[1].url, 'https://api.openai.com/v1/images/edits');
   assert.equal(requests[1].body.get('n'), '1'); assert.equal(requests[1].body.get('model'), 'gpt-image-2.5-sunburst');
   assert.equal(requests[1].body.getAll('image[]').length, 1);
-  assert.deepEqual(secrets, [[plugin.id, 'google-image'], [plugin.id, 'openai-image']]);
+  assert.ok(secrets.every(([owner]) => owner === 'system.ai'));
+  assert.deepEqual([...new Set(secrets.map(([, name]) => name))].sort(), ['google-image', 'openai-image']);
   assert.throws(() => imageOptions('unknown'), /无效/); assert.throws(() => imageOptions('gemini-nano-banana-2.1', { quality: 'low' }), /不支持/);
   assert.equal(imageOptions('gpt-image-2.5-sunburst', { size: '2560x1440', quality: 'max' }).parameters.quality, 'max');
-  await assert.rejects(editor.edit({ ...plugin, permissions: { ...plugin.permissions, network: [] } }, { modelId: 'gpt-image-2.5-sunburst' }), /未授权/);
+  await assert.rejects(editor.edit({ ...plugin, permissions: { ...plugin.permissions, ai: [] } }, { modelId: 'gpt-image-2.5-sunburst' }), /未授权/);
+});
+
+test('shared image credentials are reusable by every image plugin and migrate legacy keys', async () => {
+  const values = new Map(), writes = [];
+  const shared = {
+    get: async (owner, name) => values.get(owner + ':' + name) ?? null,
+    set: async (owner, name, value) => { writes.push([owner, name]); values.set(owner + ':' + name, value); },
+    clear: async (owner, name) => { writes.push([owner, name]); values.delete(owner + ':' + name); },
+  };
+  const editor = new ImageEditor(shared, async () => Response.json({ data: [{ b64_json: png.toString('base64') }] }));
+  const other = { id: 'local.image-editor', permissions: { files: true, ai: ['image-edit'] } };
+  assert.deepEqual(await editor.models(plugin), []);
+  const status = await editor.configureShared({ provider: 'google', apiKey: 'shared-google' });
+  assert.equal(status.google.configured, true);
+  assert.deepEqual((await editor.models(plugin)).map(model => model.id), ['gemini-nano-banana-2.1', 'gemini-3-pro-image']);
+  assert.deepEqual((await editor.models(other)).map(model => model.id), ['gemini-nano-banana-2.1', 'gemini-3-pro-image']);
+  assert.deepEqual(writes, [['system.ai', 'google-image']]);
+  await editor.configureShared({ provider: 'google', clear: true });
+  assert.deepEqual(await editor.models(plugin), []);
+
+  values.set('official.ai-image:google-image', 'legacy-google');
+  assert.equal((await editor.sharedStatus()).google.source, 'legacy');
+  await editor.configureShared({ provider: 'google', clear: true });
+  assert.equal(values.has('official.ai-image:google-image'), false);
+
+  values.set('system.ai:external', 'openai-text-key');
+  const inheriting = new ImageEditor(shared, async () => Response.json({ data: [{ b64_json: png.toString('base64') }] }), { settings: { address: 'https://api.openai.com/v1' } });
+  const inherited = await inheriting.sharedStatus();
+  assert.deepEqual(inherited.openai, { configured: true, source: 'inherited' });
+  assert.deepEqual(inherited.proxy, { configured: true });
+  assert.deepEqual((await inheriting.models(other)).map(model => model.id), ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
+  values.delete('system.ai:external');
+
+  values.set('official.ai-image:openai-image', 'legacy-openai');
+  assert.deepEqual((await editor.models(plugin)).map(model => model.id), ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
+  assert.equal((await editor.sharedStatus()).openai.source, 'legacy');
+  await editor.edit(other, { modelId: 'gpt-image-2.5-sunburst', prompt: 'edit', bytes: png, mime: 'image/png' });
+  assert.equal(values.get('system.ai:openai-image'), 'legacy-openai');
+  assert.equal(values.has('official.ai-image:openai-image'), false);
 });
 
 test('image failures are explicit and never automatically resubmit', async () => {

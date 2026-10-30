@@ -45,6 +45,17 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '打开 AI 设置', exact: true }).click();
     await expect(page.getByRole('heading', { name: '选择一个服务商', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '共享图像能力', exact: true })).toBeVisible();
+    await expect(page.getByText('AI 批图', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '配置共享密钥', exact: true }).click();
+    const googleImageRow = page.locator('.ai-image-key-row').filter({ has: page.getByLabel('Google 官方访问密钥', { exact: true }) });
+    await page.getByLabel('Google 官方访问密钥', { exact: true }).fill('fixture-google-image');
+    await googleImageRow.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.locator('.ai-image-provider-row').filter({ hasText: 'Google 官方' })).toContainText('已配置');
+    expect((await page.evaluate(() => window.commerceDesktop.invoke('ai.imageStatus'))).google).toMatchObject({ configured: true, source: 'dedicated' });
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '共享图像能力.png') });
+    await googleImageRow.getByRole('button', { name: '清除', exact: true }).click();
+    await expect(page.locator('.ai-image-provider-row').filter({ hasText: 'Google 官方' })).toContainText('未配置');
     await page.getByRole('button', { name: /自定义服务/ }).click();
     await page.getByLabel('服务地址', { exact: true }).fill('http://127.0.0.1:' + server.address().port);
     await page.getByLabel('访问密钥', { exact: true }).fill('fixture');
