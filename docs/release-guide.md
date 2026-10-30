@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.6.8，插件 API / SDK 1.5.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.6.9，插件 API / SDK 1.5.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 底座
 
