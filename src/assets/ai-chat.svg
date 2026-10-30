@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg-ai-chat" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62E8B5"/>
+      <stop offset=".5" stop-color="#22A579"/>
+      <stop offset="1" stop-color="#145842"/>
+    </linearGradient>
+    <radialGradient id="glow-ai-chat" cx="0" cy="0" r="1" gradientTransform="translate(78 55) rotate(45) scale(150)">
+      <stop stop-color="#fff" stop-opacity=".52"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bubble-ai-chat" x1="80" y1="54" x2="180" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/>
+      <stop offset="1" stop-color="#EEFCF6"/>
+    </linearGradient>
+    <linearGradient id="spark-ai-chat" x1="104" y1="92" x2="162" y2="152" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29B384"/>
+      <stop offset="1" stop-color="#15694D"/>
+    </linearGradient>
+    <filter id="shadow-ai-chat" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0E3024" flood-opacity=".26"/>
+    </filter>
+    <clipPath id="tile-ai-chat">
+      <rect x="8" y="8" width="240" height="240" rx="58"/>
+    </clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#102E23" opacity=".18" filter="url(#shadow-ai-chat)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg-ai-chat)"/>
+  <g clip-path="url(#tile-ai-chat)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#glow-ai-chat)"/>
+    <path d="M-4 183C55 146 104 158 157 184c43 21 77 20 108 4v72H-4z" fill="#fff" opacity=".09"/>
+    <path d="M25 37C62 12 130 8 179 20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".14"/>
+    <g filter="url(#shadow-ai-chat)">
+      <rect x="52" y="64" width="108" height="84" rx="24" transform="rotate(-7 106 106)" fill="#fff" opacity=".36"/>
+      <path d="M84 78h94a28 28 0 0 1 28 28v44a28 28 0 0 1-28 28h-44l-26 20c-5 4-12 0-12-6v-14h-2a28 28 0 0 1-28-28v-44a28 28 0 0 1 28-28z" fill="url(#bubble-ai-chat)"/>
+      <path d="M126 92c3 18 9 24 27 27-18 3-24 9-27 27-3-18-9-24-27-27 18-3 24-9 27-27z" fill="url(#spark-ai-chat)"/>
+      <circle cx="163" cy="144" r="6" fill="#FF9F43"/>
+    </g>
+    <path d="M198 46c2 14 7 19 21 21-14 3-19 8-21 22-3-14-8-19-22-22 14-2 19-7 22-21z" fill="#fff"/>
+    <circle cx="62" cy="198" r="6" fill="#fff" opacity=".72"/>
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="2"/>
+</svg>

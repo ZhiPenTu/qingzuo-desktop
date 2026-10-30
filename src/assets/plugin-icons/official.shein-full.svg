@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg-shein-full" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD05E"/><stop offset=".5" stop-color="#FF962D"/><stop offset="1" stop-color="#EF5034"/>
+    </linearGradient>
+    <radialGradient id="glow-shein-full" cx="0" cy="0" r="1" gradientTransform="translate(78 55) rotate(45) scale(150)">
+      <stop stop-color="#fff" stop-opacity=".52"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="white-shein-full" x1="80" y1="54" x2="180" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <filter id="shadow-shein-full" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#15203D" flood-opacity=".24"/>
+    </filter>
+    <filter id="soft-shein-full" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="tile-shein-full"><rect x="8" y="8" width="240" height="240" rx="58"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#18243E" opacity=".18" filter="url(#shadow-shein-full)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg-shein-full)"/>
+  <g clip-path="url(#tile-shein-full)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#glow-shein-full)"/>
+    <path d="M-4 183C55 146 104 158 157 184c43 21 77 20 108 4v72H-4z" fill="#fff" opacity=".09"/>
+    <path d="M25 37C62 12 130 8 179 20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".14"/>
+    
+  <g filter="url(#shadow-shein-full)">
+    <path d="M76 95h106l-9 91a16 16 0 0 1-16 15H101a16 16 0 0 1-16-15z" fill="url(#white-shein-full)"/>
+    <path d="M103 98V85c0-18 11-31 26-31s26 13 26 31v13" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" opacity=".62"/>
+    <path d="M128 118v47M108 144l20-27 20 27" fill="none" stroke="#F56638" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M98 179h60" stroke="#F5B32D" stroke-width="7" stroke-linecap="round" opacity=".8"/>
+  </g>
+  <path d="M199 55l4 12 12 4-12 4-4 12-4-12-12-4 12-4z" fill="#FFF4B5"/>
+  <circle cx="54" cy="75" r="6" fill="#fff" opacity=".72"/>
+
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="2"/>
+</svg>

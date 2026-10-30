@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg-video-downloader" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#74F0FF"/><stop offset=".5" stop-color="#28AFF2"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <radialGradient id="glow-video-downloader" cx="0" cy="0" r="1" gradientTransform="translate(78 55) rotate(45) scale(150)">
+      <stop stop-color="#fff" stop-opacity=".52"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="white-video-downloader" x1="80" y1="54" x2="180" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <filter id="shadow-video-downloader" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#15203D" flood-opacity=".24"/>
+    </filter>
+    <filter id="soft-video-downloader" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="tile-video-downloader"><rect x="8" y="8" width="240" height="240" rx="58"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#18243E" opacity=".18" filter="url(#shadow-video-downloader)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg-video-downloader)"/>
+  <g clip-path="url(#tile-video-downloader)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#glow-video-downloader)"/>
+    <path d="M-4 183C55 146 104 158 157 184c43 21 77 20 108 4v72H-4z" fill="#fff" opacity=".09"/>
+    <path d="M25 37C62 12 130 8 179 20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".14"/>
+    
+  <g filter="url(#shadow-video-downloader)">
+    <rect x="59" y="61" width="138" height="99" rx="24" fill="url(#white-video-downloader)"/>
+    <path d="M111 88l35 23-35 23z" fill="#2B8EEF"/>
+    <rect x="83" y="138" width="90" height="7" rx="3.5" fill="#D3E2F6"/>
+    <circle cx="179" cy="176" r="29" fill="#fff"/>
+    <path d="M179 159v25M168 175l11 12 11-12" fill="none" stroke="#2385E8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M41 95h24M35 116h28M46 137h17" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".5"/>
+  <path d="M199 49l4 12 12 4-12 4-4 12-4-12-12-4 12-4z" fill="#FFF5B7"/>
+
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="2"/>
+</svg>

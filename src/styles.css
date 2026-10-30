@@ -427,6 +427,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .ai-transcript-content { width: 100%; max-width: 760px; margin-inline: auto; }
 .ai-chat-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 760px; min-height: 280px; gap: 14px; padding-block: 24px; margin-inline: auto; text-align: center; }
 .ai-chat-empty > svg { color: var(--primary); width: 48px; height: 48px; margin-bottom: 12px; }
+.ai-chat-empty-icon { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 8px; object-fit: cover; flex-shrink: 0; }
 .ai-chat-empty h2 { font-size: clamp(23px, 2.1vw, 30px); line-height: 1.45; font-weight: 600; letter-spacing: -.5px; text-wrap: balance; }
 .ai-chat-empty p { font-size: 14px; color: var(--muted-foreground); line-height: 1.8; }
 .ai-chat-suggestions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
@@ -467,6 +468,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .ai-chat-plugin-list section > div { display: flex; align-items: center; gap: 10px; }
 .ai-chat-plugin-list h3 { font-size: 14px; font-weight: 600; }
 .ai-chat-plugin-list svg { width: 18px; height: 18px; color: var(--primary); }
+.ai-chat-plugin-icon { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; flex-shrink: 0; }
 .ai-chat-plugin-list p, .ai-chat-plugin-list ul { margin-top: 10px; font-size: 12px; line-height: 1.8; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .ai-chat-plugin-list ul { display: flex; gap: 6px 18px; flex-wrap: wrap; padding-left: 18px; list-style: disc; }
 .harness-theme { --dsw-alias-label-primary: var(--foreground); --dsw-alias-label-secondary: var(--muted-foreground); --dsw-alias-label-tertiary: var(--muted-foreground); --dsw-alias-label-caption: var(--muted-foreground); --dsw-alias-link: var(--primary); --dsw-alias-label-shimmer: var(--primary); --dsw-alias-bg-base: var(--background); --dsw-alias-bg-layer-1: var(--card); --dsw-alias-border-l1: var(--border); --dsw-alias-border-l2: var(--border); --dsw-alias-border-l3: var(--border); --dsw-alias-interactive-bg-hover: var(--secondary); --dsw-alias-markdown-inline-code: var(--secondary); --dsw-alias-markdown-code-block: var(--background); --dsw-alias-markdown-code-block-banner: var(--secondary); --dsw-alias-state-business-primary: var(--primary); --dsw-alias-state-error-primary: var(--destructive); --dsw-font-family: inherit; --ds-font-family-code: ui-monospace, monospace; --dsw-font-markdown-base: 14px/1.8 system-ui, sans-serif; --dsw-font-markdown-base-strong: 600 14px/1.8 system-ui, sans-serif; --dsw-font-markdown-h1: 600 24px/1.5 system-ui, sans-serif; --dsw-font-markdown-h2: 600 20px/1.5 system-ui, sans-serif; --dsw-font-markdown-h3: 600 17px/1.5 system-ui, sans-serif; --dsw-font-markdown-h4: 600 15px/1.5 system-ui, sans-serif; --dsw-font-markdown-code: 12px/1.7 ui-monospace, monospace; --dsw-font-markdown-code-block: 12px/1.7 ui-monospace, monospace; --dsw-font-markdown-table: 13px/1.7 system-ui, sans-serif; --dsw-font-markdown-table-head: 600 13px/1.7 system-ui, sans-serif; --dsw-radius-sm: 4px; --dsw-radius-md: 8px; --dsw-radius-lg: 12px; --dsw-focus-ring-color: var(--ring); --ds-transition-duration: 150ms; --ds-ease-in-out: ease-in-out; }
@@ -619,6 +621,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .dark .commerce-tool-tab.is-active { background: var(--card); border-color: var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
 .commerce-tool-tab.is-disabled { opacity: 0.55; pointer-events: none; }
 .commerce-tab-icon { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted-foreground); transition: color 0.15s ease; }
+.commerce-tab-icon-image { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; }
 .commerce-tool-tab.is-active .commerce-tab-icon { color: var(--primary); }
 .commerce-tool-tab:hover:not(.is-active) .commerce-tab-icon { color: var(--foreground); }
 .commerce-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

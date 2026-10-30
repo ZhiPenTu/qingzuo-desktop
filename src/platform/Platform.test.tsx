@@ -231,10 +231,17 @@ it('renders workspace tabs without a duplicate page title bar', async () => {
 
   const toolTab = screen.getByRole('tab', { name: 'LabelEdit' });
   expect(toolTab.getAttribute('aria-selected')).toBe('false');
+  expect(toolTab.querySelector('img.commerce-tab-icon-image')).toBeTruthy();
+
+  await navigate('AI 对话');
+  const chatShellTab = await screen.findByRole('tab', { name: 'AI 对话' });
+  expect(chatShellTab.getAttribute('aria-selected')).toBe('true');
+  expect(chatShellTab.querySelector('img.commerce-tab-icon-image')).toBeTruthy();
 
   fireEvent.click(toolTab);
   await waitFor(() => expect(toolTab.getAttribute('aria-selected')).toBe('true'));
-  expect(shellTab.getAttribute('aria-selected')).toBe('false');
+  expect(chatShellTab.getAttribute('aria-selected')).toBe('false');
+  expect(chatShellTab.textContent).toBe('AI 对话');
 
   const closeBtn = screen.getByRole('button', { name: '关闭工具' });
   fireEvent.click(closeBtn);

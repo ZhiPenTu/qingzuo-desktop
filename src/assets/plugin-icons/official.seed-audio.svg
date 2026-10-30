@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg-seed-audio" x1="30" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9BD4"/><stop offset=".5" stop-color="#FF557E"/><stop offset="1" stop-color="#DB3159"/>
+    </linearGradient>
+    <radialGradient id="glow-seed-audio" cx="0" cy="0" r="1" gradientTransform="translate(78 55) rotate(45) scale(150)">
+      <stop stop-color="#fff" stop-opacity=".52"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="white-seed-audio" x1="80" y1="54" x2="180" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <filter id="shadow-seed-audio" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#15203D" flood-opacity=".24"/>
+    </filter>
+    <filter id="soft-seed-audio" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="tile-seed-audio"><rect x="8" y="8" width="240" height="240" rx="58"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#18243E" opacity=".18" filter="url(#shadow-seed-audio)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg-seed-audio)"/>
+  <g clip-path="url(#tile-seed-audio)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#glow-seed-audio)"/>
+    <path d="M-4 183C55 146 104 158 157 184c43 21 77 20 108 4v72H-4z" fill="#fff" opacity=".09"/>
+    <path d="M25 37C62 12 130 8 179 20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".14"/>
+    
+  <g filter="url(#shadow-seed-audio)">
+    <rect x="105" y="53" width="46" height="86" rx="23" fill="url(#white-seed-audio)"/>
+    <path d="M83 117c0 27 20 47 45 47s45-20 45-47" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity=".94"/>
+    <path d="M128 165v29M109 194h38" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+    <path d="M117 77h22M117 91h22M117 105h22" stroke="#FF6685" stroke-width="6" stroke-linecap="round" opacity=".72"/>
+  </g>
+  <path d="M67 72c-10 8-16 19-16 31M189 72c10 8 16 19 16 31" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".42"/>
+  <path d="M197 49l4 12 12 4-12 4-4 12-4-12-12-4 12-4z" fill="#FFF2A8"/>
+  <circle cx="61" cy="150" r="5" fill="#fff" opacity=".74"/>
+
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="2"/>
+</svg>

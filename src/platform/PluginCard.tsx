@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import type { PluginInstallState } from './commerce';
+import { resolvePluginIcon } from './plugin-icons';
 import gte from 'semver/functions/gte';
 const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'));
 
@@ -33,6 +34,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const isLabel = entry.id === 'official.labeledit';
   const isCutout = entry.id === 'official.removebg';
   const Icon = isLabel ? FileText : isCutout ? Image : Puzzle;
+  const iconSrc = resolvePluginIcon(entry.id, entry.icon ?? installed?.icon);
   // A stale catalog must not offer a downgrade of a newer bundled/local tool.
   const current = installed ? gte(installed.version, entry.version) : false;
   const updateAvailable = mode === 'plugins' && Boolean(installed) && !current;
@@ -52,7 +54,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const retry = () => onAction('market.install', { id: entry.id });
   return <Card className={cn('plugin-card', mode !== 'market' && 'plugin-row', isCutout && 'plugin-image', updating && 'is-updating')}>
     <CardHeader>
-      <span className={cn('commerce-tool-icon', entry.icon && 'has-image')}>{entry.icon ? <img src={entry.icon} alt="" /> : <Icon />}</span>
+      <span className={cn('commerce-tool-icon', iconSrc && 'has-image')}>{iconSrc ? <img src={iconSrc} alt="" /> : <Icon />}</span>
       <div className="plugin-info">
         <span className="plugin-category">{toolCategory(entry)}</span>
         <CardTitle role="heading" aria-level={2}>{entry.title}</CardTitle>

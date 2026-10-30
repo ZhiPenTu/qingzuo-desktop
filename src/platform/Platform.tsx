@@ -22,6 +22,7 @@ import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
+import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
 const AIChat = lazy(() => import('./AIChat'));
 type Page = 'home' | 'market' | 'plugins' | 'chat' | 'ai' | 'settings';
 interface ComponentUpdateState {
@@ -38,7 +39,7 @@ interface ComponentUpdateState {
 interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
 const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'market', title: '插件市场', icon: Store }, { id: 'plugins', title: '插件管理', icon: Puzzle }, { id: 'settings', title: '设置', icon: Settings }] as const;
 const shellPageIds = ['home', 'market', 'plugins', 'chat', 'ai', 'settings'] as const;
-const isShellPage = (id: string) => shellPageIds.includes(id as (typeof shellPageIds)[number]);
+const isShellPage = (id: string): id is Page => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
 // Tools keep the space they need to lay out; the browser pane gives way first.
@@ -53,6 +54,7 @@ const preview: Status = { version, kernel: { ready: false, error: null, version:
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
+const shellIconFor = (id: string) => (id === 'ai' ? Sparkles : navigation.find(item => item.id === id)?.icon ?? Boxes);
 const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
@@ -65,6 +67,7 @@ export default function Platform() {
   const desktop = Boolean(window.commerceDesktop);
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
   const [page, setPage] = useState<Page | string>('home');
+  const [lastShellPage, setLastShellPage] = useState<Page>('home');
   const [browserPaneOpen, setBrowserPaneOpen] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [surfaceRevision, setSurfaceRevision] = useState(0);
@@ -233,7 +236,10 @@ export default function Platform() {
   async function navigate(next: string, settings = false) {
     try {
       if (page === 'market' && next !== 'market') { marketCache.current = null; marketRequest.current++; }
-      if (isShellPage(next)) await window.commerceDesktop?.invoke('view.hide');
+      if (isShellPage(next)) {
+        await window.commerceDesktop?.invoke('view.hide');
+        setLastShellPage(next);
+      }
       else {
         await run('view.open', { id: next, settings });
         // Re-opening the tool that is already on screen changes no layout, so the
@@ -371,6 +377,10 @@ export default function Platform() {
   const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
   const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
   const shellPage = isShellPage(page);
+  const shellTabPage: Page = shellPage ? (page as Page) : lastShellPage;
+  const shellTabTitle = shellPage ? title : (navigation.find(n => n.id === shellTabPage)?.title ?? (shellTabPage === 'ai' ? pageCopy.ai[0] : '工具中心'));
+  const ShellTabIcon = shellIconFor(shellTabPage);
+  const shellTabIconSrc = shellTabPage === 'chat' ? aiChatIcon : undefined;
   const copy = pageCopy[page as Page];
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
@@ -384,14 +394,14 @@ export default function Platform() {
     return { min, max, width: Math.round(Math.min(max, Math.max(min, browserPaneWidth ?? defaultBrowserPaneWidth()))) };
   })();
   const renderWorkspaceTabs = () => status?.tabs.length ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
-    <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate('home')}>
-      <Boxes className="commerce-tab-icon" /><span className="commerce-tab-title">{shellPage ? title : '工具中心'}</span>
+    <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate(shellTabPage)}>
+      {shellTabIconSrc ? <img src={shellTabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <ShellTabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{shellTabTitle}</span>
     </button>
     {status.tabs.map(id => {
-      const TabIcon = tabIconFor(id); const toolTitle = plugins.find(p => p.id === id)?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
+      const plugin = plugins.find(p => p.id === id); const marketPlugin = marketById.get(id); const TabIcon = tabIconFor(id); const tabIconSrc = resolvePluginIcon(id, plugin?.icon ?? marketPlugin?.icon); const toolTitle = plugin?.title ?? marketPlugin?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
       return <div key={id} role="tab" tabIndex={0} aria-selected={isActive} className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')} onClick={() => { if (!isInstalling) void navigate(id); }} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}>
-        <TabIcon className="commerce-tab-icon" /><span className="commerce-tab-title">{toolTitle}</span>
-        <button type="button" className="commerce-tab-close" aria-label="关闭工具" title="关闭" disabled={isInstalling} onClick={e => { e.stopPropagation(); void run('view.close', { id }).then(() => { if (page === id) setPage('home'); }).catch(() => {}); }}><X /></button>
+        {tabIconSrc ? <img src={tabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <TabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{toolTitle}</span>
+        <button type="button" className="commerce-tab-close" aria-label="关闭工具" title="关闭" disabled={isInstalling} onClick={e => { e.stopPropagation(); void run('view.close', { id }).then(() => { if (page === id) setPage(lastShellPage); }).catch(() => {}); }}><X /></button>
       </div>;
     })}
   </div> : <span className="commerce-windowbar-context">{title}</span>;
