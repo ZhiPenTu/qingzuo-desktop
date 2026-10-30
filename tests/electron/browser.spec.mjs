@@ -81,7 +81,8 @@ test('opens an Electron browser pane, navigates multiple pages, and preserves br
     const sidebarAfter = await shell.locator('.commerce-sidebar').boundingBox();
     const paneAfterMaximize = await pane.boundingBox();
     const ratioAfterMaximize = (paneAfterMaximize?.width || 0) / ((workspaceAfter?.width || 0) - (sidebarAfter?.width || 0));
-    expect(ratioAfterMaximize).toBeCloseTo(ratioBeforeMaximize, 2);
+    // Windows native view rounding can shift the measured ratio slightly more than two-decimal precision.
+    expect(Math.abs(ratioAfterMaximize - ratioBeforeMaximize)).toBeLessThan(0.01);
     await expect.poll(async () => {
       const surface = await shell.locator('.browser-surface').boundingBox();
       const bounds = await app.evaluate(({ BrowserWindow }, prefix) => {
