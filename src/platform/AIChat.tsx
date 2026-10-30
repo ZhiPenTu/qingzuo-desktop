@@ -7,6 +7,7 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescri
 import { cn } from '@/lib/utils';
 import { HarnessActivity, HarnessMessage, HarnessParameters } from './HarnessPresentation';
 import { chatInvoke, type ChatSession, type ChatSummary, type ChatPlugin } from './harness-client';
+import { assistantModelLabel, isChatModel } from './ai-providers';
 
 export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () => void; onOpenPlugin: (id: string) => void }) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
@@ -14,6 +15,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const [plugins, setPlugins] = useState<ChatPlugin[]>([]);
   const [ready, setReady] = useState(false);
   const [model, setModel] = useState('');
+  const [address, setAddress] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [text, setText] = useState('');
@@ -35,8 +37,10 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   useEffect(() => {
     if (!window.commerceDesktop) return;
     let active = true;
-    void Promise.all([chatInvoke<ChatSummary[]>('list'), chatInvoke<ChatPlugin[]>('tools'), window.commerceDesktop?.invoke<{ model: string; verified: string[] }>('ai.status')]).then(async ([items, tools, status]) => {
-      if (!active) return; setChats(items); setPlugins(tools); setModel(status?.model || ''); setReady(Boolean(status?.model && status.verified.includes(status.model)));
+    void Promise.all([chatInvoke<ChatSummary[]>('list'), chatInvoke<ChatPlugin[]>('tools'), window.commerceDesktop?.invoke<{ address?: string; model: string; verified?: string[]; ready?: boolean }>('ai.status')]).then(async ([items, tools, status]) => {
+      if (!active) return;
+      setChats(items); setPlugins(tools); setModel(status?.model || ''); setAddress(status?.address || '');
+      setReady(typeof status?.ready === 'boolean' ? status.ready : Boolean(status?.model && status.verified?.includes(status.model) && isChatModel({ id: status.model })));
       const remembered = localStorage.getItem('qingzuo.ai-chat.selected.v1');
       const id = items.find(item => item.id === remembered)?.id || items[0]?.id;
       if (id) await load(id);
@@ -78,7 +82,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   function suggest(prompt: string) { setText(prompt); input.current?.focus(); }
   return <div className="ai-chat-layout harness-theme">
     <header className="ai-chat-toolbar">
-      <div className="ai-chat-heading"><div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : '助手待配置'} /></div><p title={session?.model || model}>{session?.model || model || '默认助手模型'}</p></div>
+      <div className="ai-chat-heading"><div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : '助手待配置'} /></div><p title={assistantModelLabel(address, session?.model || model)}>{assistantModelLabel(address, session?.model || model)}</p></div>
       <div className="ai-chat-toolbar-actions">
         <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
           <SheetTrigger render={<Button variant="ghost" aria-label="历史对话" title="历史对话" />}><History data-icon="inline-start" /><span>历史对话</span></SheetTrigger>
@@ -93,7 +97,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
       </div>
     </header>
     <section className="ai-chat-workspace" aria-label="AI 对话">
-      {!ready ? <Alert><AlertDescription>先接入文本账户，选择模型并验证工具调用。对话请求可能按提供商规则计费。<Button variant="outline" size="sm" onClick={onSettings}>配置文本助手</Button></AlertDescription></Alert> : null}
+      {!ready ? <Alert><AlertDescription>AI 助手尚未启用。连接服务后即可开始对话。<Button variant="outline" size="sm" onClick={onSettings}>继续设置</Button></AlertDescription></Alert> : null}
       {error || session?.error ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{error || session?.error}<Button variant="ghost" size="sm" onClick={onSettings}>检查 AI 设置</Button></AlertDescription></Alert> : null}
       <div ref={transcript} className={cn('ai-transcript', !hasMessages && 'ai-transcript-empty')} role="log" aria-label="对话内容" onScroll={() => { const element = transcript.current; if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
         {!hasMessages ? <div className="ai-chat-empty"><MessageCircleMore /><h2>今天，想让工作轻一点？</h2><p>描述你的想法，让 AI 和插件一起完成。</p><div className="ai-chat-suggestions"><Button variant="outline" onClick={() => suggest('我有哪些插件可以用？')}><LayoutGrid data-icon="inline-start" />发现可用工具</Button><Button variant="outline" onClick={() => suggest('打开 AI 批图，帮我规划白底商品图')}><Image data-icon="inline-start" />规划商品图</Button></div><Button variant="ghost" size="sm" onClick={() => setToolsOpen(true)}>可调用 {plugins.length} 个插件<ChevronRight data-icon="inline-end" /></Button></div> : null}

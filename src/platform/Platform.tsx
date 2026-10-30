@@ -57,7 +57,7 @@ const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
   plugins: ['每一件工具，都井井有条。', '管理已安装工具的状态、设置和版本。'],
-  ai: ['AI 设置', '先接入账户，再选择助手模型。图像编辑单独配置。'],
+  ai: ['AI 设置', '选择服务商，连接后即可开始对话。'],
   chat: ['AI 对话', '说一句话，让工具替你完成。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，管理轻作与已安装的工具。'],
 } as const;
@@ -406,9 +406,6 @@ export default function Platform() {
     </div>
     <div className="commerce-body">
       <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
-        <div className="commerce-sidebar-head">
-          <div className="commerce-brand"><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-        </div>
         <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
