@@ -535,6 +535,7 @@ export class BrowserRuntime {
   async closeTab(id) {
     const tab = this.tabs.get(id);
     if (!tab) throw new Error('浏览器标签不存在。');
+    const closingActiveTab = this.activeTabId === id;
     this.cancelForTab(id);
     if (tab.view && !tab.view.webContents.isDestroyed()) {
       this.window.contentView.removeChildView(tab.view);
@@ -544,7 +545,9 @@ export class BrowserRuntime {
     this.candidates.delete(id);
     if (this.activeTabId === id) this.activeTabId = this.tabs.keys().next().value || null;
     if (!this.tabs.size) await this.newTab();
-    else this.hide();
+    // Closing an inactive tab must not hide the selected page. Its tab key and
+    // URL are unchanged, so the renderer will not request another bounds sync.
+    else if (closingActiveTab) this.hide();
     this.notify({ type: 'status', tabId: id });
     return this.status();
   }
