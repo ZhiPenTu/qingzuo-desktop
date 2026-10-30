@@ -89,7 +89,7 @@ it('keeps backend progress after acknowledgment, restores it across tabs, and co
   await waitFor(() => expect(screen.getByRole('button', { name: '导入插件' }).hasAttribute('disabled')).toBe(false));
   await openToolTab('已安装');
   await screen.findByText('正在下载新版本… 40%');
-  expect(screen.getByRole('button', { name: '打开工具' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByRole('button', { name: '管理' }).hasAttribute('disabled')).toBe(true);
   emit(job('verifying')); await screen.findByText('正在校验插件签名…');
   emit(job('installing')); await screen.findByText('正在安装新版本…');
@@ -104,7 +104,7 @@ it('keeps backend progress after acknowledgment, restores it across tabs, and co
   await screen.findByText('v0.2.0');
   expect(screen.getByText('已启用')).toBeTruthy();
   expect(screen.getByText('市场安装')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '打开工具' }).hasAttribute('disabled')).toBe(false);
+  expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '管理' }));
   expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
   emit(job('installed', { progress: 100 }), [installed]);
@@ -414,7 +414,7 @@ it('shows only tool tabs on the left and browser tabs on the right while split',
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
 
-  fireEvent.click(screen.getByRole('button', { name: '打开工具' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开' }));
   await waitFor(() => expect(screen.getByRole('tab', { name: 'LabelEdit' }).getAttribute('aria-selected')).toBe('true'));
   fireEvent.click(screen.getByRole('button', { name: '打开浏览器面板' }));
   const toolTabs = await screen.findByRole('tablist', { name: '已打开的工具' });

@@ -240,7 +240,7 @@ test('keeps the tool and browser surfaces visible while switching between them',
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await shell.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
     await shell.getByRole('button', { name: '工具中心', exact: true }).click();
-    await shell.getByRole('button', { name: '打开工具', exact: true }).click();
+    await shell.getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://local.fixture-native/'))).toBe(true);
 
     await shell.getByRole('button', { name: '打开浏览器面板', exact: true }).click();

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useId, useState } from 'react';
-import { AlertCircle, ArrowRight, Check, ChevronDown, Download, FileText, Image, LoaderCircle, Puzzle } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Download, FileText, Image, LoaderCircle, Puzzle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -100,7 +100,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
         <div className="plugin-card-actions">
           {updateAvailable ? <Button variant="outline" size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
           <Button variant="outline" size="sm" disabled={unavailable} aria-expanded={manageOpen} aria-controls={manageId} onClick={() => setManageOpen(open => !open)}>管理</Button>
-          <Button size="sm" disabled={unavailable || !ready || !installed?.enabled || Boolean(installed?.missing.length)} onClick={() => onOpen()}>打开工具<ArrowRight data-icon="inline-end" /></Button>
+          <Button size="sm" disabled={unavailable || !ready || !installed?.enabled || Boolean(installed?.missing.length)} onClick={() => onOpen()}>打开</Button>
         </div>
       </>}
     </CardFooter>

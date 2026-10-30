@@ -101,7 +101,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     await expect(cardFor(page).getByRole('status')).toContainText('正在下载新版本');
     await expect(cardFor(page).getByRole('button', { name: '管理', exact: true })).toBeDisabled();
     await expect(cardFor(page).getByRole('status')).toContainText('正在下载新版本');
-    await expect(cardFor(page).getByRole('button', { name: '打开工具', exact: true })).toBeDisabled();
+    await expect(cardFor(page).getByRole('button', { name: '打开', exact: true })).toBeDisabled();
     await page.getByRole('tab', { name: '全部', exact: true }).click();
     await expect(marketCard.getByRole('status')).toContainText('正在下载新版本');
     await page.screenshot({ path: path.join(screenshotDirectory, 'slow-download.png'), fullPage: false });
@@ -122,7 +122,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     }, moduleURL);
     expect(sameHost.pid).toBe(hostPid); expect(sameHost.pending).toBe(0); expect(sameHost.state.find(job => job.id === id).status).toBe('installed');
     await page.screenshot({ path: path.join(screenshotDirectory, 'installed.png'), fullPage: false });
-    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'))).toBe(true);
     const pluginPage = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'));
     await pluginPage.getByRole('button', { name: '验证新服务', exact: true }).click();
@@ -164,7 +164,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     await expect(marketCard.getByRole('status')).toContainText('安装完成 · v0.4.0');
     expect(await app.evaluate(() => globalThis.__marketSlow.downloads.filter(download => download.version === '0.4.0').length)).toBe(1);
     await page.screenshot({ path: path.join(screenshotDirectory, 'sync-retried.png'), fullPage: false });
-    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'))).toBe(true);
     const recoveredPlugin = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'));
     await recoveredPlugin.getByRole('button', { name: '验证新服务', exact: true }).click();

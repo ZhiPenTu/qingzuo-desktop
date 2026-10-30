@@ -17,7 +17,7 @@ test('private file resources render and expire after release', async () => {
     await expect(page.getByText('工具服务已就绪')).toBeVisible();
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
-    await page.getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://local.resource/'))).toBe(true);
     const plugin = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://local.resource/'));
     const token = await plugin.evaluate(async () => {
