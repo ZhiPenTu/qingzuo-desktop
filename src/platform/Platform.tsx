@@ -406,9 +406,6 @@ export default function Platform() {
     </div>
     <div className="commerce-body">
       <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>
-        <div className="commerce-sidebar-head">
-          <div className="commerce-brand"><div><strong>轻作</strong><span>QINGZUO</span></div></div>
-        </div>
         <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
