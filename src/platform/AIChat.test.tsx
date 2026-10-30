@@ -3,11 +3,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import AIChat from './AIChat';
 import type { ChatEvent, ChatSession } from './harness-client';
 
-function fixture(verified = true) {
-  let session: ChatSession = { id: 'fixture-chat', title: '测试对话', model: 'fixture-model', state: 'idle', history: [] };
+function fixture(verified = true, overrides: { address?: string; model?: string; ready?: boolean; legacy?: boolean; sessionModel?: string } = {}) {
+  let session: ChatSession = { id: 'fixture-chat', title: '测试对话', model: overrides.sessionModel ?? 'fixture-model', state: 'idle', history: [] };
   let listener: (event: ChatEvent) => void = () => {};
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>) => {
-    if (method === 'ai.status') return { model: 'fixture-model', verified: verified ? ['fixture-model'] : [] };
+    if (method === 'ai.status') return { address: overrides.address ?? 'https://custom.example.com', model: overrides.model ?? 'fixture-model', verified: verified ? [overrides.model ?? 'fixture-model'] : [], ...(overrides.legacy ? {} : { ready: overrides.ready ?? verified }) };
     if (method === 'ai.chat.list') return [{ id: session.id, title: session.title, state: session.state, updated: 1 }];
     if (method === 'ai.chat.tools') return [{ id: 'local.fixture', title: '示例插件', description: '', tools: [{ name: 'open', title: '打开插件' }] }];
     if (method === 'ai.chat.status' || method === 'ai.chat.create') return structuredClone(session);
@@ -22,10 +22,33 @@ const onOpenPlugin = vi.fn();
 afterEach(() => { cleanup(); vi.restoreAllMocks(); delete window.commerceDesktop; localStorage.clear(); });
 it('requires model validation and never sends or approves on mount', async () => {
   const { invoke } = fixture(false), settings = vi.fn(); render(<AIChat onSettings={settings} onOpenPlugin={onOpenPlugin} />);
-  await screen.findByText(/先接入文本账户/); fireEvent.change(screen.getByLabelText('消息'), { target: { value: 'hello' } });
+  await screen.findByText(/AI 助手尚未启用/); fireEvent.change(screen.getByLabelText('消息'), { target: { value: 'hello' } });
   expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
   expect(invoke.mock.calls.some(([method]) => method === 'ai.chat.send' || method === 'ai.chat.approve')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '配置文本助手' })); expect(settings).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: '继续设置' })); expect(settings).toHaveBeenCalledOnce();
+});
+it('honors ai.status.ready while keeping the older verified list compatible', async () => {
+  fixture(false, { ready: true }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await waitFor(() => expect(screen.queryByText(/AI 助手尚未启用/)).toBeNull());
+  expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByLabelText('消息'), { target: { value: 'ready' } });
+  expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false);
+});
+it('derives readiness from the legacy verified list without enabling image models', async () => {
+  fixture(true, { legacy: true }); const { unmount } = render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByText('fixture-model');
+  fireEvent.change(screen.getByLabelText('消息'), { target: { value: 'legacy' } });
+  expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false);
+  unmount(); cleanup();
+  fixture(true, { legacy: true, model: 'gpt-image-2.5', sessionModel: 'gpt-image-2.5' }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByText(/AI 助手尚未启用/);
+});
+it('shows a friendly provider model and falls back to the id for custom services', async () => {
+  fixture(true, { address: 'https://api.deepseek.com', model: 'fixture-model', sessionModel: 'fixture-model' }); const { unmount } = render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByText(/Fixture Model/);
+  unmount(); cleanup();
+  fixture(true, { address: 'https://custom.example.com', model: 'team-private-chat', sessionModel: 'team-private-chat' }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByText('team-private-chat');
 });
 it('streams upstream Markdown, handles IME, stops and retains history', async () => {
   const { invoke, emit } = fixture(); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);

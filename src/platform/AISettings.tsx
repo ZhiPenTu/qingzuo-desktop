@@ -1,195 +1,321 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CheckCircle2, Image, LoaderCircle, Server, LayoutList, Box, MessageCircle } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  AlertCircle,
+  BrainCircuit,
+  CheckCircle2,
+  ChevronDown,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Image,
+  KeyRound,
+  Layers3,
+  LoaderCircle,
+  MessageCircle,
+  RefreshCw,
+  Server,
+  SlidersHorizontal,
+  Sparkles,
+} from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { AI_PROVIDERS, DEFAULT_PROXY_ADDRESS, friendlyModelName, isChatModel, normalizeAIAddress, providerForAddress, type AIModel } from './ai-providers';
 
-interface ProxyStatus { mode: string; address: string; model: string; running: boolean; verified: string[]; error: string | null }
+interface ProxyStatus {
+  mode: string;
+  address: string;
+  model: string;
+  running: boolean;
+  verified?: string[];
+  ready?: boolean;
+  error: string | null;
+}
+
+interface SetupSuccess {
+  ok: true;
+  status: ProxyStatus;
+}
+
+interface SetupFailure {
+  ok: false;
+  code: string;
+  message: string;
+  models?: AIModel[];
+}
+
+type SetupResult = SetupSuccess | SetupFailure;
+
+const CUSTOM_PROVIDER_ID = 'custom';
+const providerIcons = { deepseek: BrainCircuit, openai: Sparkles, siliconflow: Layers3 } as const;
+
+function statusReady(status: ProxyStatus | null) {
+  if (!status || !status.model) return false;
+  if (typeof status.ready === 'boolean') return status.ready;
+  return Array.isArray(status.verified) && status.verified.includes(status.model) && isChatModel({ id: status.model });
+}
+
+function unexpectedSetupFailure(reason: unknown): SetupFailure {
+  const raw = reason instanceof Error ? reason.message : String(reason);
+  if (/401/.test(raw)) return { ok: false, code: 'invalid_key', message: '访问密钥无效，请检查后重新粘贴。' };
+  if (/403/.test(raw)) return { ok: false, code: 'forbidden', message: '这个密钥没有调用所选服务的权限，请在服务商后台检查权限。' };
+  if (/404/.test(raw)) return { ok: false, code: 'incompatible_address', message: '服务地址不兼容，请检查是否填写了 OpenAI 兼容接口地址。' };
+  if (/429/.test(raw)) return { ok: false, code: 'rate_limited', message: '请求过于频繁或额度不足，请稍后再试，或检查服务商账户。' };
+  if (/timeout|超时/i.test(raw)) return { ok: false, code: 'network_timeout', message: '连接超时，请检查网络后重试。' };
+  return { ok: false, code: 'network_error', message: '无法连接 AI 服务，请检查网络或服务地址后重试。' };
+}
 
 export function AISettings({ imageAvailable = false, onOpenImage, onOpenChat }: { imageAvailable?: boolean; onOpenImage?: () => void; onOpenChat?: () => void }) {
-  const [section, setSection] = useState('overview');
   const [status, setStatus] = useState<ProxyStatus | null>(null);
-  const [address, setAddress] = useState('http://127.0.0.1:8317');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [providerId, setProviderId] = useState<string>('deepseek');
+  const [address, setAddress] = useState(AI_PROVIDERS[0].address);
   const [key, setKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState('');
-  const [models, setModels] = useState<{ id: string }[]>([]);
-  const [busy, setBusy] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [editing, setEditing] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [setupError, setSetupError] = useState<SetupFailure | null>(null);
+  const [recoveryModels, setRecoveryModels] = useState<AIModel[]>([]);
   const operation = useRef(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
 
   const invoke = useCallback(async <Value,>(method: string, args?: unknown) => {
-    if (!window.commerceDesktop) throw new Error('请在轻作桌面应用中配置 AI 模型。');
+    if (!window.commerceDesktop) throw new Error('请在轻作桌面应用中配置 AI 服务。');
     return window.commerceDesktop.invoke<Value>('ai.' + method, args);
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    void invoke<ProxyStatus>('status').then(value => {
-      if (active) { setStatus(value); setAddress(value.address); setModel(value.model); }
-    }).catch(reason => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, [invoke]);
+  const hydrate = useCallback((value: ProxyStatus) => {
+    const savedProvider = providerForAddress(value.address);
+    const hasSavedConnection = value.address !== DEFAULT_PROXY_ADDRESS || Boolean(value.model);
+    const nextProvider = savedProvider?.id ?? (hasSavedConnection ? CUSTOM_PROVIDER_ID : AI_PROVIDERS[0].id);
+    setStatus(value);
+    setProviderId(nextProvider);
+    setAddress(savedProvider?.address ?? (hasSavedConnection ? value.address : AI_PROVIDERS[0].address));
+    setModel(value.model);
+    setAdvancedOpen(nextProvider === CUSTOM_PROVIDER_ID);
+    setEditing(!statusReady(value));
+    setKey('');
+    setShowKey(false);
+  }, []);
 
-  async function action(name: string, work: () => Promise<unknown>, success: string) {
-    if (operation.current) return;
-    operation.current = true; setBusy(name); setError(''); setMessage('');
-    try { await work(); setStatus(await invoke<ProxyStatus>('status')); setMessage(success); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { operation.current = false; setBusy(''); }
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const value = await invoke<ProxyStatus>('status');
+      hydrate(value);
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [hydrate, invoke]);
+
+  useEffect(() => { void loadStatus(); }, [loadStatus]);
+
+  const provider = AI_PROVIDERS.find(item => item.id === providerId) ?? null;
+  const providerName = provider?.name ?? '自定义服务';
+  const ready = statusReady(status);
+  const canReuseKey = Boolean(status && normalizeAIAddress(status.address) === normalizeAIAddress(address));
+  const partial = Boolean(status && !ready && (status.model || status.address !== DEFAULT_PROXY_ADDRESS));
+  const ProviderIcon = provider ? providerIcons[provider.id] : Server;
+
+  function clearFeedback() {
+    setSetupError(null);
+    setRecoveryModels([]);
   }
 
-  async function configure() {
-    const value = await invoke<ProxyStatus>('configure', { mode: 'external', address, model, apiKey: key });
-    if (status?.address !== value.address || key) { setModels([]); }
-    setStatus(value); setKey('');
+  function selectProvider(id: string) {
+    clearFeedback();
+    setProviderId(id);
+    setKey('');
+    setShowKey(false);
+    const known = AI_PROVIDERS.find(item => item.id === id);
+    const saved = status ? providerForAddress(status.address) : null;
+    if (known) {
+      setAddress(known.address);
+      setModel(saved?.id === id ? status?.model ?? '' : '');
+      setAdvancedOpen(false);
+    } else {
+      setAddress(saved ? '' : status?.address ?? '');
+      setModel(saved ? '' : status?.model ?? '');
+      setAdvancedOpen(true);
+    }
   }
 
-  const connectionChanged = Boolean(status && (status.address !== address || key));
-  const disabled = Boolean(busy) || !status;
-  const verified = Boolean(status?.verified.includes(model));
-  const imageModel = /gpt[-_]?image|nano[-_ ]?banana|image[-_]?generation/i.test(model);
-  const sections = [
-    { group: '开始使用', items: [{ id: 'overview', title: '配置概览', icon: LayoutList }] },
-    { group: '文本助手', items: [{ id: 'connection', title: '代理连接', icon: Server }, { id: 'model', title: '默认模型', icon: Box }] },
-    { group: '图像编辑', items: [{ id: 'image', title: '图像 API', icon: Image }] },
-  ];
-
-  function selectSection(next: string) {
-    setSection(next); setKey(''); setError(''); setMessage('');
+  async function openKeyPage() {
+    if (!provider) return;
+    try {
+      await window.commerceDesktop?.invoke('openExternal', { url: provider.keyUrl });
+    } catch (reason) {
+      setSetupError(unexpectedSetupFailure(reason));
+    }
   }
-  const spinner = (name: string) => busy === name ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null;
 
-  return (
-    <div className="ai-settings-layout">
-      <nav className="ai-settings-rail" aria-label="AI 配置分类">
-        {sections.map(group => (
-          <div key={group.group}>
-            <p>{group.group}</p>
-            {group.items.map(({ id, title, icon: Icon }) => (
-              <Button key={id} variant={section === id ? 'secondary' : 'ghost'} aria-current={section === id ? 'page' : undefined} onClick={() => selectSection(id)}>
-                <Icon />{title}
-              </Button>
-            ))}
-          </div>
-        ))}
-      </nav>
-      <div className="ai-settings">
-        {error || status?.error ? <Alert variant="destructive"><AlertDescription>{error || status?.error}</AlertDescription></Alert> : null}
-        {message ? <Alert role="status"><CheckCircle2 /><AlertDescription>{message}</AlertDescription></Alert> : null}
+  async function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (operation.current || !address.trim() || (!key.trim() && !canReuseKey)) return;
+    operation.current = true;
+    setBusy(true);
+    clearFeedback();
+    try {
+      const result = await invoke<SetupResult>('setup', {
+        address: address.trim(),
+        ...(key.trim() ? { apiKey: key.trim() } : {}),
+        preferredModels: provider?.preferredModels ?? [],
+        ...(model.trim() ? { model: model.trim() } : {}),
+      });
+      if (!result.ok) {
+        setSetupError(result);
+        const available = (result.models ?? []).filter(item => isChatModel(item));
+        setRecoveryModels(available);
+        if (available.length) {
+          setModel('');
+          setAdvancedOpen(true);
+        }
+        return;
+      }
+      hydrate(result.status);
+    } catch (reason) {
+      setSetupError(unexpectedSetupFailure(reason));
+    } finally {
+      operation.current = false;
+      setBusy(false);
+    }
+  }
 
-        {section === 'overview' ? (
-          <section className="ai-overview" aria-label="配置概览">
-            <div className="ai-setup-steps">
-              {[
-                { number: 1, title: '接入文本服务', description: status?.address ? '已配置服务地址：' + status.address : '填写兼容 OpenAI 接口的本机服务地址与访问密钥。', button: '配置连接', action: () => selectSection('connection') },
-                { number: 2, title: '选择助手模型', description: status?.model ? '当前：' + status.model + (status.verified.includes(status.model) ? ' · 已验证' : ' · 未验证') : '完成验证后，助手才能调用工具。图片型号不能用作助手。', button: '选择模型', action: () => selectSection('model') },
-                { number: 3, title: '开始 AI 对话', description: '调用前展示插件及参数，确认后执行。', button: '打开对话', action: onOpenChat },
-              ].map(step => (
-                <div className="ai-setup-row" key={step.number}>
-                  <span>{step.number}</span>
-                  <div><h2>{step.title}</h2><p>{step.description}</p></div>
-                  <Button disabled={!step.action} onClick={step.action}>{step.button}<ArrowRight /></Button>
+  function changeService() {
+    clearFeedback();
+    setEditing(true);
+    setKey('');
+    setShowKey(false);
+    setAdvancedOpen(providerId === CUSTOM_PROVIDER_ID);
+  }
+
+  if (loading && !status) {
+    return <div className="ai-settings-loading" role="status"><LoaderCircle className="animate-spin" />正在读取 AI 设置…</div>;
+  }
+
+  if (loadError && !status) {
+    return <div className="ai-settings">
+      <Alert variant="destructive"><AlertCircle /><AlertDescription><strong>暂时无法读取 AI 设置</strong><p>原有设置不会因此被修改。请检查应用状态后重试。</p><Button variant="outline" size="sm" onClick={() => void loadStatus()}><RefreshCw data-icon="inline-start" />重新读取</Button></AlertDescription></Alert>
+    </div>;
+  }
+
+  return <div className="ai-settings ai-settings-wizard">
+    {status?.error || loadError ? <Alert variant="destructive"><AlertCircle /><AlertDescription><strong>{status?.error || loadError}</strong><Button variant="outline" size="sm" onClick={() => void loadStatus()}><RefreshCw data-icon="inline-start" />重新读取</Button></AlertDescription></Alert> : null}
+
+    {ready && !editing ? <>
+      <section className="ai-ready-card" aria-label="AI 助手状态">
+        <div className="ai-ready-mark"><CheckCircle2 /></div>
+        <div className="ai-ready-copy">
+          <span>已启用</span>
+          <h1>AI 助手已连接 {providerName}</h1>
+          <p>{friendlyModelName(status!.address, status!.model)}</p>
+        </div>
+        <div className="ai-ready-actions">
+          <Button disabled={!onOpenChat} onClick={onOpenChat}><MessageCircle data-icon="inline-start" />开始 AI 对话</Button>
+          <Button variant="outline" onClick={changeService}><SlidersHorizontal data-icon="inline-start" />更换服务</Button>
+        </div>
+      </section>
+
+      <Card id="ai-image" className="ai-image-entry">
+        <CardHeader>
+          <CardTitle role="heading" aria-level={2}><Image className="ai-section-icon" />图像编辑</CardTitle>
+          <CardDescription>需要处理或生成图片时，再单独配置图像服务。</CardDescription>
+          <CardAction><Button variant="outline" disabled={!imageAvailable} onClick={onOpenImage}>{imageAvailable ? '配置图像服务' : '需要安装 AI 批图'}</Button></CardAction>
+        </CardHeader>
+        {!imageAvailable ? <CardContent><p className="text-sm text-muted-foreground">安装并启用「AI 批图」后即可配置。</p></CardContent> : null}
+      </Card>
+    </> : <>
+      {partial ? <div className="ai-partial-note" role="status"><AlertCircle /><div><strong>已保存，尚未启用</strong><span>{status?.model ? `已选择 ${friendlyModelName(status.address, status.model)}，还需要完成连接验证。` : '还需要完成连接验证才能开始对话。'}</span></div></div> : null}
+
+      <section className="ai-provider-section" aria-labelledby="ai-provider-heading">
+        <div className="ai-wizard-heading">
+          <div><span>连接 AI 服务</span><h1 id="ai-provider-heading">选择一个服务商</h1><p>连接并验证成功后，就可以开始对话。</p></div>
+          <div className="ai-privacy-note"><KeyRound /><span>访问密钥只保存在本机</span></div>
+        </div>
+        <div className="ai-provider-grid" role="group" aria-label="服务商">
+          {AI_PROVIDERS.map(item => {
+            const Icon = providerIcons[item.id];
+            const selected = providerId === item.id;
+            return <button key={item.id} type="button" className="ai-provider-card" aria-pressed={selected} onClick={() => selectProvider(item.id)}>
+              <span className="ai-provider-icon"><Icon /></span>
+              <span className="ai-provider-copy"><strong>{item.name}</strong><small>{item.description}</small></span>
+              {selected ? <CheckCircle2 className="ai-provider-check" /> : null}
+            </button>;
+          })}
+          <button type="button" className="ai-provider-card is-custom" aria-pressed={providerId === CUSTOM_PROVIDER_ID} onClick={() => selectProvider(CUSTOM_PROVIDER_ID)}>
+            <span className="ai-provider-icon"><Server /></span>
+            <span className="ai-provider-copy"><strong>自定义服务</strong><small>连接其他 OpenAI 兼容服务</small></span>
+            {providerId === CUSTOM_PROVIDER_ID ? <CheckCircle2 className="ai-provider-check" /> : null}
+          </button>
+        </div>
+      </section>
+
+      <form onSubmit={event => void connect(event)}>
+        <Card className="ai-connect-card">
+          <CardHeader>
+            <CardTitle role="heading" aria-level={2}><ProviderIcon className="ai-section-icon" />连接 {providerName}</CardTitle>
+            <CardDescription>{provider ? `填写 ${provider.name} 的访问密钥，地址已经自动配置。` : '填写兼容 OpenAI 接口的服务地址和访问密钥。'}</CardDescription>
+            {provider ? <CardAction><Button type="button" variant="ghost" size="sm" onClick={() => void openKeyPage()}>如何获取<ExternalLink data-icon="inline-end" /></Button></CardAction> : null}
+          </CardHeader>
+          <CardContent className="ai-connect-content">
+            {setupError ? <Alert variant="destructive" className="ai-setup-error"><AlertCircle /><AlertDescription>
+              <strong>{setupError.message}</strong>
+              {recoveryModels.length ? <div className="ai-model-recovery">
+                <FieldLabel htmlFor="ai-recovery-model">可用模型</FieldLabel>
+                <select id="ai-recovery-model" className="ai-select" value={model} onChange={event => setModel(event.target.value)}>
+                  <option value="">请选择模型</option>
+                  {recoveryModels.map(item => <option key={item.id} value={item.id}>{item.title && item.title !== item.id ? `${item.title} · ${item.id}` : item.id}</option>)}
+                </select>
+                <span>选择后重新验证，不会自动改用其他模型。</span>
+              </div> : null}
+            </AlertDescription></Alert> : null}
+
+            <FieldGroup className="ai-key-field">
+              <Field>
+                <FieldLabel htmlFor="ai-access-key">访问密钥</FieldLabel>
+                <div className="ai-secret-field">
+                  <Input id="ai-access-key" type={showKey ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={key} disabled={busy} onChange={event => { setKey(event.target.value); clearFeedback(); }} placeholder={canReuseKey ? '留空继续使用已保存的密钥' : '粘贴访问密钥'} />
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={showKey ? '隐藏访问密钥' : '显示访问密钥'} title={showKey ? '隐藏访问密钥' : '显示访问密钥'} onClick={() => setShowKey(value => !value)}>{showKey ? <EyeOff /> : <Eye />}</Button>
                 </div>
-              ))}
+                <FieldDescription>{provider ? `在 ${provider.name} 控制台创建密钥后粘贴到这里。` : '使用服务提供的 OpenAI 兼容访问密钥。'}</FieldDescription>
+              </Field>
+            </FieldGroup>
+
+            <div className="ai-advanced">
+              <button type="button" className="ai-advanced-toggle" aria-expanded={advancedOpen || providerId === CUSTOM_PROVIDER_ID} onClick={() => setAdvancedOpen(value => !value)}>
+                <SlidersHorizontal />高级设置<ChevronDown className={advancedOpen || providerId === CUSTOM_PROVIDER_ID ? 'is-open' : ''} />
+              </button>
+              {advancedOpen || providerId === CUSTOM_PROVIDER_ID ? <div className="ai-advanced-fields">
+                <Field>
+                  <FieldLabel htmlFor="ai-address">服务地址</FieldLabel>
+                  <Input id="ai-address" value={address} disabled={busy} onChange={event => { setAddress(event.target.value); clearFeedback(); }} placeholder="https://your-service.example.com/v1" />
+                  <FieldDescription>支持 HTTPS；本机服务也可以使用 HTTP。</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="ai-model-override">指定模型（可选）</FieldLabel>
+                  <Input id="ai-model-override" value={model} disabled={busy} onChange={event => { setModel(event.target.value); clearFeedback(); }} placeholder="留空自动选择推荐模型" />
+                  <FieldDescription>只有需要使用特定模型时才填写。</FieldDescription>
+                </Field>
+              </div> : null}
             </div>
-            <div className="ai-image-band">
-              <Image />
-              <div><h2>图像编辑</h2><p>使用已接入的图片模型，或单独配置官方 API。</p></div>
-              <Button variant="outline" onClick={() => selectSection('image')}>配置图像 API<ArrowRight /></Button>
-            </div>
-          </section>
-        ) : null}
-
-        {section === 'image' ? (
-          <Card id="ai-image" className="ai-image-entry">
-            <CardHeader>
-              <CardTitle role="heading" aria-level={2}><Image className="ai-section-icon" />图像编辑 API</CardTitle>
-              <CardDescription>批图可以直接使用已接入的图片模型，也可以单独配置官方 API。</CardDescription>
-              <CardAction><Button disabled={!imageAvailable} onClick={onOpenImage}>配置图像 API<ArrowRight data-icon="inline-end" /></Button></CardAction>
-            </CardHeader>
-            {!imageAvailable ? <CardContent><p className="text-sm text-muted-foreground">请先安装并启用「AI 批图」插件，再来配置。</p></CardContent> : null}
-            <CardContent><p className="text-sm text-muted-foreground">能否用于图片编辑，取决于所选模型和账户权限。选择图片模型不会改变默认助手模型。</p></CardContent>
-          </Card>
-        ) : null}
-
-        {section === 'connection' ? (
-          <Card id="ai-connection">
-            <CardHeader>
-              <CardTitle role="heading" aria-level={2}><Server className="ai-section-icon" />助手连接方式</CardTitle>
-              <CardDescription>填写兼容 OpenAI 接口的本机服务地址，保存后可在「默认模型」中验证。</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <FieldGroup className="ai-connection-fields">
-                <Field>
-                  <FieldLabel htmlFor="ai-address">代理地址</FieldLabel>
-                  <Input id="ai-address" disabled={disabled} value={address} onChange={event => setAddress(event.target.value)} placeholder="http://127.0.0.1:8317" />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="ai-access-key">代理访问密钥</FieldLabel>
-                  <Input id="ai-access-key" disabled={disabled} type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder="留空保留已有密钥" />
-                </Field>
-              </FieldGroup>
-              <p className="text-sm text-muted-foreground">只支持本机地址，需使用 HTTP 或 HTTPS。</p>
-              {connectionChanged ? <p role="status" className="text-sm text-muted-foreground">连接方式尚未应用。请先保存，再获取模型。</p> : null}
-            </CardContent>
-            <CardFooter className="ai-actions">
-              <Button disabled={disabled} onClick={() => void action('configure', configure, '连接设置已保存')}>{spinner('configure')}保存连接设置</Button>
-              <Button variant="outline" disabled={disabled || connectionChanged} onClick={() => selectSection('model')}>下一步：选择模型<ArrowRight /></Button>
-            </CardFooter>
-          </Card>
-        ) : null}
-
-        {section === 'model' ? (
-          <Card id="ai-assistant-model">
-            <CardHeader>
-              <CardTitle role="heading" aria-level={2}>默认助手模型</CardTitle>
-              <CardDescription>先保存连接设置，再获取可用模型。</CardDescription>
-              <CardAction><Badge variant="secondary">{verified ? '已通过工具调用验证' : '尚未验证'}</Badge></CardAction>
-            </CardHeader>
-            <CardContent>
-              <FieldGroup className="ai-model-fields">
-                <Field>
-                  <FieldLabel htmlFor="ai-model">助手型号</FieldLabel>
-                  <select id="ai-model" className="ai-select" disabled={disabled || connectionChanged} value={model} onChange={event => setModel(event.target.value)}>
-                    <option value="">{models.length ? '请选择模型' : '先点击「获取模型」'}</option>
-                    {model && !models.some(item => item.id === model) ? <option value={model}>{model}</option> : null}
-                    {models.map(item => (
-                      <option key={item.id} value={item.id} disabled={/gpt[-_]?image|nano[-_ ]?banana|image[-_]?generation/i.test(item.id)}>
-                        {item.id}
-                      </option>
-                    ))}
-                  </select>
-                  <FieldDescription>这里只列出可以用作助手的文本模型。</FieldDescription>
-                </Field>
-                <Button variant="outline" disabled={disabled || connectionChanged} onClick={() => void action('models', async () => setModels(await invoke<{ id: string }[]>('models')), '模型列表已刷新')}>
-                  {spinner('models')}获取模型
-                </Button>
-              </FieldGroup>
-              {imageModel ? <Alert variant="destructive"><AlertDescription>当前选择的是图像模型，不能用作 AI 助手。请改选一个文本模型，当前选择不会被自动替换。</AlertDescription></Alert> : null}
-            </CardContent>
-            <CardFooter className="ai-actions">
-              <Button disabled={disabled || connectionChanged || !model || imageModel} onClick={() => void action('model', configure, '默认助手模型已保存')}>
-                {spinner('model')}保存默认模型
-              </Button>
-              <Button variant="outline" disabled={disabled || connectionChanged || !model || imageModel} onClick={() => {
-                if (window.confirm('验证会向 ' + model + ' 发送一次简短的文本请求，可能按提供商规则计费。是否继续？')) {
-                  void action('verify', async () => { await configure(); await invoke('verify'); }, '模型连接及工具调用验证通过');
-                }
-              }}>
-                {spinner('verify')}验证连接与工具调用
-              </Button>
-              <p className="text-sm text-muted-foreground">验证只请求文本，不生成图片。</p>
-            </CardFooter>
-            <CardFooter>
-              <Button variant="ghost" onClick={onOpenChat}><MessageCircle />打开 AI 对话</Button>
-            </CardFooter>
-          </Card>
-        ) : null}
-      </div>
-    </div>
-  );
+          </CardContent>
+          <CardFooter className="ai-connect-actions">
+            <Button type="submit" disabled={busy || !address.trim() || (!key.trim() && !canReuseKey)}>
+              {busy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
+              {busy ? '正在连接…' : setupError ? '重新验证' : partial ? '完成启用' : '连接并启用'}
+            </Button>
+            {ready && editing ? <Button type="button" variant="ghost" disabled={busy} onClick={() => { setEditing(false); clearFeedback(); }}>取消</Button> : null}
+            <p>连接时会发送一次测试消息，可能产生少量费用。</p>
+          </CardFooter>
+        </Card>
+      </form>
+    </>}
+  </div>;
 }
