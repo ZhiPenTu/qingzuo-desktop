@@ -45,6 +45,7 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
+async function openToolTab(name: '已安装' | '全部') { fireEvent.click(await screen.findByRole('tab', { name })); }
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -54,42 +55,63 @@ afterEach(() => {
   delete window.commerceDesktop;
 });
 
-it('keeps backend progress after acknowledgment, restores it across pages, and completes on the installed state', async () => {
+it('merges installed tools and the catalog into one page with two tabs', async () => {
+  fixture();
+  render(<Platform />);
+  await screen.findByRole('heading', { name: '工具中心' });
+
+  expect(screen.queryByRole('button', { name: '插件市场' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '插件管理' })).toBeNull();
+  expect(screen.getByRole('tablist', { name: '工具视图' }).querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(screen.getByRole('tab', { name: '已安装' }).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('button', { name: '管理' })).toBeTruthy();
+
+  await openToolTab('全部');
+  expect(screen.getByRole('tab', { name: '全部' }).getAttribute('aria-selected')).toBe('true');
+  expect(await screen.findByRole('button', { name: '导入插件' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'LabelEdit' })).toBeTruthy();
+
+  await openToolTab('已安装');
+  expect(screen.getByRole('tab', { name: '已安装' }).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('button', { name: '管理' })).toBeTruthy();
+});
+
+it('keeps backend progress after acknowledgment, restores it across tabs, and completes on the installed state', async () => {
   const { invoke, emit } = fixture();
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
-  await navigate('插件市场');
+  await openToolTab('全部');
   fireEvent.click(await screen.findByRole('button', { name: '更新插件' }));
   fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
   await screen.findByText('正在下载新版本… 40%');
   expect(screen.getByRole('button', { name: '更新插件' }).hasAttribute('disabled')).toBe(true);
   expect(invoke.mock.calls.filter(([method]) => method === 'market.install')).toHaveLength(1);
   await waitFor(() => expect(screen.getByRole('button', { name: '导入插件' }).hasAttribute('disabled')).toBe(false));
-  await navigate('工具中心');
+  await openToolTab('已安装');
   await screen.findByText('正在下载新版本… 40%');
   expect(screen.getByRole('button', { name: '打开工具' }).hasAttribute('disabled')).toBe(true);
-  await navigate('插件管理');
-  await screen.findByText('正在下载新版本… 40%');
-  expect(screen.getByRole('button', { name: '卸载' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '管理' }).hasAttribute('disabled')).toBe(true);
   emit(job('verifying')); await screen.findByText('正在校验插件签名…');
   emit(job('installing')); await screen.findByText('正在安装新版本…');
   emit(job('syncing')); await screen.findByText('正在刷新工具…');
-  await navigate('插件市场');
+  await openToolTab('全部');
   await screen.findByText('正在刷新工具…');
   emit(job('installed', { progress: 100 }), [{ ...installed, version: entry.version }]);
   await screen.findByText('安装完成 · v0.2.0');
   expect(screen.getByRole('button', { name: '已安装' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByRole('progressbar')).toBeNull();
-  await navigate('工具中心');
+  await openToolTab('已安装');
   await screen.findByText('v0.2.0');
   expect(screen.getByText('已启用')).toBeTruthy();
   expect(screen.getByText('市场安装')).toBeTruthy();
   expect(screen.getByRole('button', { name: '打开工具' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '管理' }));
+  expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
   emit(job('installed', { progress: 100 }), [installed]);
   await screen.findByText('v0.1.0');
   expect(screen.queryByText('安装完成 · v0.2.0')).toBeNull();
   emit(job('installed', { progress: 100 }), []);
-  await navigate('插件市场');
+  await openToolTab('全部');
   await screen.findByRole('button', { name: '安装插件' });
   expect(screen.queryByText('安装完成 · v0.2.0')).toBeNull();
 });
@@ -98,7 +120,7 @@ it('restores an existing background installation and retries its specific error'
   const { invoke, emit } = fixture(job('downloading', { progress: null, transferred: 1024 ** 2 }), false);
   render(<Platform />);
   await screen.findByText('工具服务已就绪');
-  await navigate('插件市场');
+  await openToolTab('全部');
   await screen.findByText('正在下载插件…');
   expect(screen.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(false);
   expect(screen.getByText('1.0 MB')).toBeTruthy();
@@ -191,12 +213,11 @@ it('shows the app version and routes every runtime check to app updates', async 
   await waitFor(() => expect(sourceSelect.value).toBe('github'));
 });
 
-it('checks plugin versions on demand and offers the update from management', async () => {
+it('checks plugin versions on demand and offers the update from installed tools', async () => {
   const { invoke } = fixture();
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
-  await navigate('插件管理');
-  await screen.findByRole('heading', { name: '插件管理' });
+  await screen.findByRole('heading', { name: '工具中心' });
   expect(screen.getByText('检查插件是否有新版本')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '检查插件更新' }));
   await screen.findByText('发现 1 个插件更新');
@@ -213,8 +234,7 @@ it('strips Electron IPC remote-method prefixes and translates raw ADM-ZIP import
     return baseImpl(method);
   });
   render(<Platform />);
-  fireEvent.click(await screen.findByRole('button', { name: '插件市场' }));
-  await screen.findByRole('heading', { name: '插件市场' });
+  await openToolTab('全部');
   fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('插件包格式无效或文件未下载完整');
@@ -382,7 +402,7 @@ it('opens the browser in a right-side pane with independent left and right contr
   expect(sidebar?.classList.contains('is-collapsed')).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: '隐藏浏览器面板' }));
-  await screen.findByRole('heading', { name: '让日常工作，轻一点。' });
+  await screen.findByRole('heading', { name: '工具中心' });
   expect(document.querySelector('.commerce-sidebar')).toBeTruthy();
   expect(invoke.mock.calls.some(([method]) => method === 'browser.open')).toBe(true);
   expect(invoke.mock.calls.some(([method]) => method === 'browser.hide')).toBe(true);
@@ -413,8 +433,7 @@ it('shows feedback action on error alert and opens issue reporting dialog', asyn
     return baseImpl(method, args);
   });
   render(<Platform />);
-  fireEvent.click(await screen.findByRole('button', { name: '插件市场' }));
-  await screen.findByRole('heading', { name: '插件市场' });
+  await openToolTab('全部');
   fireEvent.click(await screen.findByRole('button', { name: '导入插件' }));
   const feedbackBtn = await screen.findByRole('button', { name: '反馈此问题' });
   expect(feedbackBtn).toBeTruthy();

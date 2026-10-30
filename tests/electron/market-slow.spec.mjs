@@ -74,7 +74,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     }, moduleURL);
 
     const second = await signedFixture('0.2.0', privateKey); await fixtureFetch(app, second, 34000);
-    await page.getByRole('button', { name: '插件市场', exact: true }).click();
+    await page.getByRole('tab', { name: '全部', exact: true }).click();
     const marketCard = cardFor(page); await expect(marketCard.getByRole('button', { name: '更新插件', exact: true })).toBeVisible();
     const acknowledged = await page.evaluate(async id => {
       const started = performance.now(), value = await window.commerceDesktop.invoke('market.install', { id });
@@ -97,14 +97,12 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     }, id);
     expect(mutationErrors).toHaveLength(4); expect(mutationErrors.every(error => error.includes('正在安装或更新'))).toBe(true);
 
-    await page.getByRole('button', { name: '插件管理', exact: true }).click();
-    const managementCard = cardFor(page); await expect(managementCard.getByRole('status')).toContainText('正在下载新版本');
-    await expect(managementCard.getByRole('button', { name: '停用', exact: true })).toBeDisabled();
-    await expect(managementCard.getByRole('button', { name: '卸载', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: '工具中心', exact: true }).click();
+    await page.getByRole('tab', { name: '已安装', exact: true }).click();
+    await expect(cardFor(page).getByRole('status')).toContainText('正在下载新版本');
+    await expect(cardFor(page).getByRole('button', { name: '管理', exact: true })).toBeDisabled();
     await expect(cardFor(page).getByRole('status')).toContainText('正在下载新版本');
     await expect(cardFor(page).getByRole('button', { name: '打开工具', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: '插件市场', exact: true }).click();
+    await page.getByRole('tab', { name: '全部', exact: true }).click();
     await expect(marketCard.getByRole('status')).toContainText('正在下载新版本');
     await page.screenshot({ path: path.join(screenshotDirectory, 'slow-download.png'), fullPage: false });
 
@@ -124,14 +122,14 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     }, moduleURL);
     expect(sameHost.pid).toBe(hostPid); expect(sameHost.pending).toBe(0); expect(sameHost.state.find(job => job.id === id).status).toBe('installed');
     await page.screenshot({ path: path.join(screenshotDirectory, 'installed.png'), fullPage: false });
-    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'))).toBe(true);
     const pluginPage = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'));
     await pluginPage.getByRole('button', { name: '验证新服务', exact: true }).click();
     await expect(pluginPage.getByRole('status')).toHaveText('v0.2.0 · 新版本服务已同步');
 
     const bad = await signedFixture('0.3.0', privateKey, true); await fixtureFetch(app, bad);
-    await page.getByRole('button', { name: '插件市场', exact: true }).click(); await marketCard.getByRole('button', { name: '更新插件', exact: true }).click();
+    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '全部', exact: true }).click(); await marketCard.getByRole('button', { name: '更新插件', exact: true }).click();
     await expect(marketCard.getByRole('alert')).toContainText('插件签名无效。'); await expect(marketCard.getByRole('button', { name: '重试更新', exact: true })).toBeEnabled();
     expect((await status(page)).plugins.find(plugin => plugin.id === id).version).toBe('0.2.0');
     await page.screenshot({ path: path.join(screenshotDirectory, 'signature-error.png'), fullPage: false });
@@ -144,8 +142,8 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     // Fail only after the new version is durably committed. Recovery must retry
     // reconciliation, not download/reinstall the same market version again.
     const fourth = await signedFixture('0.4.0', privateKey); await fixtureFetch(app, fourth);
-    await page.getByRole('button', { name: '工具中心', exact: true }).click();
-    await page.getByRole('button', { name: '插件市场', exact: true }).click();
+    await page.getByRole('tab', { name: '已安装', exact: true }).click();
+    await page.getByRole('tab', { name: '全部', exact: true }).click();
     await expect(marketCard.getByRole('button', { name: '更新插件', exact: true })).toBeVisible();
     await app.evaluate(async (_, url) => {
       const vm = process.getBuiltinModule('node:vm'), runtime = await vm.runInThisContext('import(' + JSON.stringify(url) + ')', { importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER });
@@ -166,7 +164,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     await expect(marketCard.getByRole('status')).toContainText('安装完成 · v0.4.0');
     expect(await app.evaluate(() => globalThis.__marketSlow.downloads.filter(download => download.version === '0.4.0').length)).toBe(1);
     await page.screenshot({ path: path.join(screenshotDirectory, 'sync-retried.png'), fullPage: false });
-    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.getByRole('button', { name: '工具中心', exact: true }).click(); await page.getByRole('tab', { name: '已安装', exact: true }).click(); await cardFor(page).getByRole('button', { name: '打开工具', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'))).toBe(true);
     const recoveredPlugin = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + id + '/'));
     await recoveredPlugin.getByRole('button', { name: '验证新服务', exact: true }).click();
