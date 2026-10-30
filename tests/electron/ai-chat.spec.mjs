@@ -18,6 +18,12 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
   let round = 0; const requests = [];
   const server = createServer(async (request, response) => {
     let input = ''; for await (const bytes of request) input += bytes;
+    const url = new URL(request.url, 'http://127.0.0.1');
+    if (request.method === 'GET' && url.pathname === '/v1/models') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ data: [{ id: 'gpt-image-2.5', type: 'image' }, { id: 'fixture-tool-model', display_name: 'Fixture Tool Model' }] }));
+      return;
+    }
     const body = JSON.parse(input); requests.push(body);
     if (!body.stream) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] })); return; }
     round++; response.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -36,12 +42,45 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     let page = await launch();
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
-    await page.evaluate(async address => { await window.commerceDesktop.invoke('ai.configure', { mode: 'external', address, apiKey: 'fixture', model: 'fixture-tool-model' }); await window.commerceDesktop.invoke('ai.verify'); }, 'http://127.0.0.1:' + server.address().port);
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '打开 AI 设置', exact: true }).click();
-    await expect(page.getByLabel('配置概览', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '选择一个服务商', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '共享图像能力', exact: true })).toBeVisible();
+    await expect(page.getByText('AI 批图', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '配置共享密钥', exact: true }).click();
+    const googleImageRow = page.locator('.ai-image-key-row').filter({ has: page.getByLabel('Google 官方访问密钥', { exact: true }) });
+    await page.getByLabel('Google 官方访问密钥', { exact: true }).fill('fixture-google-image');
+    await googleImageRow.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.locator('.ai-image-provider-row').filter({ hasText: 'Google 官方' })).toContainText('已配置');
+    expect((await page.evaluate(() => window.commerceDesktop.invoke('ai.imageStatus'))).google).toMatchObject({ configured: true, source: 'dedicated' });
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '共享图像能力.png') });
+    await googleImageRow.getByRole('button', { name: '清除', exact: true }).click();
+    await expect(page.locator('.ai-image-provider-row').filter({ hasText: 'Google 官方' })).toContainText('未配置');
+    await page.getByRole('button', { name: /自定义服务/ }).click();
+    await page.getByLabel('服务地址', { exact: true }).fill('http://127.0.0.1:' + server.address().port);
+    await page.getByLabel('访问密钥', { exact: true }).fill('fixture');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setMinimumSize(1, 1));
+    for (const [width, height] of [[1440, 900], [1280, 720], [700, 900], [390, 844]]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size[0], size[1]), [width, height]);
+      await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置连接向导.png') });
+    await page.getByRole('button', { name: '连接并启用', exact: true }).click();
+    await expect(page.getByLabel('AI 助手状态', { exact: true })).toBeVisible();
+    await expect(page.getByText('AI 助手已连接 自定义服务', { exact: true })).toBeVisible();
+    await expect(page.getByText('fixture-tool-model', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
+    for (const [width, height] of [[1440, 900], [1280, 720], [700, 900], [390, 844]]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size[0], size[1]), [width, height]);
+      await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      const geometry = await page.evaluate(() => ({ width: window.innerWidth, documentWidth: document.documentElement.scrollWidth }));
+      expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.width);
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
     await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
     await expect(page.locator('.commerce-heading')).toHaveCount(0); await expect(page.locator('.commerce-topbar')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '今天，想让工作轻一点？' })).toBeVisible();

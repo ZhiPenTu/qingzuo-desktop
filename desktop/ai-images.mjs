@@ -1,5 +1,9 @@
 import { secureRequest } from './network-transport.mjs';
 
+const IMAGE_PROVIDERS = Object.freeze(['google', 'openai']);
+const IMAGE_CREDENTIAL = Object.freeze({ google: 'google-image', openai: 'openai-image' });
+const LEGACY_IMAGE_PLUGIN = 'official.ai-image';
+
 export const imageModels = Object.freeze([
   { id: 'gemini-nano-banana-2.1', provider: 'google', title: 'Nano Banana 2.1', sizes: ['1K', '2K', '4K'], ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'] },
   { id: 'gemini-3-pro-image', provider: 'google', title: 'Nano Banana Pro', sizes: ['1K', '2K', '4K'], ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'] },
@@ -54,9 +58,62 @@ export class ImageEditor {
   assert(plugin) {
     if (!plugin.permissions.ai?.includes('image-edit')) throw new Error('图像编辑未授权。');
   }
+  async credential(owner, name) {
+    return this.credentials.get(owner, name).catch(() => null);
+  }
+  inheritsOpenAIKey() {
+    if (!this.proxy) return false;
+    try { return new URL(this.proxy.settings.address).origin === 'https://api.openai.com'; }
+    catch { return false; }
+  }
+  async sharedCredential(provider, { externalKey } = {}) {
+    if (!IMAGE_PROVIDERS.includes(provider)) throw new Error('图像服务无效。');
+    const name = IMAGE_CREDENTIAL[provider];
+    const dedicated = await this.credential('system.ai', name);
+    if (dedicated) return { value: dedicated, source: 'dedicated' };
+    if (provider === 'openai' && this.inheritsOpenAIKey()) {
+      const inherited = externalKey === undefined ? await this.credential('system.ai', 'external') : externalKey;
+      if (inherited) return { value: inherited, source: 'inherited' };
+    }
+    const legacy = await this.credential(LEGACY_IMAGE_PLUGIN, name);
+    return legacy ? { value: legacy, source: 'legacy' } : { value: null, source: 'none' };
+  }
+  async sharedKey(provider, migrateLegacy = false) {
+    const shared = await this.sharedCredential(provider);
+    if (migrateLegacy && shared.source === 'legacy') {
+      try {
+        await this.credentials.set('system.ai', IMAGE_CREDENTIAL[provider], shared.value);
+        await this.credentials.clear(LEGACY_IMAGE_PLUGIN, IMAGE_CREDENTIAL[provider]);
+      } catch { /* The legacy key remains usable if migration cannot be completed. */ }
+    }
+    return shared.value;
+  }
+  async sharedStatus() {
+    const externalKey = await this.credential('system.ai', 'external');
+    const entries = await Promise.all(IMAGE_PROVIDERS.map(async provider => {
+      const shared = await this.sharedCredential(provider, { externalKey });
+      return [provider, { configured: Boolean(shared.value), source: shared.source }];
+    }));
+    return { ...Object.fromEntries(entries), proxy: { configured: Boolean(externalKey) } };
+  }
+  async configureShared({ provider, apiKey, clear = false } = {}) {
+    if (!IMAGE_PROVIDERS.includes(provider)) throw new Error('图像服务无效。');
+    if (clear) {
+      await this.credentials.clear('system.ai', IMAGE_CREDENTIAL[provider]);
+      await this.credentials.clear(LEGACY_IMAGE_PLUGIN, IMAGE_CREDENTIAL[provider]).catch(() => {});
+    }
+    else {
+      if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 4096) throw new Error('访问密钥格式无效。');
+      await this.credentials.set('system.ai', IMAGE_CREDENTIAL[provider], apiKey.trim());
+    }
+    return this.sharedStatus();
+  }
   async models(plugin, { source = 'official' } = {}) {
     this.assert(plugin);
-    if (source === 'official') return imageModels.map(model => ({ ...model, source }));
+    if (source === 'official') {
+      const available = Object.fromEntries(await Promise.all(IMAGE_PROVIDERS.map(async provider => [provider, Boolean(await this.sharedKey(provider))])));
+      return imageModels.filter(model => available[model.provider]).map(model => ({ ...model, source }));
+    }
     if (source !== 'proxy' || !this.proxy) throw new Error('图像来源无效或代理不可用。');
     return proxyImageModels(await this.proxy.catalog());
   }
@@ -83,13 +140,12 @@ export class ImageEditor {
     await this.assertSelection(plugin, selection);
     const proxied = model.source === 'proxy';
     const origin = model.provider === 'google' ? 'https://generativelanguage.googleapis.com' : 'https://api.openai.com';
-    const credential = model.provider + '-image';
-    if (!proxied && (!plugin.permissions.network?.includes(origin) || !plugin.permissions.credentials?.includes(credential))) throw new Error('图像服务未授权。');
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000 || bytes.length > 25 * 1024 ** 2 || imageMime(bytes) !== mime) throw new Error('原图或提示词无效。');
     signal?.throwIfAborted();
     const connection = proxied ? await this.proxy.imageConnection() : null;
     if (proxied && connection.id !== selection.connectionId) throw new Error('代理图像服务连接已改变，请重新准备批次并确认。');
-    const secret = connection?.key || await this.credentials.get(plugin.id, credential); if (!secret) throw new Error('请先配置 ' + model.provider + ' 图像 API Key。');
+    const secret = connection?.key || await this.sharedKey(model.provider, true);
+    if (!secret) throw new Error('请先在轻作「AI 设置」中配置共享图像服务。');
     let url, body, headers;
     if (model.provider === 'google') {
       url = (proxied ? '/v1beta/models/' : origin + '/v1/models/') + encodeURIComponent(model.id) + ':generateContent';

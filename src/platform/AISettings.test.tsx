@@ -2,14 +2,42 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import { AISettings } from './AISettings';
 
-function mockDesktop(model = '') {
-  let status = { mode: 'external', address: 'http://127.0.0.1:8317', model, running: true, verified: [] as string[], error: null };
+interface MockStatus {
+  mode: string;
+  address: string;
+  model: string;
+  running: boolean;
+  verified: string[];
+  ready?: boolean;
+  error: string | null;
+}
+
+const unconfigured: MockStatus = { mode: 'external', address: 'http://127.0.0.1:8317', model: '', running: true, verified: [], error: null };
+const enabled: MockStatus = { mode: 'external', address: 'https://api.deepseek.com', model: 'deepseek-flash', running: true, verified: ['deepseek-flash'], ready: true, error: null };
+const unconfiguredImages = {
+  google: { configured: false, source: 'none' },
+  openai: { configured: false, source: 'none' },
+  proxy: { configured: false },
+};
+
+function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
+  let status = structuredClone(options.status ?? unconfigured);
+  let imageStatus = structuredClone(options.imageStatus ?? unconfiguredImages);
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>): Promise<unknown> => {
-    if (method === 'ai.status') return { ...status };
-    if (method === 'ai.configure') { status = { ...status, ...args }; return { ...status }; }
-    if (method === 'ai.models') return [{ id: 'fixture-model' }, { id: 'gpt-image-2.5' }];
-    if (method === 'ai.verify') { status.verified = [status.model]; return status; }
-    return { saved: true };
+    if (method === 'ai.status') return structuredClone(status);
+    if (method === 'ai.setup') {
+      if (options.setup) return options.setup(args ?? {});
+      status = { ...enabled, address: String(args?.address ?? enabled.address), model: String(args?.model || 'deepseek-flash'), verified: [String(args?.model || 'deepseek-flash')] };
+      return { ok: true, status: structuredClone(status) };
+    }
+    if (method === 'ai.imageStatus') return structuredClone(imageStatus);
+    if (method === 'ai.configureImage') {
+      if (options.configureImage) return options.configureImage(args ?? {});
+      imageStatus = { ...imageStatus, [String(args?.provider)]: { configured: true, source: 'dedicated' } };
+      return structuredClone(imageStatus);
+    }
+    if (method === 'openExternal') return true;
+    throw new Error('unexpected method ' + method);
   });
   window.commerceDesktop = { invoke, onChanged: () => () => {} } as NonNullable<Window['commerceDesktop']>;
   return invoke;
@@ -17,69 +45,170 @@ function mockDesktop(model = '') {
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); delete window.commerceDesktop; });
 
-it('starts with hierarchy and only shows the selected configuration level', async () => {
-  mockDesktop(); const onOpenChat = vi.fn(), onOpenImage = vi.fn();
-  render(<AISettings imageAvailable onOpenImage={onOpenImage} onOpenChat={onOpenChat} />);
-  expect(screen.getByLabelText('配置概览')).toBeTruthy();
-  expect(screen.queryByLabelText('代理访问密钥')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '打开对话' })); expect(onOpenChat).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '图像 API' }));
-  fireEvent.click(screen.getByRole('button', { name: '配置图像 API' })); expect(onOpenImage).toHaveBeenCalledOnce();
-});
-
-it('offers only the external proxy connection and exposes no account, or provider surface', async () => {
+it('starts on a single-page provider wizard without the old configuration hierarchy', async () => {
   mockDesktop(); render(<AISettings />);
-  for (const removed of ['账户与 API', '轻作内置管理', ' 登录', 'API Key 接入', '启动代理', '停止代理', '检查代理更新']) {
-    expect(screen.queryByRole('button', { name: removed })).toBeNull();
-    expect(screen.queryByText(removed)).toBeNull();
-  }
-  fireEvent.click(screen.getByRole('button', { name: '代理连接' }));
-  await screen.findByLabelText('代理地址');
-  expect(screen.getByLabelText('代理访问密钥')).toBeTruthy();
+  await screen.findByRole('heading', { name: '选择一个服务商' });
+  expect(screen.getByRole('button', { name: /DeepSeek/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: /^OpenAI/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /硅基流动/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /自定义服务/ })).toBeTruthy();
+  expect(screen.getByLabelText('访问密钥')).toBeTruthy();
+  expect(screen.queryByText('配置概览')).toBeNull();
+  expect(screen.queryByRole('button', { name: '代理连接' })).toBeNull();
+  expect(screen.queryByLabelText('AI 助手状态')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '图像编辑' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '共享图像能力' })).toBeTruthy();
+  expect(screen.queryByText(/AI 批图/)).toBeNull();
 });
 
-it('configures external connection with address and key and saves on demand', async () => {
+it('shows the key on demand and opens the provider key page', async () => {
   const invoke = mockDesktop(); render(<AISettings />);
-  fireEvent.click(screen.getByRole('button', { name: '代理连接' }));
-  await screen.findByDisplayValue('http://127.0.0.1:8317');
-  fireEvent.change(screen.getByLabelText('代理地址'), { target: { value: 'https://api.deepseek.com' } });
-  fireEvent.change(screen.getByLabelText('代理访问密钥'), { target: { value: 'sk-secret' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存连接设置' }));
-  await screen.findByText('连接设置已保存');
-  expect(invoke).toHaveBeenCalledWith('ai.configure', { mode: 'external', address: 'https://api.deepseek.com', model: '', apiKey: 'sk-secret' });
+  const key = await screen.findByLabelText('访问密钥') as HTMLInputElement;
+  expect(key.type).toBe('password');
+  fireEvent.change(key, { target: { value: 'sk-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '显示访问密钥' }));
+  expect(key.type).toBe('text');
+  fireEvent.click(screen.getByRole('button', { name: '隐藏访问密钥' }));
+  expect(key.type).toBe('password');
+  fireEvent.click(screen.getByRole('button', { name: '如何获取' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('openExternal', { url: 'https://platform.deepseek.com/api_keys' }));
 });
 
-it('requires explicit saving to apply address and key changes', async () => {
+it('connects and enables the assistant with one action using the provider recommendation', async () => {
+  const invoke = mockDesktop(); const onOpenChat = vi.fn();
+  render(<AISettings onOpenChat={onOpenChat} />);
+  fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
+  await screen.findByLabelText('AI 助手状态');
+  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://api.deepseek.com', apiKey: 'sk-secret', preferredModels: ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-chat'] });
+  expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
+  expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '开始 AI 对话' }));
+  expect(onOpenChat).toHaveBeenCalledOnce();
+});
+
+it('configures shared image credentials without naming a plugin', async () => {
   const invoke = mockDesktop(); render(<AISettings />);
-  fireEvent.click(screen.getByRole('button', { name: '代理连接' }));
-  await screen.findByDisplayValue('http://127.0.0.1:8317');
-  fireEvent.change(screen.getByLabelText('代理地址'), { target: { value: 'http://127.0.0.1:9000' } });
-  expect(screen.getByRole('status').textContent).toContain('连接方式尚未应用');
-  expect(invoke.mock.calls.some(([method]) => method === 'ai.configure')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '保存连接设置' }));
-  await screen.findByText('连接设置已保存');
-  expect(invoke).toHaveBeenCalledWith('ai.configure', expect.objectContaining({ address: 'http://127.0.0.1:9000' }));
+  await screen.findByRole('heading', { name: '共享图像能力' });
+  expect(screen.getByText('兼容服务').closest('.ai-image-provider-row')?.textContent).toContain('未配置');
+  fireEvent.click(screen.getByRole('button', { name: '配置共享密钥' }));
+  const key = await screen.findByLabelText('Google 官方访问密钥') as HTMLInputElement;
+  expect(key.type).toBe('password');
+  fireEvent.change(key, { target: { value: 'image-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '显示Google 官方访问密钥' }));
+  expect(key.type).toBe('text');
+  fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0]);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.configureImage', { provider: 'google', apiKey: 'image-secret' }));
+  await screen.findByText('已配置');
+  expect(screen.queryByText(/AI 批图/)).toBeNull();
 });
 
-it('does not replace an existing image-model selection silently', async () => {
-  const invoke = mockDesktop('gpt-image-2.5'); render(<AISettings />);
-  fireEvent.click(screen.getByRole('button', { name: '默认模型' }));
-  await screen.findByText(/当前选择的是图像模型/);
-  expect((screen.getByLabelText('助手型号') as HTMLSelectElement).value).toBe('gpt-image-2.5');
-  expect(screen.getByRole('button', { name: '验证连接与工具调用' }).hasAttribute('disabled')).toBe(true);
-  expect(invoke.mock.calls.some(([method]) => method === 'ai.configure')).toBe(false);
+it('shows a shared compatible connection and lets an old image key be cleared', async () => {
+  const invoke = mockDesktop({
+    imageStatus: {
+      google: { configured: true, source: 'legacy' },
+      openai: { configured: true, source: 'inherited' },
+      proxy: { configured: true },
+    },
+    configureImage: () => ({
+      google: { configured: false, source: 'none' },
+      openai: { configured: true, source: 'inherited' },
+      proxy: { configured: true },
+    }),
+  });
+  render(<AISettings />);
+  await waitFor(() => expect(screen.getByText('兼容服务').closest('.ai-image-provider-row')?.textContent).toContain('已配置'));
+  expect(screen.getByText('正在使用旧版保存的密钥')).toBeTruthy();
+  expect(screen.getByText('沿用上方连接')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '配置共享密钥' }));
+  fireEvent.click(screen.getByRole('button', { name: '清除' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.configureImage', { provider: 'google', clear: true }));
 });
 
-it('confirms paid connection tests and never tests greyed image models', async () => {
-  const invoke = mockDesktop(), confirm = vi.spyOn(window, 'confirm').mockReturnValue(false); render(<AISettings />);
-  fireEvent.click(screen.getByRole('button', { name: '默认模型' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '获取模型' }).hasAttribute('disabled')).toBe(false));
-  fireEvent.click(screen.getByRole('button', { name: '获取模型' })); await screen.findByRole('option', { name: 'fixture-model' });
-  expect(screen.getByRole('option', { name: 'gpt-image-2.5' }).hasAttribute('disabled')).toBe(true);
-  fireEvent.change(screen.getByLabelText('助手型号'), { target: { value: 'fixture-model' } });
-  fireEvent.click(screen.getByRole('button', { name: '验证连接与工具调用' })); expect(confirm).toHaveBeenCalledOnce();
-  expect(invoke.mock.calls.some(([method]) => method === 'ai.verify')).toBe(false);
-  confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: '验证连接与工具调用' }));
-  await screen.findByText('模型连接及工具调用验证通过');
-  expect(invoke.mock.calls.filter(([method]) => method === 'ai.verify')).toHaveLength(1);
+it('shows a concise enabled state and lets the user replace the service', async () => {
+  mockDesktop({ status: enabled }); render(<AISettings />);
+  await screen.findByLabelText('AI 助手状态');
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '开始 AI 对话' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '更换服务' }));
+  await screen.findByRole('heading', { name: '选择一个服务商' });
+  expect((screen.getByLabelText('访问密钥') as HTMLInputElement).placeholder).toContain('留空继续使用已保存的密钥');
+  expect(screen.getByRole('button', { name: '连接并启用' })).toBeTruthy();
+});
+
+it('recognizes an older enabled status without the ready field', async () => {
+  const { ready: _ready, ...legacyEnabled } = enabled;
+  mockDesktop({ status: legacyEnabled }); render(<AISettings />);
+  await screen.findByLabelText('AI 助手状态');
+  expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
+});
+
+it('surfaces a saved but unverified configuration with one completion action', async () => {
+  mockDesktop({ status: { ...unconfigured, model: 'team-private-chat', verified: [] } }); render(<AISettings />);
+  await screen.findByText('已保存，尚未启用');
+  expect(screen.getByRole('button', { name: '完成启用' })).toBeTruthy();
+  expect(screen.getByLabelText('服务地址')).toBeTruthy();
+  expect(screen.getByLabelText('指定模型（可选）')).toHaveProperty('value', 'team-private-chat');
+});
+
+it.each([
+  ['invalid_key', '访问密钥无效，请检查后重新粘贴。'],
+  ['forbidden', '这个密钥没有调用所选服务的权限，请在服务商后台检查权限。'],
+  ['incompatible_address', '服务地址不兼容，请检查是否填写了 OpenAI 兼容接口地址。'],
+  ['rate_limited', '请求过于频繁或额度不足，请稍后再试，或检查服务商账户。'],
+  ['network_timeout', '连接超时，请检查网络后重试。'],
+])('renders actionable %s failures without raw status codes', async (code, message) => {
+  mockDesktop({ setup: () => ({ ok: false, code, message }) }); render(<AISettings />);
+  fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
+  await screen.findByText(message);
+  expect(screen.getByText(message).textContent).not.toMatch(/\b(401|403|404|429)\b/);
+  expect(screen.queryByLabelText('AI 助手状态')).toBeNull();
+});
+
+it('offers discovered chat models after a failed tool check and never selects one silently', async () => {
+  const invoke = mockDesktop({ setup: () => ({ ok: false, code: 'model_incompatible', message: '这个模型不支持 AI 助手所需的工具调用，请选择其他模型。', models: [{ id: 'team-private-chat', title: '私有对话模型' }, { id: 'gpt-image-2.5' }] }) });
+  render(<AISettings />);
+  fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
+  const select = await screen.findByLabelText('可用模型');
+  expect(screen.getByRole('option', { name: '私有对话模型 · team-private-chat' })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'gpt-image-2.5' })).toBeNull();
+  expect((select as HTMLSelectElement).value).toBe('');
+  fireEvent.change(select, { target: { value: 'team-private-chat' } });
+  expect((screen.getByLabelText('指定模型（可选）') as HTMLInputElement).value).toBe('team-private-chat');
+  expect(screen.getByRole('button', { name: '重新验证' })).toBeTruthy();
+  expect(invoke.mock.calls.filter(([method]) => method === 'ai.setup')).toHaveLength(1);
+});
+
+it('supports a custom OpenAI-compatible address and explicit model', async () => {
+  const invoke = mockDesktop({ setup: args => ({ ok: true, status: { ...enabled, address: String(args.address), model: String(args.model), ready: true } }) });
+  render(<AISettings />);
+  fireEvent.click(await screen.findByRole('button', { name: /自定义服务/ }));
+  await screen.findByLabelText('服务地址');
+  fireEvent.change(screen.getByLabelText('服务地址'), { target: { value: 'https://gateway.example.com/v1' } });
+  fireEvent.change(screen.getByLabelText('指定模型（可选）'), { target: { value: 'team-private-chat' } });
+  fireEvent.change(screen.getByLabelText('访问密钥'), { target: { value: 'sk-custom' } });
+  fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
+  await screen.findByLabelText('AI 助手状态');
+  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://gateway.example.com/v1', apiKey: 'sk-custom', preferredModels: [], model: 'team-private-chat' });
+  expect(screen.getByText('team-private-chat')).toBeTruthy();
+});
+
+it('retries a failed settings read without replacing the saved configuration', async () => {
+  let attempts = 0;
+  const invoke = vi.fn(async (method: string) => {
+    if (method === 'ai.imageStatus') return unconfiguredImages;
+    if (method !== 'ai.status') throw new Error('unexpected');
+    attempts++;
+    if (attempts === 1) throw new Error('fixture read failure');
+    return enabled;
+  });
+  window.commerceDesktop = { invoke, onChanged: () => () => {} } as NonNullable<Window['commerceDesktop']>;
+  render(<AISettings />);
+  await screen.findByText('暂时无法读取 AI 设置');
+  expect(screen.getByText(/原有设置不会因此被修改/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
+  await screen.findByLabelText('AI 助手状态');
+  expect(attempts).toBe(2);
 });

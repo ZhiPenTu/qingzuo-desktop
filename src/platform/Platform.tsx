@@ -57,7 +57,7 @@ const pageCopy = {
   home: ['让日常工作，轻一点。', '把顺手的工具放在一起，专注每一次创作。'],
   market: ['让工作台，多一点可能。', '找到适合你的工具，按需安装，独立更新。'],
   plugins: ['每一件工具，都井井有条。', '管理已安装工具的状态、设置和版本。'],
-  ai: ['AI 设置', '先接入账户，再选择助手模型。图像编辑单独配置。'],
+  ai: ['AI 设置', '选择服务商，连接后即可开始对话。'],
   chat: ['AI 对话', '说一句话，让工具替你完成。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，管理轻作与已安装的工具。'],
 } as const;
@@ -440,12 +440,12 @@ export default function Platform() {
           {page === 'home' ? <button className="workspace-discover" onClick={() => void navigate('market')}><span className="discover-icon"><Plus /></span><span><strong>去插件市场，发现更多顺手工具</strong><small>按需扩展你的工作台，工具可以独立安装与更新。</small></span><ArrowRight /></button> : null}
           <div className="commerce-info"><ShieldCheck /><div><strong>{page === 'market' ? '每个工具都会先校验来源' : '你的工作台，由你掌握'}</strong><p>{page === 'market' ? '市场里的工具都来自已校验的发布目录，安装前会自动检查一遍。' : '本地工具在本机处理文件，联网工具按你的授权访问服务。'}</p></div></div>
         </> : null}
-        {page === 'ai' ? <AISettings imageAvailable={desktop && plugins.some(plugin => plugin.id === 'official.ai-image' && plugin.enabled && !plugin.missing.length) && status.kernel.ready} onOpenImage={() => void navigate('official.ai-image', true)} onOpenChat={() => void navigate('chat')} /> : null}
+        {page === 'ai' ? <AISettings onOpenChat={() => void navigate('chat')} /> : null}
         {page === 'settings' ? <div className="commerce-settings">
           <Card>
             <CardHeader>
               <CardTitle role="heading" aria-level={2}>AI 助手</CardTitle>
-              <CardDescription>统一管理助手模型、连接方式与图像 API Key。</CardDescription>
+              <CardDescription>统一管理对话与图像服务。</CardDescription>
               <CardAction className="self-center">
                 <Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button>
               </CardAction>

@@ -11,7 +11,7 @@ import { ProxyRuntime, proxyAddress } from '../../desktop/ai-proxy.mjs';
 import { bootCommerceKernel } from '../../desktop/kernel.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jAdkAAAAASUVORK5CYII=', 'base64');
-const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit', 'assistant'], network: ['https://api.openai.com', 'https://generativelanguage.googleapis.com'], credentials: ['google-image', 'openai-image'] } };
+const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit', 'assistant'] } };
 const foreign = { ...plugin, id: 'local.foreign' };
 const credentials = { get: async () => 'fixture-key', set: async () => {} };
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -28,7 +28,7 @@ async function fixture(context, edit = async () => ({ bytes: png, mime: 'image/p
 const input = (token, count = 1, concurrency = 2) => ({ modelId: 'gemini-nano-banana-2.1', prompt: '统一白底', concurrency, items: Array.from({ length: count }, (_, index) => ({ token, ...(index === 1 ? { prompt: '第二张增加阴影' } : {}) })) });
 async function start(runtime, batch, grant, retryFailed = false) { await runtime.start(plugin, { id: batch.id, revision: batch.revision, directoryToken: grant.token, retryFailed }); await runtime.running.get(batch.id)?.done; return runtime.get(plugin, batch.id); }
 
-test('official image adapters send one original, exact models, isolated keys and parse image bytes', async () => {
+test('official image adapters use shared host credentials and parse image bytes', async () => {
   const requests = [], secrets = [];
   const editor = new ImageEditor({ get: async (...args) => { secrets.push(args); return 'fixture-key'; } }, async (url, options) => {
     requests.push({ url, ...options });
@@ -40,10 +40,50 @@ test('official image adapters send one original, exact models, isolated keys and
   assert.equal(requests[1].url, 'https://api.openai.com/v1/images/edits');
   assert.equal(requests[1].body.get('n'), '1'); assert.equal(requests[1].body.get('model'), 'gpt-image-2.5-sunburst');
   assert.equal(requests[1].body.getAll('image[]').length, 1);
-  assert.deepEqual(secrets, [[plugin.id, 'google-image'], [plugin.id, 'openai-image']]);
+  assert.ok(secrets.every(([owner]) => owner === 'system.ai'));
+  assert.deepEqual([...new Set(secrets.map(([, name]) => name))].sort(), ['google-image', 'openai-image']);
   assert.throws(() => imageOptions('unknown'), /无效/); assert.throws(() => imageOptions('gemini-nano-banana-2.1', { quality: 'low' }), /不支持/);
   assert.equal(imageOptions('gpt-image-2.5-sunburst', { size: '2560x1440', quality: 'max' }).parameters.quality, 'max');
-  await assert.rejects(editor.edit({ ...plugin, permissions: { ...plugin.permissions, network: [] } }, { modelId: 'gpt-image-2.5-sunburst' }), /未授权/);
+  await assert.rejects(editor.edit({ ...plugin, permissions: { ...plugin.permissions, ai: [] } }, { modelId: 'gpt-image-2.5-sunburst' }), /未授权/);
+});
+
+test('shared image credentials are reusable by every image plugin and migrate legacy keys', async () => {
+  const values = new Map(), writes = [];
+  const shared = {
+    get: async (owner, name) => values.get(owner + ':' + name) ?? null,
+    set: async (owner, name, value) => { writes.push([owner, name]); values.set(owner + ':' + name, value); },
+    clear: async (owner, name) => { writes.push([owner, name]); values.delete(owner + ':' + name); },
+  };
+  const editor = new ImageEditor(shared, async () => Response.json({ data: [{ b64_json: png.toString('base64') }] }));
+  const other = { id: 'local.image-editor', permissions: { files: true, ai: ['image-edit'] } };
+  assert.deepEqual(await editor.models(plugin), []);
+  const status = await editor.configureShared({ provider: 'google', apiKey: 'shared-google' });
+  assert.equal(status.google.configured, true);
+  assert.deepEqual((await editor.models(plugin)).map(model => model.id), ['gemini-nano-banana-2.1', 'gemini-3-pro-image']);
+  assert.deepEqual((await editor.models(other)).map(model => model.id), ['gemini-nano-banana-2.1', 'gemini-3-pro-image']);
+  assert.deepEqual(writes, [['system.ai', 'google-image']]);
+  await editor.configureShared({ provider: 'google', clear: true });
+  assert.deepEqual(await editor.models(plugin), []);
+
+  values.set('official.ai-image:google-image', 'legacy-google');
+  assert.equal((await editor.sharedStatus()).google.source, 'legacy');
+  await editor.configureShared({ provider: 'google', clear: true });
+  assert.equal(values.has('official.ai-image:google-image'), false);
+
+  values.set('system.ai:external', 'openai-text-key');
+  const inheriting = new ImageEditor(shared, async () => Response.json({ data: [{ b64_json: png.toString('base64') }] }), { settings: { address: 'https://api.openai.com/v1' } });
+  const inherited = await inheriting.sharedStatus();
+  assert.deepEqual(inherited.openai, { configured: true, source: 'inherited' });
+  assert.deepEqual(inherited.proxy, { configured: true });
+  assert.deepEqual((await inheriting.models(other)).map(model => model.id), ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
+  values.delete('system.ai:external');
+
+  values.set('official.ai-image:openai-image', 'legacy-openai');
+  assert.deepEqual((await editor.models(plugin)).map(model => model.id), ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
+  assert.equal((await editor.sharedStatus()).openai.source, 'legacy');
+  await editor.edit(other, { modelId: 'gpt-image-2.5-sunburst', prompt: 'edit', bytes: png, mime: 'image/png' });
+  assert.equal(values.get('system.ai:openai-image'), 'legacy-openai');
+  assert.equal(values.has('official.ai-image:openai-image'), false);
 });
 
 test('image failures are explicit and never automatically resubmit', async () => {
@@ -139,6 +179,139 @@ test('proxy address boundary and external tool verification', async context => {
   assert.deepEqual(await proxy.models(), [{ id: 'fixture-tool-model' }]);
   assert.equal(proxy.status().mode, 'external');
   for (const operation of ['accounts', 'login', 'loginStatus', 'provider', 'setBinary']) assert.equal(typeof proxy[operation], 'undefined');
+});
+
+test('one-click setup discovers chat models, verifies tools and only then saves', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-setup-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let savedKey = ''; const requests = [];
+  const credentials = {
+    get: async () => savedKey,
+    set: async (_plugin, _name, value) => { savedKey = value; },
+    clear: async () => { savedKey = ''; },
+  };
+  const proxy = new ProxyRuntime({ root, credentials, request: async (base, endpoint, options) => {
+    requests.push({ base, endpoint, options });
+    if (endpoint === '/v1/models') return Response.json({ data: [
+      { id: 'gpt-image-2.5', type: 'image_generation' },
+      { id: 'embedding-3', type: 'embedding' },
+      { id: 'rerank-v2', type: 'rerank' },
+      { id: 'deepseek-v4-flash', display_name: 'DeepSeek V4 Flash' },
+    ] });
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, 'deepseek-v4-flash');
+    assert.ok(body.tools.some(tool => tool.function.name === 'connection_check'));
+    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+  } });
+  await proxy.initialize();
+  const result = await proxy.setup({ address: 'https://api.deepseek.com/v1', apiKey: 'sk-new', preferredModels: ['not-listed', 'deepseek-v4-flash'] });
+  assert.equal(result.ok, true);
+  assert.equal(result.status.model, 'deepseek-v4-flash');
+  assert.equal(result.status.address, 'https://api.deepseek.com');
+  assert.equal(result.status.ready, true);
+  assert.equal(savedKey, 'sk-new');
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8')), { schemaVersion: 1, mode: 'external', address: 'https://api.deepseek.com', model: 'deepseek-v4-flash', verified: ['deepseek-v4-flash'] });
+  assert.equal(requests.filter(item => item.endpoint === '/v1/chat/completions').length, 1);
+});
+
+test('setup prefers the registry order, falls back for missing recommendations and never silently replaces a failed model', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-choice-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let savedKey = ''; const validTools = new Set(['fallback-model', 'second-preferred-model']);
+  const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fallback-model' }, { id: 'second-preferred-model' }, { id: 'failing-model' }, { id: 'video-model', type: 'video' }] });
+    const model = JSON.parse(options.body).model;
+    return Response.json({ choices: [{ message: { tool_calls: validTools.has(model) ? [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] : [] } }] });
+  } });
+  await proxy.initialize();
+  const preferred = await proxy.setup({ address: 'https://fallback.example.com', apiKey: 'sk-fallback', preferredModels: ['second-preferred-model', 'fallback-model'] });
+  assert.equal(preferred.ok, true);
+  assert.equal(preferred.status.model, 'second-preferred-model');
+
+  const fallback = await proxy.setup({ address: 'https://fallback.example.com', apiKey: 'sk-fallback', preferredModels: ['missing-model'] });
+  assert.equal(fallback.ok, true);
+  assert.equal(fallback.status.model, 'fallback-model');
+
+  const previous = proxy.status(), previousKey = savedKey;
+  const failed = await proxy.setup({ address: 'https://failed.example.com', apiKey: 'sk-failed', preferredModels: ['failing-model'], model: 'failing-model' });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, 'model_incompatible');
+  assert.deepEqual(failed.models.map(item => item.id).sort(), ['failing-model', 'fallback-model', 'second-preferred-model']);
+  assert.deepEqual(proxy.status(), previous);
+  assert.equal(savedKey, previousKey);
+  assert.equal(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8')).address, 'https://fallback.example.com');
+});
+
+test('setup restores the previous key when settings cannot be saved', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-save-failure-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let savedKey = 'old-key';
+  const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint) => {
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'chat-model' }] });
+    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+  } });
+  await proxy.initialize();
+  await mkdir(path.join(root, 'settings.json'));
+  const result = await proxy.setup({ address: 'https://save.example.com', apiKey: 'new-key', preferredModels: ['chat-model'] });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'save_failed');
+  assert.equal(result.message, '无法保存 AI 设置，请检查磁盘空间后重试。');
+  assert.equal(savedKey, 'old-key');
+  assert.equal(proxy.status().ready, false);
+});
+
+test('setup reuses a key only for the same address and maps actionable failures without exposing status codes', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-errors-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const calls = []; let savedKey = '';
+  const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; calls.push('set'); }, clear: async () => { savedKey = ''; } };
+  const proxy = new ProxyRuntime({ root, credentials, request: async (base, endpoint, options) => {
+    calls.push(base + endpoint + ':' + options.headers.Authorization);
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'chat-model' }] });
+    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+  } });
+  await proxy.initialize();
+  await proxy.configure({ address: 'https://reuse.example.com/v1', apiKey: 'stored-key', model: 'old-model' });
+  const reused = await proxy.setup({ address: 'https://reuse.example.com', apiKey: '', preferredModels: ['chat-model'] });
+  assert.equal(reused.ok, true);
+  assert.ok(calls.some(call => call.includes('Bearer stored-key')));
+  assert.equal(calls.filter(call => call === 'set').length, 1);
+
+  const missing = await proxy.setup({ address: 'https://other.example.com', apiKey: '', preferredModels: ['chat-model'] });
+  assert.equal(missing.code, 'missing_key');
+
+  for (const [status, code] of [[401, 'invalid_key'], [403, 'forbidden'], [404, 'incompatible_address'], [429, 'rate_limited']]) {
+    const failing = new ProxyRuntime({ root: path.join(root, String(status)), credentials, request: async () => new Response('', { status }) });
+    await failing.initialize();
+    const result = await failing.setup({ address: 'https://errors.example.com', apiKey: 'sk-test', preferredModels: [] });
+    assert.equal(result.ok, false); assert.equal(result.code, code); assert.doesNotMatch(result.message, new RegExp(String(status)));
+  }
+  const timeout = new ProxyRuntime({ root: path.join(root, 'timeout'), credentials, request: async () => { throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); } });
+  await timeout.initialize();
+  assert.equal((await timeout.setup({ address: 'https://timeout.example.com', apiKey: 'sk-test', preferredModels: [] })).code, 'network_timeout');
+});
+
+test('setup reports no chat models, blocks image models and supports an explicit custom model', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-models-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let savedKey = 'sk-test'; const requested = [];
+  const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'text-embedding-3-large', type: 'embedding' }, { id: 'gpt-image-2.5', type: 'image' }] });
+    requested.push(JSON.parse(options.body).model);
+    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+  } });
+  await proxy.initialize();
+  const empty = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [] });
+  assert.equal(empty.code, 'no_models');
+  const image = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [], model: 'gpt-image-2.5' });
+  assert.equal(image.code, 'model_not_chat');
+  const custom = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [], model: 'team-private-chat' });
+  assert.equal(custom.ok, true);
+  assert.deepEqual(requested, ['team-private-chat']);
+  assert.equal(custom.status.model, 'team-private-chat');
 });
 
 test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', { timeout: 30000 }, async context => {

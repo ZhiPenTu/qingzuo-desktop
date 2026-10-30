@@ -85,6 +85,18 @@ describe('PluginCard installation state', () => {
     expect(screen.queryByLabelText(/累计下载/)).toBeNull();
   });
 
+  it('keeps release notes hidden until explicitly opened', async () => {
+    render(<PluginCard entry={{ ...entry, releaseNotes: '修复稳定性问题' }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: '查看版本说明' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('修复稳定性问题')).toBeNull();
+    fireEvent.click(toggle);
+    expect(await screen.findByText('修复稳定性问题')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '收起版本说明' }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: '收起版本说明' }));
+    expect(screen.queryByText('修复稳定性问题')).toBeNull();
+  });
+
   it('renders the plugin-provided brand icon instead of the category fallback', () => {
     const icon = 'data:image/png;base64,iVBORw0KGgo=';
     const { container } = render(<PluginCard entry={{ ...entry, icon }} mode="market" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
