@@ -33,27 +33,29 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 ## 第三方界面配色
 
-插件虽然独立渲染，也应像轻作工作台中的一个工具，而不是嵌进来的另一套产品。界面以暖白或深绿灰中性表面为主，墨绿/薄荷绿只承担主操作、当前选择和焦点。插件使用 `--qz-*` 局部语义变量，不假定能读取宿主 CSS 变量。
+插件虽然独立渲染，也应像轻作工作台中的一个工具，而不是嵌进来的另一套产品。工作区域在浅色模式下使用纯白 `#ffffff`，通过中性边框、轻量中性表面和清晰排版建立层级；窗口外壳才使用浅灰。墨绿/薄荷绿只承担主操作、当前选择和焦点。插件使用 `--qz-*` 局部语义变量，不假定能读取宿主 CSS 变量。完整规则见 [插件界面视觉规范](design/plugin-ui-guidelines.md)。
 
 当前隔离页面不会继承底座的强制主题，默认使用 `prefers-color-scheme` 跟随系统。宿主后续提供明确的主题值时，插件应优先使用宿主值。
 
 ```css
 :root {
   color-scheme: light;
-  --qz-bg: #f7f8f4;
+  --qz-bg: #ffffff;
   --qz-surface: #ffffff;
   --qz-overlay: #ffffff;
-  --qz-canvas: #e9ede7;
-  --qz-text: #20312a;
-  --qz-text-muted: #69756e;
+  --qz-surface-subtle: #f8f9f7;
+  --qz-canvas: #eef0ec;
+  --qz-text: #1f2d26;
+  --qz-text-muted: #68756e;
   --qz-primary: #28654a;
+  --qz-primary-hover: #1e503a;
   --qz-on-primary: #ffffff;
-  --qz-selection: #e4eee5;
-  --qz-on-selection: #28654a;
-  --qz-muted: #f0f3ed;
-  --qz-hover: #edf2eb;
-  --qz-border: #dfe5de;
-  --qz-input-border: #d7dfd5;
+  --qz-selection: #e7eee8;
+  --qz-on-selection: #245a43;
+  --qz-muted: #f0f2ef;
+  --qz-hover: #edf1ed;
+  --qz-border: #e1e5e0;
+  --qz-input-border: #d5dcd6;
   --qz-focus: #28654a;
   --qz-danger: #b42318;
   --qz-boundary-strong: #69756e;
@@ -76,20 +78,22 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --qz-bg: #19211d;
-    --qz-surface: #202923;
+    --qz-bg: #151c18;
+    --qz-surface: #1d2621;
+    --qz-surface-subtle: #202a24;
     --qz-overlay: #253129;
-    --qz-canvas: #121a15;
+    --qz-canvas: #111814;
     --qz-text: #edf3ee;
     --qz-text-muted: #a6b5aa;
     --qz-primary: #99d8ad;
+    --qz-primary-hover: #b9e6c5;
     --qz-on-primary: #173222;
     --qz-selection: #2c4233;
     --qz-on-selection: #bde6c8;
     --qz-muted: #253029;
     --qz-hover: #2b382f;
-    --qz-border: #36453a;
-    --qz-input-border: #425447;
+    --qz-border: #35433a;
+    --qz-input-border: #415246;
     --qz-focus: #99d8ad;
     --qz-danger: #f87171;
     --qz-boundary-strong: #a6b5aa;
@@ -113,9 +117,12 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 使用规则：
 
-- 页面和工具内容使用 `--qz-bg`，卡片、列表和面板使用 `--qz-surface`；同一层级不要反复嵌套不同底色。
+- 页面和工具内容使用 `--qz-bg`，卡片、列表和面板使用 `--qz-surface`；同一层级不要反复嵌套不同底色。浅色工作区域必须保持纯白，不能用暖白或灰白替代。
 - 一个区域只设置一个主操作。次要操作使用边框或幽灵按钮，不要整页铺满绿色按钮。
 - 普通卡片使用 `1px solid var(--qz-border)` 和间距分组，不使用装饰性投影、玻璃拟态或多层浮起卡片。
+- 卡片圆角保持 `7–9px`，控件和按钮使用 `6px`；不要使用超过 `12px` 的装饰性大圆角。
+- 插件最外层页面不需要自行绘制工作区圆角；底座会按当前工作区视觉规范统一裁切原生插件视图。
+- 页面留白与控件间距优先收紧；正文和控件保持 `13px` 左右，不能通过缩小字体制造紧凑感。
 - 状态必须同时提供图标或文字。信息提示优先使用中性色，不要新增通用蓝色。
 - 图表按 `--qz-chart-1` 至 `--qz-chart-5` 顺序取色，并提供直接标签、图例或不同线型；面积填充不超过同色 `16%` 不透明度。
 - 键盘焦点使用 `2px` 的 `--qz-focus` 环。输入框不能只靠浅边框识别，应同时有可见标签。
@@ -153,6 +160,29 @@ SDK 1.3.0 为「在指定网站上采集结构化数据」补齐五组主进程�
 ```
 
 插件页面仍拿不到密钥与页面 HTML，只能拿到结构化结果和摘要。旧底座通过 `api: '^1.3.0'` 拒绝安装并提示升级。
+
+### API 1.6 文生图批次
+
+SDK 1.6.0 让后台图片批次同时支持图生图和文生图。模型目录、共享连接、凭据、确认、目录授权、并发、保存与恢复仍由底座统一管理；插件只提交模式和提示词，不携带原图令牌。
+
+- **模式**：`ai.batch.create({ mode: 'edit' | 'generate', ... })`，省略 `mode` 时保持原有图生图行为。
+- **文生图项目**：`items` 每项可只带 `prompt`，不能带 `token`；没有单项提示词时使用批次统一提示词。单个文生图批次最多 20 项。
+- **图生图项目**：继续使用 `token`，每项可选择覆盖统一提示词；原有恢复、未知状态不自动重发和保存失败语义不变。
+- **结果预览**：`batch.preview({ original: true })` 只适用于图生图；文生图没有原图，只能预览生成结果。
+- **兼容性**：声明 `api: '^1.5.0'` 的旧插件继续可用；需要文生图批次时声明 `api: '^1.6.0'`。
+
+示例：
+
+```js
+const batch = await client.ai.batch.create({
+  mode: 'generate',
+  source: 'proxy',
+  modelId,
+  prompt: '一只戴红色围巾的柴犬站在雪地里，清晨柔光，真实摄影',
+  concurrency: 2,
+  items: [{}, { prompt: '同一只柴犬，改为傍晚暖光' }],
+});
+```
 
 ### API 1.5 图片输入
 

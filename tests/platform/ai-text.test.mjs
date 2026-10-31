@@ -72,8 +72,8 @@ test('complete maps service failures to explicit errors', async () => {
   await assert.rejects(empty.complete({ messages }), /没有返回内容/);
 });
 
-test('plugin manifests declare text AI capability against API 1.5', () => {
-  assert.equal(API_VERSION, '1.5.0');
+test('plugin manifests declare text AI capability against API 1.6', () => {
+  assert.equal(API_VERSION, '1.6.0');
   // 1.5 只增加可选的图片片段，声明 ^1.4.0 的旧插件仍然兼容。
   const manifest = { commerce: { manifestVersion: 1, id: 'official.shein-full', title: '希音全托管铺货', description: '采集与翻译', ui: 'ui/index.html', api: '^1.4.0', permissions: { ai: ['image-edit', 'text'] } }, version: '0.2.0' };
   const validated = validateManifest(manifest);

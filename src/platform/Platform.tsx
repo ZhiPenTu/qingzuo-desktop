@@ -396,7 +396,11 @@ export default function Platform() {
   useEffect(() => {
     const element = surface.current;
     if (!element || isShellPage(page) || typeof ResizeObserver === 'undefined') return;
-    const update = () => { const rect = element.getBoundingClientRect(); void window.commerceDesktop?.invoke('view.bounds', { id: page, x: rect.x, y: rect.y, width: rect.width, height: rect.height }); };
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      const radius = Number.parseFloat(getComputedStyle(element).borderTopLeftRadius);
+      void window.commerceDesktop?.invoke('view.bounds', { id: page, x: rect.x, y: rect.y, width: rect.width, height: rect.height, radius: Number.isFinite(radius) ? radius : 0 });
+    };
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
   }, [page, surfaceRevision]);

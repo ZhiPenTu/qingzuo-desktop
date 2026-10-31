@@ -1,7 +1,7 @@
 {
   "name": "qingzuo-desktop",
   "private": true,
-  "version": "0.6.11",
+  "version": "0.6.12",
   "main": "desktop/main.mjs",
   "workspaces": [
     "packages/*"
@@ -95,6 +95,6 @@
   },
   "license": "MIT",
   "overrides": {
-    "node-addon-require-builtin": "0.1.6"
+    "node-addon-require-builtin": "0.1.9"
   }
 }

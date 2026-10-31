@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import { validateToolSchema } from './tool-schema-core.mjs';
-export const API_VERSION = '1.5.0';
+export const API_VERSION = '1.6.0';
 export const TARGET = process.platform + '-' + process.arch;
 export const RESERVED_HEADERS = ['authorization', 'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-connection', 'te', 'trailer'];
 export function validatePluginIcon(value) {

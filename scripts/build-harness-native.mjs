@@ -7,7 +7,7 @@ import { HARNESS_UPSTREAM } from '../desktop/harness-version.mjs';
 const pin = HARNESS_UPSTREAM.nativeAdapter;
 
 // The official optional binary was built for macOS 15. Compile the unchanged
-// official 0.1.6 native source for our macOS 14 target during the app build.
+// official 0.1.9 native source for our macOS 14 target during the app build.
 // This is a build-time adaptation, never a plugin install-time fallback.
 if (process.platform !== 'darwin') process.exit(0);
 if (process.arch !== 'arm64') throw new Error('Only macOS Apple Silicon is supported.');
@@ -32,7 +32,9 @@ const source = path.join(cache, 'source'); await mkdir(source, { recursive: true
 execFileSync('tar', ['-xzf', archive, '--strip-components=1', '-C', source]);
 const native = path.join(source, 'packages/native');
 const binding = JSON.parse(await readFile(path.join(native, 'binding.gyp'))).targets[0];
-const files = [...binding.sources, 'src/runtime_context/runtime_profile.cc', 'src/runtime_context/runtime_profile_napi.cc', 'src/runtime_compat_napi.cc'].map(file => path.join(native, file));
+const napiSources = binding.conditions?.find(([condition]) => condition === "narb_backend=='nodeabi'")?.[2]?.sources;
+if (!Array.isArray(napiSources) || napiSources.length === 0) throw new Error('Harness native adapter N-API sources were not found.');
+const files = [...new Set([...binding.sources, ...napiSources])].map(file => path.join(native, file));
 const include = path.resolve(path.dirname(process.execPath), '../include/node');
 await access(path.join(include, 'node.h'));
 const api = path.dirname(require.resolve('node-addon-api/package.json'));

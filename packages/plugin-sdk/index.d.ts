@@ -44,7 +44,7 @@ export interface NetworkRequest {
 export interface DirectoryGrant { token: string; name: string }
 export type ImageSource = 'official' | 'proxy';
 export interface ImageModel { id: string; source?: ImageSource; provider: 'google' | 'openai' | 'compatible'; title: string; sizes: string[]; ratios?: string[]; qualities?: string[] }
-export interface BatchInput { source?: ImageSource; modelId: string; parameters?: { size?: string; ratio?: string; quality?: string }; prompt: string; concurrency?: number; items: { token: string; prompt?: string }[] }
+export interface BatchInput { mode?: 'edit' | 'generate'; source?: ImageSource; modelId: string; parameters?: { size?: string; ratio?: string; quality?: string }; prompt: string; concurrency?: number; items: { token?: string; prompt?: string }[] }
 export interface TextModel { id: string; title: string }
 /** defaultModel 是当前目录中的首个文本模型，仅作为兼容回退；插件应允许用户从 models 中自行选择。 */
 export interface TextModelCatalog { models: TextModel[]; defaultModel: string }
@@ -52,6 +52,6 @@ export interface TextModelCatalog { models: TextModel[]; defaultModel: string }
 export type MessagePart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 export interface CompleteOptions { model?: string; messages: { role: 'system' | 'user' | 'assistant'; content: string | MessagePart[] }[]; temperature?: number; responseFormat?: { type: 'text' | 'json_object' } }
 export interface CompleteResult { content: string; model: string }
-export interface ImageBatch { schemaVersion: 1; id: string; owner: string; revision: number; created: number; state: 'draft' | 'running' | 'canceling' | 'interrupted' | 'finished' | 'canceled'; source?: ImageSource; modelId: string; parameters: Record<string, string>; concurrency: number; items: { id: string; name: string; mime: string; prompt: string; state: 'pending' | 'running' | 'unknown' | 'failed' | 'save-failed' | 'succeeded'; error: string | null; output: string | null; outputMime?: string }[] }
+export interface ImageBatch { schemaVersion: 1; id: string; owner: string; revision: number; created: number; state: 'draft' | 'running' | 'canceling' | 'interrupted' | 'finished' | 'canceled'; mode: 'edit' | 'generate'; source?: ImageSource; modelId: string; parameters: Record<string, string>; concurrency: number; items: { id: string; name: string; mime: string | null; prompt: string; state: 'pending' | 'running' | 'unknown' | 'failed' | 'save-failed' | 'succeeded'; error: string | null; output: string | null; outputMime?: string }[] }
 export interface AssistantStatus { id?: string; model?: string; state: 'idle' | 'running'; history: { role: 'user' | 'assistant'; text: string }[]; error?: string | null }
 export type AIEvent = { type: 'batch'; batch: ImageBatch } | { type: 'assistant'; session: AssistantStatus } | { type: 'assistant-delta'; text: string };

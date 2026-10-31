@@ -79,8 +79,8 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
     await expect.poll(() => application.context().pages().some(page => page.url().startsWith('commerce-plugin://local.debug-log-fixture/'))).toBe(true);
 
     await shell.getByRole('button', { name: '日志调试', exact: true }).click();
-    await expect(shell.getByText('plugin-debug-marker', { exact: true })).toBeVisible();
-    await expect(shell.getByText('browser-debug-marker', { exact: true })).toBeVisible();
+    await expect(shell.getByText('plugin-debug-marker', { exact: true }).first()).toBeVisible();
+    await expect(shell.getByText('browser-debug-marker', { exact: true }).first()).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) {
       await mkdir(process.env.QINGZUO_UI_EVIDENCE_DIR, { recursive: true });
       await shell.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '日志调试.png') });

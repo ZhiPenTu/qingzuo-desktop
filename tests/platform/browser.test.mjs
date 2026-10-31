@@ -38,7 +38,7 @@ test('browser permission declarations are explicit and validated', () => {
 test('page automation requires declared origins plus the automate capability', () => {
   const base = { name: 'fixture', version: '0.1.0', commerce: { manifestVersion: 1, id: 'local.automate', title: 'Automate', description: '', api: '^1.3.0', ui: 'ui/index.html', permissions: { browser: ['automate'], browserOrigins: ['https://detail.1688.com'] } } };
   const manifest = validateManifest(base);
-  assert.equal(API_VERSION, '1.5.0');
+  assert.equal(API_VERSION, '1.6.0');
   assert.deepEqual(manifest.permissions.browserOrigins, ['https://detail.1688.com']);
   assert.equal(allowedBrowserOrigin(manifest, 'https://detail.1688.com/offer/1.html').origin, 'https://detail.1688.com');
   assert.throws(() => allowedBrowserOrigin(manifest, 'https://s.1688.com/other'), /没有操作此页面的权限/);
