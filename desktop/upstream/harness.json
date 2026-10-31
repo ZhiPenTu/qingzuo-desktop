@@ -78,10 +78,10 @@
   ],
   "nativeAdapter": {
     "package": "node-addon-require-builtin",
-    "version": "0.1.6",
+    "version": "0.1.9",
     "repository": "https://github.com/deepseek-ai/dsh-node-addon-require-builtin",
-    "commit": "36e2a4c9505fd4d05216f2fa9745676cd06d0012",
-    "sha256": "e895e65b02492b8bf496738b4937374ed1324c8594b33ce90e50ce4dba3f1147",
+    "commit": "a58d3599a2e551d7d706d1ff796c9fd4bbaff63c",
+    "sha256": "286616f15e4f12013988e45ad27a69b4968a9f059c8bd351e412505230577948",
     "platform": "darwin",
     "arch": "arm64",
     "supportedTargets": [
