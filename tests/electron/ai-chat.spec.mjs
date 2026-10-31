@@ -40,6 +40,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
   }
   try {
     let page = await launch();
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '工具中心.png') });
     await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }); dialog.showMessageBox = async () => ({ response: 1 }); }, artifact);
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
     await page.getByRole('button', { name: '设置', exact: true }).click();

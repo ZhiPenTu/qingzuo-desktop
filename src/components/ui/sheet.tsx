@@ -23,7 +23,7 @@ function SheetContent({ className, children, ...props }: SheetPrimitive.Popup.Pr
 }
 
 function SheetHeader({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="sheet-header" className={cn('flex flex-col gap-2 p-6 pr-12', className)} {...props} />;
+  return <div data-slot="sheet-header" className={cn('flex flex-col gap-2 p-4 pr-10', className)} {...props} />;
 }
 
 function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
