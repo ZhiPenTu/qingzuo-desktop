@@ -19,6 +19,7 @@ export class BatchRuntime {
       try {
         const batch = JSON.parse(await readFile(path.join(directory, 'state.json'), 'utf8'));
         if (batch.schemaVersion !== 1 || batch.id !== id || !/^[a-z][a-z0-9.-]+$/.test(batch.owner) || !Array.isArray(batch.items)) continue;
+        if (!['edit', 'generate'].includes(batch.mode)) batch.mode = 'edit';
         batch.directory = null;
         for (const item of batch.items) if (item.state === 'running') { item.state = item.outputMime ? 'save-failed' : 'unknown'; item.error = item.outputMime ? '保存中断，可以重新保存。' : '执行中断，服务是否完成未知；不会自动重发。'; }
         if (['running', 'canceling'].includes(batch.state)) batch.state = 'interrupted';
@@ -37,19 +38,29 @@ export class BatchRuntime {
   }
   async create(plugin, options) {
     this.assert(plugin);
+    const mode = options.mode ?? 'edit';
+    if (!['edit', 'generate'].includes(mode)) throw new Error('批次模式无效。');
     if (!['official', 'proxy'].includes(options.source ?? 'official')) throw new Error('图像来源无效。');
     if (options.source === 'proxy' && !this.editor.resolve) throw new Error('代理图像编辑不可用。');
     const selection = this.editor.resolve ? await this.editor.resolve(plugin, options) : imageOptions(options.modelId, options.parameters);
-    if (!Array.isArray(options.items) || !options.items.length || options.items.length > 200 || !Number.isInteger(options.concurrency ?? 2) || (options.concurrency ?? 2) < 1 || (options.concurrency ?? 2) > 4) throw new Error('批次图片或并发数无效。');
+    if (!Array.isArray(options.items) || !options.items.length || options.items.length > (mode === 'generate' ? 20 : 200) || !Number.isInteger(options.concurrency ?? 2) || (options.concurrency ?? 2) < 1 || (options.concurrency ?? 2) > 4) throw new Error('批次项目或并发数无效。');
     const id = randomUUID(), directory = path.join(this.root, id);
-    const batch = { schemaVersion: 1, id, owner: plugin.id, created: Date.now(), revision: 1, state: 'draft', source: options.source ?? 'official', modelId: options.modelId, parameters: selection.parameters, selection, concurrency: options.concurrency ?? 2, directory: null, items: [] };
+    const batch = { schemaVersion: 1, id, owner: plugin.id, created: Date.now(), revision: 1, state: 'draft', mode, source: options.source ?? 'official', modelId: options.modelId, parameters: selection.parameters, selection, concurrency: options.concurrency ?? 2, directory: null, items: [] };
     await mkdir(directory, { recursive: true, mode: 0o700 });
     try {
       for (const [index, input] of options.items.entries()) {
-        const file = await this.files.get(plugin, input.token), prompt = input.prompt || options.prompt;
-        if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.mime) || file.size > 25 * 1024 ** 2 || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000) throw new Error('图片或提示词无效。');
-        await copyFile(file.filename, path.join(directory, 'input-' + index));
-        batch.items.push({ id: String(index), name: file.name, mime: file.mime, prompt, state: 'pending', error: null, output: null });
+        const prompt = input.prompt || options.prompt;
+        if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000) throw new Error('提示词无效。');
+        if (mode === 'generate') {
+          if (input.token) throw new Error('文生图项目不能包含原图。');
+          batch.items.push({ id: String(index), name: '生成图-' + (index + 1), mime: null, prompt, state: 'pending', error: null, output: null });
+        } else {
+          if (typeof input.token !== 'string') throw new Error('图生图项目缺少原图。');
+          const file = await this.files.get(plugin, input.token);
+          if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.mime) || file.size > 25 * 1024 ** 2) throw new Error('图片无效。');
+          await copyFile(file.filename, path.join(directory, 'input-' + index));
+          batch.items.push({ id: String(index), name: file.name, mime: file.mime, prompt, state: 'pending', error: null, output: null });
+        }
       }
       this.batches.set(id, batch); await this.persist(batch); return this.snapshot(batch);
     } catch (error) { this.batches.delete(id); await rm(directory, { recursive: true, force: true }); throw error; }
@@ -100,7 +111,10 @@ export class BatchRuntime {
         const controller = new AbortController(); operation.controllers.add(controller); const timer = setTimeout(() => controller.abort(), 600000);
         try {
           if (!saveOnly) {
-            const output = await this.editor.edit(plugin, { modelId: batch.modelId, source: batch.source ?? 'official', selection: batch.selection, parameters: batch.parameters, prompt: item.prompt, bytes: await readFile(path.join(this.root, batch.id, 'input-' + index)), mime: item.mime, signal: controller.signal });
+            const common = { modelId: batch.modelId, source: batch.source ?? 'official', selection: batch.selection, parameters: batch.parameters, prompt: item.prompt, signal: controller.signal };
+            const output = batch.mode === 'generate'
+              ? await this.editor.generate(plugin, common)
+              : await this.editor.edit(plugin, { ...common, bytes: await readFile(path.join(this.root, batch.id, 'input-' + index)), mime: item.mime });
             await writeFile(path.join(this.root, batch.id, 'output-' + index), output.bytes, { mode: 0o600 }); item.outputMime = output.mime;
           }
           item.state = 'save-failed'; await this.persist(batch);
@@ -117,6 +131,7 @@ export class BatchRuntime {
   async cancel(plugin, id) { const batch = this.get(plugin, id), operation = this.running.get(id); if (operation) { operation.canceled = true; batch.state = 'canceling'; for (const controller of operation.controllers) controller.abort(); await operation.done; } return this.snapshot(batch); }
   async preview(plugin, { id, itemId, original = false }) {
     const batch = this.get(plugin, id), index = batch.items.findIndex(item => item.id === itemId); if (index < 0) throw new Error('任务无效。');
+    if (original && batch.mode === 'generate') throw new Error('文生图没有原图。');
     const item = batch.items[index]; if (!original && !item.outputMime) throw new Error('任务尚未生成结果。');
     return this.files.create(plugin, await readFile(path.join(this.root, id, (original ? 'input-' : 'output-') + index)), item.name, original ? item.mime : item.outputMime);
   }

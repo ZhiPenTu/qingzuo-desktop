@@ -85,6 +85,23 @@ test('proxy edits send one original to exact native/multipart endpoints with hos
   assert.ok(secrets.every(args => args[0] === 'system.ai' && args[1] === 'external'));
 });
 
+test('proxy text-to-image uses generation endpoints without sending an original', async context => {
+  const { editor, calls, secrets } = await fixture(context);
+  for (const modelId of ['gemini-3.1-flash-image-preview', 'gpt-image-2.5-sunburst', 'studio-edit']) {
+    assert.deepEqual(await editor.generate(plugin, { source: 'proxy', modelId, prompt: '生成一间海边小屋' }), { bytes: png, mime: 'image/png' });
+  }
+  const requests = edits(calls); assert.equal(requests.length, 3);
+  const google = JSON.parse(requests[0].options.body);
+  assert.equal(requests[0].endpoint, '/v1beta/models/gemini-3.1-flash-image-preview:generateContent');
+  assert.deepEqual(google.contents[0].parts, [{ text: '生成一间海边小屋' }]);
+  assert.equal(requests[1].endpoint, '/v1/images/generations');
+  assert.equal(requests[2].endpoint, '/v1/images/generations');
+  const openai = JSON.parse(requests[1].options.body);
+  assert.equal(openai.model, 'gpt-image-2.5-sunburst'); assert.equal(openai.n, 1); assert.equal(openai.response_format, 'b64_json');
+  assert.ok(requests.every(call => call.options.headers.Authorization === 'Bearer shared-fixture' && !call.options.headers['x-goog-api-key']));
+  assert.ok(secrets.every(args => args[0] === 'system.ai' && args[1] === 'external'));
+});
+
 test('proxy image errors, missing image, URL-only results and cancellation never fallback or resubmit', async context => {
   let response;
   const { editor, calls } = await fixture(context, async (_base, _endpoint, options) => { options.signal?.throwIfAborted(); return response; });

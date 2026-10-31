@@ -59,6 +59,15 @@ export async function boundedJson(response, limit = 96 * 1024 ** 2) {
   for await (const chunk of response.body ?? []) { size += chunk.length; if (size > limit) { await response.body?.cancel?.().catch(() => {}); throw new Error('服务响应过大。'); } chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { throw new Error('服务响应格式无效。'); }
 }
+async function readImageResult(response, model, proxied) {
+  if (!response.ok) { await response.body?.cancel(); throw new Error(({ 401: proxied ? '代理访问密钥无效，请检查轻作 AI 设置。' : 'API Key 无效。', 403: '账号无权使用此型号。', 404: proxied ? '代理未启用此图像接口，请检查代理服务的版本与图像配置。' : '图像接口或型号不存在。', 400: proxied ? '代理拒绝此图片模型或参数，请检查图像路由配置；未改用其他型号。' : '图像服务拒绝此型号或参数。', 429: '请求限流或额度不足，请稍后手动重试。' })[response.status] || '图像服务请求失败（' + response.status + '）。'); }
+  const data = await boundedJson(response);
+  const part = model.provider === 'google' ? data.candidates?.[0]?.content?.parts?.find(item => item.inlineData || item.inline_data) : null;
+  const encoded = model.provider === 'google' ? (part?.inlineData || part?.inline_data)?.data : data.data?.[0]?.b64_json;
+  if (typeof encoded !== 'string' || !encoded || encoded.length > 90_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error('服务未返回图片，可能被内容策略拒绝。');
+  const output = Buffer.from(encoded, 'base64'); if (output.length > 64 * 1024 ** 2) throw new Error('结果图片过大。');
+  return { bytes: output, mime: imageMime(output) };
+}
 export class ImageEditor {
   constructor(credentials, request = secureRequest, proxy = null) { this.credentials = credentials; this.request = request; this.proxy = proxy; }
   assert(plugin) {
@@ -188,12 +197,34 @@ export class ImageEditor {
     const request = { method: 'POST', headers, body, redirect: 'error', signal };
     signal?.throwIfAborted();
     const response = proxied ? await this.proxy.request(connection.base, url, request) : await this.request(url, request);
-    if (!response.ok) { await response.body?.cancel(); throw new Error(({ 401: proxied ? '代理访问密钥无效，请检查轻作 AI 设置。' : 'API Key 无效。', 403: '账号无权使用此型号。', 404: proxied ? '代理未启用此图像接口，请检查代理服务的版本与图像配置。' : '图像接口或型号不存在。', 400: proxied ? '代理拒绝此图片模型或参数，请检查图像路由配置；未改用其他型号。' : '图像服务拒绝此型号或参数。', 429: '请求限流或额度不足，请稍后手动重试。' })[response.status] || '图像服务请求失败（' + response.status + '）。'); }
-    const data = await boundedJson(response);
-    const part = model.provider === 'google' ? data.candidates?.[0]?.content?.parts?.find(item => item.inlineData || item.inline_data) : null;
-    const encoded = model.provider === 'google' ? (part?.inlineData || part?.inline_data)?.data : data.data?.[0]?.b64_json;
-    if (typeof encoded !== 'string' || !encoded || encoded.length > 90_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error('服务未返回图片，可能被内容策略拒绝。');
-    const output = Buffer.from(encoded, 'base64'); if (output.length > 64 * 1024 ** 2) throw new Error('结果图片过大。');
-    return { bytes: output, mime: imageMime(output) };
+    return readImageResult(response, model, proxied);
+  }
+  async generate(plugin, { modelId, parameters, prompt, signal, source = 'official', selection }) {
+    this.assert(plugin);
+    selection ??= await this.resolve(plugin, { source, modelId, parameters });
+    const { model, parameters: options } = imageOptions(modelId, parameters, [selection.model]);
+    await this.assertSelection(plugin, selection);
+    const proxied = model.source === 'proxy';
+    const origin = model.provider === 'google' ? 'https://generativelanguage.googleapis.com' : 'https://api.openai.com';
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000) throw new Error('生成提示词无效。');
+    signal?.throwIfAborted();
+    const connection = proxied ? await this.proxy.imageConnection() : null;
+    if (proxied && connection.id !== selection.connectionId) throw new Error('代理图像服务连接已改变，请重新准备批次并确认。');
+    const secret = connection?.key || await this.sharedKey(model.provider, true);
+    if (!secret) throw new Error('请先在轻作「AI 设置」中配置共享图像服务。');
+    let url, body, headers;
+    if (model.provider === 'google') {
+      url = (proxied ? '/v1beta/models/' : origin + '/v1/models/') + encodeURIComponent(model.id) + ':generateContent';
+      headers = { 'Content-Type': 'application/json', ...(proxied ? { Authorization: 'Bearer ' + secret } : { 'x-goog-api-key': secret }) };
+      body = JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(options.ratio || options.size ? { imageConfig: { ...(options.ratio ? { aspectRatio: options.ratio } : {}), ...(options.size ? { imageSize: options.size } : {}) } } : {}) } });
+    } else {
+      url = (proxied ? '' : origin) + '/v1/images/generations';
+      headers = { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' };
+      body = JSON.stringify({ model: model.id, prompt, n: 1, ...(options.size ? { size: options.size } : {}), ...(options.quality ? { quality: options.quality } : {}), ...(proxied ? { response_format: 'b64_json' } : {}) });
+    }
+    const request = { method: 'POST', headers, body, redirect: 'error', signal };
+    signal?.throwIfAborted();
+    const response = proxied ? await this.proxy.request(connection.base, url, request) : await this.request(url, request);
+    return readImageResult(response, model, proxied);
   }
 }
