@@ -35,11 +35,26 @@ export async function cleanupSandbox(launcher, policy) {
   await new Promise((resolve,reject) => execFile(launcher,['--cleanup',policy],{windowsHide:true,timeout:10000},error => error ? reject(error) : resolve()));
 }
 export class RpcWorker {
-  constructor(child, timeout = 90000) {
+  constructor(child, timeout = 90000, log = () => {}) {
     this.child = child; this.timeout = timeout; this.pending = new Map(); this.counter = 0; this.closed = false; this.exited = new Promise(resolve => { child.once('close', resolve); });
-    this.error = ''; child.stderr.on('data', data => { this.error = (this.error + data.toString()).slice(-4000); });
+    this.error = '';
+    child.stderr.on('data', data => {
+      const text = data.toString().trim();
+      this.error = (this.error + data.toString()).slice(-4000);
+      if (text) log('warn', text);
+    });
     const lines = createInterface({ input: child.stdout });
-    lines.on('line', line => { let message; try { message = JSON.parse(line); } catch { return; } const entry = this.pending.get(message.id); if (!entry) return; clearTimeout(entry.timer); this.pending.delete(message.id); if (message.error) entry.reject(new Error(message.error)); else entry.resolve(message.result); });
+    lines.on('line', line => {
+      let message;
+      try { message = JSON.parse(line); }
+      catch { if (line.trim()) log('debug', line); return; }
+      const entry = this.pending.get(message.id);
+      if (!entry) { if (line.trim()) log('debug', line); return; }
+      clearTimeout(entry.timer);
+      this.pending.delete(message.id);
+      if (message.error) entry.reject(new Error(message.error));
+      else entry.resolve(message.result);
+    });
     child.on('error', error => this.fail(new Error('SANDBOX_UNAVAILABLE：' + error.message)));
     child.on('exit', code => this.fail(new Error('插件进程已退出（' + code + '）。' + this.error)));
   }

@@ -348,6 +348,50 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-settings [data-slot="card-title"] { font-size: 16px; font-weight: 600; }
 .commerce-settings [data-slot="card-description"] { font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
 .commerce-settings [data-slot="card-header"]:has([data-slot="card-action"]) { align-items: center; }
+.debug-log-switch { position: relative; width: 42px; height: 24px; padding: 0; border: 1px solid var(--input); border-radius: 999px; background: var(--muted); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.debug-log-switch span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 18%, transparent); transition: transform .16s ease; }
+.debug-log-switch.is-on { border-color: var(--primary); background: var(--primary); }
+.debug-log-switch.is-on span { transform: translateX(18px); }
+.debug-log-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.debug-log-switch:disabled { opacity: .5; cursor: default; }
+.debug-log-setting-detail { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--secondary) 45%, var(--card)); }
+.debug-log-setting-detail > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.debug-log-setting-detail span { color: var(--muted-foreground); font-size: 11px; }
+.debug-log-setting-detail strong { overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.debug-log-page { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.debug-log-page > [data-slot="card"] { --card-spacing: 22px; border: 1px solid var(--border); --tw-ring-color: transparent; }
+.debug-log-overview [data-slot="card-description"] { line-height: 1.6; }
+.debug-log-location { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--secondary) 42%, var(--card)); }
+.debug-log-location > div:first-child { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 5px; }
+.debug-log-location span, .debug-log-size > span { color: var(--muted-foreground); font-size: 11px; }
+.debug-log-location strong { overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.debug-log-location-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.debug-log-size { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.debug-log-size label { font-size: 12px; font-weight: 550; }
+.debug-log-size .download-source-select { min-width: 120px; max-width: 140px; height: 34px; }
+.debug-log-size > span { margin-left: auto; }
+.debug-log-viewer { min-height: 0; }
+.debug-log-viewer-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
+.debug-log-viewer-head [data-slot="card-description"] { margin-top: 5px; }
+.debug-log-viewer-actions { display: flex; align-items: center; gap: 10px; }
+.debug-log-filters { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--muted); }
+.debug-log-filters button { border-radius: 6px; }
+.debug-log-list { min-height: 340px; max-height: min(62vh, 720px); overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--foreground) 3%, var(--card)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.debug-log-row { display: grid; grid-template-columns: 126px 48px minmax(90px, 170px) 38px minmax(0, 1fr); align-items: start; column-gap: 10px; padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); font-size: 11px; line-height: 1.55; }
+.debug-log-row:last-child { border-bottom: 0; }
+.debug-log-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+.debug-log-row time, .debug-log-row small { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.debug-log-row small { grid-column: 1 / -1; overflow: hidden; margin-top: 3px; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.debug-log-row pre { grid-column: 1 / -1; margin: 5px 0 0; color: var(--foreground); font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.debug-log-scope { width: fit-content; padding: 1px 6px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); font-size: 10px; }
+.debug-log-scope.is-plugin { color: #8b5e13; background: color-mix(in srgb, #e8ad36 16%, transparent); }
+.debug-log-scope.is-browser { color: #256b8c; background: color-mix(in srgb, #3b9cc5 15%, transparent); }
+.debug-log-source { overflow: hidden; color: var(--muted-foreground); text-overflow: ellipsis; white-space: nowrap; }
+.debug-log-level { color: var(--muted-foreground); font-size: 10px; }
+.debug-log-row.is-warn .debug-log-level { color: #9b6b10; }
+.debug-log-row.is-error .debug-log-level { color: var(--destructive); }
+.debug-log-row.is-error pre { color: color-mix(in srgb, var(--destructive) 82%, var(--foreground)); }
+.debug-log-empty { display: grid; place-items: center; min-height: 340px; color: var(--muted-foreground); font-family: var(--font-sans); font-size: 13px; }
 @media (max-width: 640px) {
   .commerce-settings [data-slot="card-header"]:has([data-slot="card-action"]) {
     display: flex;
@@ -355,6 +399,14 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
     align-items: flex-start;
     gap: 14px;
   }
+  .debug-log-location, .debug-log-viewer-head { align-items: stretch; flex-direction: column; }
+  .debug-log-location-actions, .debug-log-viewer-actions { justify-content: space-between; }
+  .debug-log-size { flex-wrap: wrap; }
+  .debug-log-size > span { width: 100%; margin-left: 0; }
+  .debug-log-row { grid-template-columns: 112px 46px minmax(0, 1fr) 36px; }
+  .debug-log-source { grid-column: 1 / -1; grid-row: 2; }
+  .debug-log-row pre { grid-row: 3; }
+  .debug-log-row small { grid-row: 4; }
 }
 .ai-settings { display: flex; min-width: 0; flex-direction: column; gap: 20px; }
 .ai-settings-wizard { width: 100%; max-width: 980px; }

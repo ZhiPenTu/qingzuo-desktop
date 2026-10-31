@@ -72,5 +72,9 @@ window.addEventListener('load', schedule, { once: true });
 window.addEventListener('scroll', schedule, { passive: true });
 window.addEventListener('hashchange', schedule);
 window.addEventListener('commerce:rescan', schedule);
-new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster', 'href'] });
+const observeDocument = () => {
+  if (document.documentElement) new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster', 'href'] });
+};
+if (document.documentElement) observeDocument();
+else window.addEventListener('DOMContentLoaded', observeDocument, { once: true });
 schedule();

@@ -70,7 +70,7 @@ function publicDownload(task) {
 }
 
 export class BrowserRuntime {
-  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {}, files = null, storage = null, cookieStore = null }) {
+  constructor({ window, changed, event = () => {}, preload, resizeStop = () => {}, resizeMove = () => {}, files = null, storage = null, cookieStore = null, log = () => {} }) {
     this.window = window;
     this.changed = changed;
     this.event = event;
@@ -80,6 +80,7 @@ export class BrowserRuntime {
     this.files = files;
     this.storage = storage;
     this.cookieStore = cookieStore;
+    this.log = log;
     this.sessionCookies = new Map();
     this.cookieStoreDirty = false;
     this.cookieWriteTimer = null;
@@ -95,6 +96,10 @@ export class BrowserRuntime {
   notify(value) {
     this.changed();
     this.event(value);
+  }
+
+  report(level, source, message, extra = {}) {
+    try { this.log(level, source, message, extra); } catch {}
   }
 
   async ensureSession() {
@@ -197,6 +202,7 @@ export class BrowserRuntime {
       this.cookieStoreDirty = false;
     } catch (error) {
       console.error('Browser cookie store failed:', error.message);
+      this.report('error', 'cookies', `浏览器登录状态保存失败：${error.message}`);
     }
   }
 
@@ -366,8 +372,24 @@ export class BrowserRuntime {
     view.setBounds({ x: 0, y: 0, width: Math.max(1, area.width), height: Math.max(1, area.height) });
     view.setVisible(false);
     view.webContents.setWindowOpenHandler(({ url }) => {
-      if (isAllowedBrowserUrl(url)) void this.newTab(url).catch(error => console.error('Browser new tab failed:', error.message));
+      if (isAllowedBrowserUrl(url)) void this.newTab(url).catch(error => {
+        console.error('Browser new tab failed:', error.message);
+        this.report('error', 'tab/' + tab.id, `新标签页打开失败：${error.message}`, { url });
+      });
       return { action: 'deny' };
+    });
+    view.webContents.on('console-message', (details, legacyLevel, legacyMessage, legacyLine, legacySource) => {
+      const message = typeof details?.message === 'string' ? details.message : legacyMessage;
+      if (typeof message !== 'string') return;
+      const level = typeof details?.level === 'string'
+        ? details.level
+        : ({ 0: 'debug', 1: 'info', 2: 'warn', 3: 'error' })[legacyLevel] || 'info';
+      const line = Number.isSafeInteger(details?.lineNumber) ? details.lineNumber : legacyLine;
+      this.report(level, 'tab/' + tab.id, message, { line, url: details?.sourceId || legacySource || tab.url });
+    });
+    view.webContents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
+      if (code === -3 || isMainFrame === false) return;
+      this.report('error', 'tab/' + tab.id, `页面加载失败（${code}）：${description}`, { url: validatedURL });
     });
     view.webContents.on('will-navigate', (event, url) => {
       try { normalizeBrowserUrl(url); }
@@ -390,7 +412,12 @@ export class BrowserRuntime {
       if (input.type === 'mouseUp') this.resizeStop();
       else if (input.type === 'mouseMove') this.resizeMove(view.getBounds().x + input.x);
     });
-    view.webContents.on('render-process-gone', (_event, details) => { tab.loading = false; console.error('Browser renderer gone:', tab.id, details); this.notify({ type: 'status', tabId: tab.id }); });
+    view.webContents.on('render-process-gone', (_event, details) => {
+      tab.loading = false;
+      console.error('Browser renderer gone:', tab.id, details);
+      this.report('error', 'tab/' + tab.id, `浏览器渲染进程退出：${details.reason || 'unknown'}`, { url: tab.url });
+      this.notify({ type: 'status', tabId: tab.id });
+    });
     this.window.contentView.addChildView(view);
     tab.view = view;
     return view;
@@ -489,7 +516,10 @@ export class BrowserRuntime {
         && !view.webContents.isDestroyed()
         && tab.navigationSequence > navigationSequence + 1
         && isAllowedBrowserUrl(tab.url);
-      if (!superseded) throw navigationFailure(error);
+      if (!superseded) {
+        this.report('error', 'tab/' + tab.id, `页面加载失败：${error?.message || error}`, { url: address });
+        throw navigationFailure(error);
+      }
     }
     this.notify({ type: 'status', tabId: id });
     return publicTab(tab);

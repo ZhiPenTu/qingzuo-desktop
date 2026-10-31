@@ -5,7 +5,31 @@ function invoke(service, method, args) { return new Promise((resolve, reject) =>
 channel.on('message', async event => {
   const message = process.parentPort ? event.data : event;
   if (message.type === 'init') {
-    try { const { bootCommerceKernel } = await import('./kernel.mjs'); runtime = await bootCommerceKernel({ ...message.options, invoke }); send({ type: 'ready', systems: [...runtime.systems.values()].map(({ id, title, protected: protectedFlag }) => ({ id, title, protected: protectedFlag })) }); }
+    try {
+      const { bootCommerceKernel } = await import('./kernel.mjs');
+      runtime = await bootCommerceKernel({ ...message.options, invoke });
+      const { Logger } = await import('@deepseek-ai/cordis');
+      runtime.ctx.logger.exporter({
+        levels: { default: 3 },
+        colors: false,
+        maxLength: 16 * 1024,
+        export: message => {
+          try {
+            send({
+              type: 'log',
+              entry: {
+                time: message.ts,
+                scope: 'app',
+                source: 'harness/' + message.name,
+                level: message.type,
+                message: Logger.format({ colors: false, maxLength: 16 * 1024 }, message),
+              },
+            });
+          } catch {}
+        },
+      });
+      send({ type: 'ready', systems: [...runtime.systems.values()].map(({ id, title, protected: protectedFlag }) => ({ id, title, protected: protectedFlag })) });
+    }
     catch (error) { send({ type: 'fatal', error: error.message }); }
   } else if (message.type === 'result') { const p = pending.get(message.id); pending.delete(message.id); if (message.error) p?.reject(new Error(message.error)); else p?.resolve(message.result); }
   else if (message.type === 'call' || message.type === 'sync') {

@@ -28,6 +28,7 @@ import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 import { BrowserRuntime } from './browser.mjs';
 import { testRoutedRequest } from './network-test-routes.mjs';
+import { DebugLogService } from './debug-logging.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
 app.setName('Commerce Tools');
@@ -38,7 +39,7 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, browserRuntime, storage, quitting = false, quitReady = false, shutdownPromise, hostReady;
+let window, manager, workers, files, credentials, network, host, browserRuntime, storage, debugLog, quitting = false, quitReady = false, shutdownPromise, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, surfaceEpoch = 0, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -47,9 +48,53 @@ let updateService, pluginInstallService;
 let localPreview = false;
 let migration;
 let batches, proxy, imageEditor, textRuntime, approvals, downloadSources;
+const pendingDebugLogs = [];
+let debugLogEventTimer = null;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function queueDebugLog(entry) {
+  if (!window || window.isDestroyed()) return;
+  pendingDebugLogs.push(entry);
+  if (pendingDebugLogs.length > 500) pendingDebugLogs.splice(0, pendingDebugLogs.length - 500);
+  if (debugLogEventTimer) return;
+  debugLogEventTimer = setTimeout(() => {
+    debugLogEventTimer = null;
+    if (!window || window.isDestroyed() || !pendingDebugLogs.length) return;
+    window.webContents.send('commerce:debug-log', pendingDebugLogs.splice(0));
+  }, 100);
+  debugLogEventTimer.unref?.();
+}
+function runtimeLog(scope) {
+  return (level, source, message, extra = {}) => {
+    debugLog?.record({ scope, source, level, message, ...extra });
+  };
+}
+function captureWebContents(webContents, scope, source) {
+  webContents.on('console-message', (details, legacyLevel, legacyMessage, legacyLine, legacySource) => {
+    const message = typeof details?.message === 'string' ? details.message : legacyMessage;
+    if (typeof message !== 'string') return;
+    const level = typeof details?.level === 'string'
+      ? details.level
+      : ({ 0: 'debug', 1: 'info', 2: 'warn', 3: 'error' })[legacyLevel] || 'info';
+    const line = Number.isSafeInteger(details?.lineNumber) ? details.lineNumber : legacyLine;
+    const url = details?.sourceId || legacySource || webContents.getURL();
+    debugLog?.record({ scope, source, level, message, line, url });
+  });
+  webContents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
+    if (code === -3 || isMainFrame === false) return;
+    debugLog?.record({ scope, source, level: 'error', message: `页面加载失败（${code}）：${description}`, url: validatedURL });
+  });
+  webContents.on('render-process-gone', (_event, details) => {
+    debugLog?.record({ scope, source, level: 'error', message: `渲染进程退出：${details.reason || 'unknown'}`, url: webContents.getURL() });
+  });
+  webContents.on('preload-error', (_event, preloadPath, error) => {
+    debugLog?.record({ scope, source, level: 'error', message: `预加载脚本失败：${error?.message || preloadPath}` });
+  });
+  webContents.on('unresponsive', () => {
+    debugLog?.record({ scope, source, level: 'warn', message: '页面暂时无响应。', url: webContents.getURL() });
+  });
+}
 function browserEvent(event) {
   if (window && !window.isDestroyed()) window.webContents.send('commerce:browser', event);
   for (const [id, view] of views) {
@@ -131,7 +176,11 @@ async function servePlugin(request, id) {
     const response = await resourceResponse(filename);
     response.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'");
     return response;
-  } catch (error) { console.error('Plugin resource failed:', id, request.url, error.message); return new Response('Not found', { status: 404 }); }
+  } catch (error) {
+    console.error('Plugin resource failed:', id, request.url, error.message);
+    debugLog?.record({ scope: 'plugin', source: id, level: 'error', message: `插件资源加载失败：${error.message}`, url: request.url });
+    return new Response('Not found', { status: 404 });
+  }
 }
 function openView(id, settings = false) {
   const epoch=viewEpochs.get(id) ?? 0;
@@ -166,7 +215,15 @@ async function loadView(id, settings, epoch, surface) {
       // Register in each storage partition explicitly. A scheme being handled
       // elsewhere does not install an identity-bound handler in this session.
       ses.protocol.handle('commerce-plugin', request => servePlugin(request, id));
-      ses.webRequest.onBeforeRequest((details, callback) => { const url = new URL(details.url); const cancel = !(['data:', 'blob:'].includes(url.protocol) || url.protocol === 'commerce-plugin:' && url.hostname === id); if(cancel)console.log('Plugin request blocked:',id,url.origin); callback({ cancel }); });
+      ses.webRequest.onBeforeRequest((details, callback) => {
+        const url = new URL(details.url);
+        const cancel = !(['data:', 'blob:'].includes(url.protocol) || url.protocol === 'commerce-plugin:' && url.hostname === id);
+        if (cancel) {
+          console.log('Plugin request blocked:', id, url.origin);
+          debugLog?.record({ scope: 'plugin', source: id, level: 'warn', message: '已阻止插件网络请求。', url: details.url });
+        }
+        callback({ cancel });
+      });
       ses.on('will-download', async (event, item) => {
         item.pause();
         try {
@@ -190,6 +247,7 @@ async function loadView(id, settings, epoch, surface) {
           }
         } catch (error) {
           console.error('Plugin download failed:', id, error.message);
+          debugLog?.record({ scope: 'plugin', source: id, level: 'error', message: `插件下载失败：${error.message}` });
           item.cancel();
         }
       });
@@ -198,6 +256,7 @@ async function loadView(id, settings, epoch, surface) {
     pluginInstallService.assertAvailable(id);
     assertViewEpoch(id,epoch);
     const view = new WebContentsView({ webPreferences: { session: ses, preload: path.join(root, 'desktop/plugin-preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, spellcheck:false, additionalArguments: ['--commerce-plugin=' + id] } });
+    captureWebContents(view.webContents, 'plugin', id);
     view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
     view.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce-plugin://' + id + '/')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
@@ -248,18 +307,28 @@ async function syncTools() {
 }
 async function startKernel() {
   approvals?.dispose();
+  debugLog?.record({ scope: 'app', source: 'harness', level: 'info', message: '正在启动工具服务。' });
   kernelError = null; systems = []; const previousHost = host; host = null; previousHost?.kill();
   for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('工具服务已重新启动。')); } kernelRequests.clear();
   host = utilityProcess.fork(path.join(root, 'desktop/kernel-host.mjs'), [], { serviceName: 'Commerce Harness Kernel', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(app.getPath('userData'), 'harness'), DSH_TELEMETRY_DISABLED: '1' } });
+  host.stdout?.on('data', data => {
+    const message = data.toString().trim();
+    if (message) debugLog?.record({ scope: 'app', source: 'harness', level: 'info', message });
+  });
   host.stderr?.on('data', data => console.error('[kernel]', data.toString().trim()));
+  host.stderr?.on('data', data => {
+    const message = data.toString().trim();
+    if (message) debugLog?.record({ scope: 'app', source: 'harness', level: 'warn', message });
+  });
   const currentHost = host;
   hostReady = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('工具服务启动超时。')), 30000);
     host.on('message', async message => {
       if (currentHost !== host) return;
-      if (message.type === 'reply') { const p=kernelRequests.get(message.id); kernelRequests.delete(message.id); if(p) {clearTimeout(p.timer); if(message.error) p.reject(new Error(message.error)); else p.resolve(message.result);} }
-      else if (message.type === 'ready') { clearTimeout(timer); systems = message.systems; changed(); resolve(); }
-      else if (message.type === 'fatal') { clearTimeout(timer); kernelError = message.error; changed(); reject(new Error(message.error)); }
+      if (message.type === 'log') { debugLog?.record(message.entry); }
+      else if (message.type === 'reply') { const p=kernelRequests.get(message.id); kernelRequests.delete(message.id); if(p) {clearTimeout(p.timer); if(message.error) p.reject(new Error(message.error)); else p.resolve(message.result);} }
+      else if (message.type === 'ready') { clearTimeout(timer); systems = message.systems; debugLog?.record({ scope: 'app', source: 'harness', level: 'info', message: '工具服务已就绪。' }); changed(); resolve(); }
+      else if (message.type === 'fatal') { clearTimeout(timer); kernelError = message.error; debugLog?.record({ scope: 'app', source: 'harness', level: 'error', message: message.error }); changed(); reject(new Error(message.error)); }
       else if (message.type === 'invoke') { try { const result = await systemInvoke(message.service, message.method, message.args); if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, result }); } catch (error) { if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, error: error.message }); } }
     });
     host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('工具服务已停止运行。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = '工具服务已停止运行（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
@@ -360,6 +429,27 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'downloadSource.set') return downloadSources.setSource(args.source);
   if (method === 'downloadSource.addCustomMirror') return downloadSources.addCustomMirror(args.url);
   if (method === 'downloadSource.removeCustomMirror') return downloadSources.removeCustomMirror(args.url);
+  if (method === 'debugLog.status') return debugLog.snapshot();
+  if (method === 'debugLog.recent') return debugLog.recent();
+  if (method === 'debugLog.configure') {
+    if (args.directory !== undefined) throw new Error('请通过目录选择器设置日志位置。');
+    const value = await debugLog.configure({ enabled: args.enabled, maxBytes: args.maxBytes });
+    changed();
+    return value;
+  }
+  if (method === 'debugLog.chooseDirectory') {
+    const current = debugLog.snapshot();
+    const result = await dialog.showOpenDialog(window, { title: '选择日志保存目录', defaultPath: current.directory, properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled || !result.filePaths?.[0]) return { canceled: true, debugLog: current };
+    const value = await debugLog.configure({ directory: result.filePaths[0] });
+    changed();
+    return { canceled: false, debugLog: value };
+  }
+  if (method === 'debugLog.openDirectory') {
+    const error = await shell.openPath(debugLog.snapshot().directory);
+    if (error) throw new Error('无法打开日志目录：' + error);
+    return true;
+  }
   if (method === 'openExternal' || method === 'shell.openExternal') {
     if (typeof args.url !== 'string' || !/^https?:\/\//i.test(args.url)) throw new Error('链接无效。');
     await shell.openExternal(args.url);
@@ -383,7 +473,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'browser.resize.stop') { stopBrowserResize(); return; }
   if (method === 'browser.hide') { stopBrowserResize(); browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
-  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
+  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), debugLog: debugLog.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -507,6 +597,11 @@ async function shutdownRuntime() {
   quitting = true;
   shutdownPromise = (async () => {
     stopBrowserResize();
+    if (debugLogEventTimer) {
+      clearTimeout(debugLogEventTimer);
+      debugLogEventTimer = null;
+    }
+    debugLog?.record({ scope: 'app', source: 'app', level: 'info', message: '轻作正在退出。' });
     await pluginInstallService?.shutdown();
     approvals?.dispose();
     await batches?.shutdown();
@@ -517,6 +612,7 @@ async function shutdownRuntime() {
     host?.postMessage({ type: 'shutdown' });
     await new Promise(resolve => setTimeout(resolve, 300));
     host?.kill();
+    await debugLog?.flush();
   })().finally(() => {
     // Both the updater and the normal before-quit path call app.quit() after
     // this cleanup. Mark the application ready first so the second
@@ -530,6 +626,12 @@ async function main() {
 await app.whenReady();
 migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
+debugLog = new DebugLogService({
+  root: app.getPath('userData'),
+  onEntry: queueDebugLog,
+  onStateChange: () => changed(),
+});
+await debugLog.initialize();
 downloadSources = new DownloadSourceService({ root: app.getPath('userData'), changed });
 await downloadSources.initialize();
 credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':', path.join(app.getPath('userData'), 'credentials-vault.json'));
@@ -569,7 +671,7 @@ approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner 
     return { result };
   } finally { signal.removeEventListener('abort', cancel); if (signal.aborted) await workers.stopCaller(plugin.id, owner); }
 } });
-workers = new Workers(path.join(app.getPath('userData'), 'jobs'), launcher, process.execPath);
+workers = new Workers(path.join(app.getPath('userData'), 'jobs'), launcher, process.execPath, { log: runtimeLog('plugin') });
 await workers.recover().catch(error => { workers.recoveryError = error.message; console.error('沙箱任务恢复失败：',error.message); });
 const marketConfig = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
 const distribution = JSON.parse(await readFile(path.join(generated, 'distribution.json'), 'utf8'));
@@ -643,7 +745,8 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
-browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize, files, storage, cookieStore: path.join(app.getPath('userData'), 'browser-session-cookies.json') });
+captureWebContents(window.webContents, 'app', 'app');
+browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize, files, storage, cookieStore: path.join(app.getPath('userData'), 'browser-session-cookies.json'), log: runtimeLog('browser') });
 ipcMain.on('commerce:browser-candidates', (event, payload) => {
   browserRuntime?.ingestFromContents(event.sender.id, payload);
 });
@@ -670,7 +773,11 @@ app.on('window-all-closed', () => app.quit());
 
 }
 if (!primary) app.quit();
-else void main().catch(error => { console.error(error); app.quit(); });
+else void main().catch(error => {
+  console.error(error);
+  debugLog?.record({ scope: 'app', source: 'app', level: 'error', message: error?.stack || error?.message || String(error) });
+  void debugLog?.flush().finally(() => app.quit());
+});
 
 // Trusted main-process integration access; never exposed over renderer IPC.
 export { network, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, browserRuntime, files, storage, shutdownRuntime };

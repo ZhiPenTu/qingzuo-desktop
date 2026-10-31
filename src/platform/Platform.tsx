@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { PluginCard, pluginInstallActive, toolCategory, type Plugin, type ToolEntry } from './PluginCard';
 import gt from 'semver/functions/gt';
-import type { DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
+import type { DebugLogState, DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
 import { BrowserTabStrip, BrowserWorkspace } from './BrowserWorkspace';
 import { IssueReportDialog } from './IssueReportDialog';
@@ -22,8 +22,9 @@ import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
 import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
+import { DebugLogPage } from './DebugLogPage';
 const AIChat = lazy(() => import('./AIChat'));
-type Page = 'home' | 'chat' | 'ai' | 'settings';
+type Page = 'home' | 'chat' | 'ai' | 'settings' | 'logs';
 type ToolTab = 'installed' | 'all';
 interface ComponentUpdateState {
   status: string;
@@ -36,11 +37,12 @@ interface ComponentUpdateState {
   compatibility?: string;
   error?: string | null;
 }
-interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
-const navigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'settings', title: '设置', icon: Settings }] as const;
-const shellPageIds = ['home', 'chat', 'ai', 'settings'] as const;
+interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; debugLog?: DebugLogState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
+const baseNavigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'settings', title: '设置', icon: Settings }] as const;
+const shellPageIds = ['home', 'chat', 'ai', 'settings', 'logs'] as const;
 const isShellPage = (id: string): id is Page => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
+const defaultDebugLog: DebugLogState = { enabled: false, directory: '', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
 const BROWSER_PANE_MIN_WIDTH = 360;
 // Tools keep the space they need to lay out; the browser pane gives way first.
 const TOOL_PANE_MIN_WIDTH = 620;
@@ -73,20 +75,25 @@ const persistBrowserPaneRatio = (ratio: number) => {
   try { window.localStorage.setItem(BROWSER_PANE_RATIO_KEY, String(ratio)); } catch { /* storage is optional */ }
 };
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, debugLog: defaultDebugLog, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
-const shellIconFor = (id: string) => (id === 'ai' ? Sparkles : navigation.find(item => item.id === id)?.icon ?? Boxes);
 const pageCopy = {
   home: ['工具中心', '安装、管理和发现工具，都在一个地方。'],
   ai: ['AI 设置', '选择服务商，连接后即可开始对话。'],
   chat: ['AI 对话', '说一句话，让工具替你完成。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，管理轻作与已安装的工具。'],
+  logs: ['日志调试', '查看轻作、插件和浏览器产生的运行记录。'],
 } as const;
 export default function Platform() {
   const desktop = Boolean(window.commerceDesktop);
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
+  const debugLogState = status?.debugLog ?? defaultDebugLog;
+  const navigation = useMemo(() => debugLogState.enabled
+    ? [baseNavigation[0], baseNavigation[1], { id: 'logs' as const, title: '日志调试', icon: ScrollText }, baseNavigation[2]]
+    : baseNavigation, [debugLogState.enabled]);
+  const shellIconFor = (id: string) => (id === 'ai' ? Sparkles : id === 'logs' ? ScrollText : navigation.find(item => item.id === id)?.icon ?? Boxes);
   const [page, setPage] = useState<Page | string>('home');
   const [toolTab, setToolTab] = useState<ToolTab>('installed');
   const [lastShellPage, setLastShellPage] = useState<Page>('home');
@@ -135,6 +142,12 @@ export default function Platform() {
   };
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
+  useEffect(() => {
+    if (status && !debugLogState.enabled && page === 'logs') {
+      setPage('settings');
+      setLastShellPage('settings');
+    }
+  }, [status, debugLogState.enabled, page]);
   useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => {
     if (Number.isFinite(width)) {
       let collapsed = false;
@@ -165,6 +178,20 @@ export default function Platform() {
     finally { setBusy(false); if (installId) { pendingInstalls.current.delete(installId); setStartingPluginId(null); } }
   };
   const act = (method: string, args?: unknown) => { void run(method, args).catch(() => {}); };
+  const toggleDebugLog = async () => {
+    if (!desktop || busy) return;
+    const enabled = !debugLogState.enabled;
+    try {
+      const next = await run('debugLog.configure', { enabled }) as DebugLogState;
+      setStatus(current => current ? { ...current, debugLog: next } : current);
+      if (!enabled) {
+        setPage('settings');
+        setLastShellPage('settings');
+      }
+    } catch {
+      // run() already surfaced the error.
+    }
+  };
   const downloadSourceState = status?.downloadSource ?? defaultDownloadSource;
   const formatCustomMirrorLabel = (mirror: string) => {
     try { return `自定义镜像 · ${new URL(mirror).host}`; }
@@ -484,6 +511,7 @@ export default function Platform() {
           </div>}
         </> : null}
         {page === 'ai' ? <AISettings onOpenChat={() => void navigate('chat')} /> : null}
+        {page === 'logs' ? <DebugLogPage state={debugLogState} onStateChange={next => setStatus(current => current ? { ...current, debugLog: next } : current)} /> : null}
         {page === 'settings' ? <div className="commerce-settings">
           <Card>
             <CardHeader>
@@ -508,6 +536,31 @@ export default function Platform() {
                 ))}
               </div>
             </CardContent>
+          </Card>
+          <Card className="debug-log-setting-card">
+            <CardHeader>
+              <CardTitle role="heading" aria-level={2}>日志调试</CardTitle>
+              <CardDescription>记录轻作、插件和浏览器的运行日志，方便排查问题。</CardDescription>
+              <CardAction className="self-center">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label={debugLogState.enabled ? '关闭日志调试' : '开启日志调试'}
+                  aria-checked={debugLogState.enabled}
+                  className={cn('debug-log-switch', debugLogState.enabled && 'is-on')}
+                  disabled={!desktop || busy}
+                  onClick={() => void toggleDebugLog()}
+                >
+                  <span />
+                </button>
+              </CardAction>
+            </CardHeader>
+            {debugLogState.enabled ? <CardContent>
+              <div className="debug-log-setting-detail">
+                <div><span>保存位置</span><strong title={debugLogState.directory}>{debugLogState.directory}</strong></div>
+                <Button type="button" variant="outline" size="sm" onClick={() => void navigate('logs')}><ScrollText data-icon="inline-start" />打开日志调试</Button>
+              </div>
+            </CardContent> : null}
           </Card>
           <Card className="download-source-card">
             <div className="download-source-row">

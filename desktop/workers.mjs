@@ -3,7 +3,7 @@ import path from 'node:path';
 import { confinedPath, TARGET } from './security.mjs';
 import { launchSandbox, RpcWorker, cleanupSandbox } from './sandbox.mjs';
 export class Workers {
-  constructor(root, launcher, nodeRuntime) { this.root = root; this.launcher = launcher; this.nodeRuntime = nodeRuntime; this.workers = new Map(); }
+  constructor(root, launcher, nodeRuntime, { log = () => {} } = {}) { this.root = root; this.launcher = launcher; this.nodeRuntime = nodeRuntime; this.log = log; this.workers = new Map(); }
   async recover() {
     await mkdir(this.root,{recursive:true,mode:0o700});
     const journals = path.join(this.root,'.policies'); await mkdir(journals,{recursive:true,mode:0o700});
@@ -58,7 +58,7 @@ export class Workers {
       // the launcher already supplied all three handles. AppContainer denies it.
       const nodeArgs = [...(process.platform === 'win32' ? ['--no-stdio-init'] : []), '--preserve-symlinks', '--preserve-symlinks-main', entry];
       const child = await launchSandbox({ executable, args: node ? nodeArgs : [], readOnly, writable: [cwd], cwd, launcher: this.launcher, env: node ? { ELECTRON_RUN_AS_NODE: '1' } : {} });
-      worker = new RpcWorker(child); worker.directory = cwd; worker.cleaned = child.cleanup.then(() => rm(cwd, { recursive: true, force: true, maxRetries:5, retryDelay:100 }));
+      worker = new RpcWorker(child, 90000, (level, message, extra = {}) => this.log(level, 'backend/' + plugin.id, message, extra)); worker.directory = cwd; worker.cleaned = child.cleanup.then(() => rm(cwd, { recursive: true, force: true, maxRetries:5, retryDelay:100 }));
       const status=await worker.call('health');if(!status?.ready)throw new Error('插件本地服务尚未就绪。');return worker;
     } catch (e) { if(worker) {await worker.stop();await worker.cleaned;} else await rm(cwd,{recursive:true,force:true,maxRetries:5,retryDelay:100}); throw e; }
   }

@@ -55,9 +55,26 @@ export interface BrowserStatus {
   candidates: BrowserCandidate[];
   downloads: BrowserDownloadTask[];
 }
+export interface DebugLogEntry {
+  time: number;
+  scope: 'app' | 'plugin' | 'browser';
+  source: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  line?: number;
+  url?: string;
+}
+export interface DebugLogState {
+  enabled: boolean;
+  directory: string;
+  maxBytes: number;
+  currentFile: string | null;
+  storedBytes: number;
+  lastError: string | null;
+}
 declare global {
   interface Window {
-    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowserPane?(callback: (value: { tabId: string; pluginId: string }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void };
+    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowserPane?(callback: (value: { tabId: string; pluginId: string }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void; onDebugLog?(callback: (entries: DebugLogEntry[]) => void): () => void };
     commercePlugin?: PluginBridge & { id: string };
   }
 }

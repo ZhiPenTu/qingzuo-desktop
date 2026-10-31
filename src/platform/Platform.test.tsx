@@ -11,11 +11,13 @@ const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallS
 
 function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus) {
   let listener = () => {};
+  let debugListener = (_entries: import('./commerce').DebugLogEntry[]) => {};
   let plugins = hasPlugin ? [installed] : [];
   let pluginInstalls = initialJob ? [initialJob] : [];
+  let debugLog = { enabled: false, directory: '/tmp/qingzuo-logs', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
   const invoke = vi.fn(async (method: string, args?: unknown) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, ...(browser ? { browser } : {}), update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, debugLog, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, ...(browser ? { browser } : {}), update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
     if (method === 'downloadSource.set') {
       const next = (args as { source: string }).source;
       downloadSource = { ...downloadSource, source: next, notice: null };
@@ -39,10 +41,23 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
     }
     if (method === 'market.list') return { items: [entry] };
     if (method === 'market.install') { pluginInstalls = [job('downloading', { progress: 40, transferred: 4 * 1024 ** 2, total: 10 * 1024 ** 2 })]; listener(); return { accepted: true }; }
+    if (method === 'debugLog.recent') return [];
+    if (method === 'debugLog.configure') {
+      const update = args as { enabled?: boolean; maxBytes?: number };
+      debugLog = { ...debugLog, ...update };
+      listener();
+      return structuredClone(debugLog);
+    }
+    if (method === 'debugLog.chooseDirectory') {
+      debugLog = { ...debugLog, directory: '/tmp/qingzuo-logs/chosen' };
+      listener();
+      return { canceled: false, debugLog: structuredClone(debugLog) };
+    }
+    if (method === 'debugLog.openDirectory') return true;
     return {};
   });
-  window.commerceDesktop = { invoke, onChanged: callback => { listener = callback; return () => { listener = () => {}; }; } } as NonNullable<Window['commerceDesktop']>;
-  return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }) };
+  window.commerceDesktop = { invoke, onChanged: callback => { listener = callback; return () => { listener = () => {}; }; }, onDebugLog: callback => { debugListener = callback; return () => { debugListener = () => {}; }; } } as NonNullable<Window['commerceDesktop']>;
+  return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }), emitDebug: (entries: import('./commerce').DebugLogEntry[]) => act(() => debugListener(entries)) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
 async function openToolTab(name: '已安装' | '全部') { fireEvent.click(await screen.findByRole('tab', { name })); }
@@ -211,6 +226,48 @@ it('shows the app version and routes every runtime check to app updates', async 
   await screen.findByText('已添加的自定义源');
   fireEvent.click(screen.getByRole('button', { name: '删除自定义源' }));
   await waitFor(() => expect(sourceSelect.value).toBe('github'));
+});
+
+it('reveals the debug log page from settings and streams logs from every scope', async () => {
+  const { invoke, emitDebug } = fixture();
+  render(<Platform />);
+  await navigate('设置');
+
+  const toggle = await screen.findByRole('switch', { name: '开启日志调试' });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(screen.queryByRole('button', { name: '日志调试' })).toBeNull();
+
+  fireEvent.click(toggle);
+  const logNav = await screen.findByRole('button', { name: '日志调试' });
+  expect(screen.getByRole('switch', { name: '关闭日志调试' }).getAttribute('aria-checked')).toBe('true');
+  expect(invoke.mock.calls.some(([method, args]) => method === 'debugLog.configure' && (args as { enabled?: boolean }).enabled === true)).toBe(true);
+
+  fireEvent.click(logNav);
+  await screen.findByRole('heading', { name: '日志调试' });
+  await screen.findByRole('heading', { name: '实时日志' });
+  expect(screen.getByText('已使用 0 KB')).toBeTruthy();
+
+  emitDebug([
+    { time: Date.parse('2026-10-31T08:30:00.000Z'), scope: 'app', source: 'app', level: 'info', message: '底座日志' },
+    { time: Date.parse('2026-10-31T08:30:01.000Z'), scope: 'plugin', source: 'plugin/demo', level: 'warn', message: '插件日志' },
+    { time: Date.parse('2026-10-31T08:30:02.000Z'), scope: 'browser', source: 'tab/demo', level: 'error', message: '浏览器日志' },
+  ]);
+  expect(await screen.findByText('底座日志')).toBeTruthy();
+  expect(screen.getByText('插件日志')).toBeTruthy();
+  expect(screen.getByText('浏览器日志')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '插件' }));
+  expect(screen.queryByText('底座日志')).toBeNull();
+  expect(screen.getByText('插件日志')).toBeTruthy();
+
+  const size = screen.getByLabelText('最大保存大小') as HTMLSelectElement;
+  fireEvent.change(size, { target: { value: '100' } });
+  await waitFor(() => expect(invoke.mock.calls.some(([method, args]) => method === 'debugLog.configure' && (args as { maxBytes?: number }).maxBytes === 100 * 1024 ** 2)).toBe(true));
+
+  fireEvent.click(screen.getByRole('button', { name: '更改目录' }));
+  await screen.findByText('/tmp/qingzuo-logs/chosen');
+  fireEvent.click(screen.getByRole('button', { name: '打开目录' }));
+  await waitFor(() => expect(invoke.mock.calls.some(([method]) => method === 'debugLog.openDirectory')).toBe(true));
 });
 
 it('checks plugin versions on demand and offers the update from installed tools', async () => {

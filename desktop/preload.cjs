@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('commerceDesktop', Object.freeze({
   onBrowserPane: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser-pane', listener); return () => ipcRenderer.removeListener('commerce:browser-pane', listener); },
   onAI: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:ai', listener); return () => ipcRenderer.removeListener('commerce:ai', listener); },
   onBrowser: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser', listener); return () => ipcRenderer.removeListener('commerce:browser', listener); },
+  onDebugLog: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:debug-log', listener); return () => ipcRenderer.removeListener('commerce:debug-log', listener); },
 }));
