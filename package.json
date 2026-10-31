@@ -95,6 +95,6 @@
   },
   "license": "MIT",
   "overrides": {
-    "node-addon-require-builtin": "0.1.6"
+    "node-addon-require-builtin": "0.1.9"
   }
 }

@@ -42,7 +42,8 @@ test('frozen alpha.1 pending engine call is interrupted without replay; new plug
     await new Promise(resolve => server.close(resolve)); await rm(home, { recursive: true, force: true });
   });
   const invoke = async (_service, method, args) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'synthetic-fixture-key', model: 'fixture-harness' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'synthetic-fixture-key' };
+    if (method === 'models') return [{ id: 'fixture-harness' }];
     if (method === 'tools.call') { attempts.push(args); return approvals.request(args.owner, args); }
     if (method === 'event') return;
     return [];

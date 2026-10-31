@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, ScrollText } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,7 +16,6 @@ import { IssueReportDialog } from './IssueReportDialog';
 import { recordError, getLatestError, type CapturedError } from './error-tracker';
 import { useTheme } from '../theme/ThemeProvider';
 import { cn } from '@/lib/utils';
-import brandIcon from '@/assets/qingzuo.png';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
 import { AISettings } from './AISettings';
@@ -452,15 +451,14 @@ export default function Platform() {
   return <div className="commerce-shell">
     <div className="commerce-windowbar">
       <div className="commerce-windowbar-left">
-        <div className="commerce-windowbar-title"><img src={brandIcon} alt="" /><span>轻作 · Qingzuo</span></div>
-        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-sidebar-toggle" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <ChevronsRight strokeWidth={1.8} /> : <ChevronsLeft strokeWidth={1.8} />}</Button>
         {renderWorkspaceTabs()}
         <div className="commerce-windowbar-drag" aria-hidden="true" />
       </div>
       {browserPaneOpen && status?.browser?.open ? <div className="commerce-windowbar-browser-pane" style={{ '--commerce-browser-pane-width': `${browserPaneSize.width}px` } as CSSProperties}>
         <BrowserTabStrip embedded status={status.browser} busy={busy} onAction={run} />
-        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="隐藏浏览器面板" title="隐藏浏览器面板" onClick={() => void hideBrowserPane()}><PanelRightClose /></Button>
-      </div> : <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="打开浏览器面板" title="打开浏览器面板" onClick={() => void openBrowserPane()}><PanelRightOpen /></Button>}
+        <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="隐藏浏览器面板" title="隐藏浏览器面板" onClick={() => void hideBrowserPane()}><ChevronRight strokeWidth={1.8} /></Button>
+      </div> : <Button variant="ghost" size="icon-sm" className="commerce-windowbar-browser-toggle" aria-label="打开浏览器面板" title="打开浏览器面板" onClick={() => void openBrowserPane()}><ChevronLeft strokeWidth={1.8} /></Button>}
     </div>
     <div className="commerce-body">
       <aside className={cn('commerce-sidebar', sidebarCollapsed && 'is-collapsed')}>

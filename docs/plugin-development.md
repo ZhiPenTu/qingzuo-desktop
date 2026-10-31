@@ -33,27 +33,29 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 ## 第三方界面配色
 
-插件虽然独立渲染，也应像轻作工作台中的一个工具，而不是嵌进来的另一套产品。界面以暖白或深绿灰中性表面为主，墨绿/薄荷绿只承担主操作、当前选择和焦点。插件使用 `--qz-*` 局部语义变量，不假定能读取宿主 CSS 变量。
+插件虽然独立渲染，也应像轻作工作台中的一个工具，而不是嵌进来的另一套产品。工作区域在浅色模式下使用纯白 `#ffffff`，通过中性边框、轻量中性表面和清晰排版建立层级；窗口外壳才使用浅灰。墨绿/薄荷绿只承担主操作、当前选择和焦点。插件使用 `--qz-*` 局部语义变量，不假定能读取宿主 CSS 变量。完整规则见 [插件界面视觉规范](design/plugin-ui-guidelines.md)。
 
 当前隔离页面不会继承底座的强制主题，默认使用 `prefers-color-scheme` 跟随系统。宿主后续提供明确的主题值时，插件应优先使用宿主值。
 
 ```css
 :root {
   color-scheme: light;
-  --qz-bg: #f7f8f4;
+  --qz-bg: #ffffff;
   --qz-surface: #ffffff;
   --qz-overlay: #ffffff;
-  --qz-canvas: #e9ede7;
-  --qz-text: #20312a;
-  --qz-text-muted: #69756e;
+  --qz-surface-subtle: #f8f9f7;
+  --qz-canvas: #eef0ec;
+  --qz-text: #1f2d26;
+  --qz-text-muted: #68756e;
   --qz-primary: #28654a;
+  --qz-primary-hover: #1e503a;
   --qz-on-primary: #ffffff;
-  --qz-selection: #e4eee5;
-  --qz-on-selection: #28654a;
-  --qz-muted: #f0f3ed;
-  --qz-hover: #edf2eb;
-  --qz-border: #dfe5de;
-  --qz-input-border: #d7dfd5;
+  --qz-selection: #e7eee8;
+  --qz-on-selection: #245a43;
+  --qz-muted: #f0f2ef;
+  --qz-hover: #edf1ed;
+  --qz-border: #e1e5e0;
+  --qz-input-border: #d5dcd6;
   --qz-focus: #28654a;
   --qz-danger: #b42318;
   --qz-boundary-strong: #69756e;
@@ -76,20 +78,22 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --qz-bg: #19211d;
-    --qz-surface: #202923;
+    --qz-bg: #151c18;
+    --qz-surface: #1d2621;
+    --qz-surface-subtle: #202a24;
     --qz-overlay: #253129;
-    --qz-canvas: #121a15;
+    --qz-canvas: #111814;
     --qz-text: #edf3ee;
     --qz-text-muted: #a6b5aa;
     --qz-primary: #99d8ad;
+    --qz-primary-hover: #b9e6c5;
     --qz-on-primary: #173222;
     --qz-selection: #2c4233;
     --qz-on-selection: #bde6c8;
     --qz-muted: #253029;
     --qz-hover: #2b382f;
-    --qz-border: #36453a;
-    --qz-input-border: #425447;
+    --qz-border: #35433a;
+    --qz-input-border: #415246;
     --qz-focus: #99d8ad;
     --qz-danger: #f87171;
     --qz-boundary-strong: #a6b5aa;
@@ -113,9 +117,11 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 使用规则：
 
-- 页面和工具内容使用 `--qz-bg`，卡片、列表和面板使用 `--qz-surface`；同一层级不要反复嵌套不同底色。
+- 页面和工具内容使用 `--qz-bg`，卡片、列表和面板使用 `--qz-surface`；同一层级不要反复嵌套不同底色。浅色工作区域必须保持纯白，不能用暖白或灰白替代。
 - 一个区域只设置一个主操作。次要操作使用边框或幽灵按钮，不要整页铺满绿色按钮。
 - 普通卡片使用 `1px solid var(--qz-border)` 和间距分组，不使用装饰性投影、玻璃拟态或多层浮起卡片。
+- 卡片圆角保持 `7–9px`，控件和按钮使用 `6px`；不要使用超过 `12px` 的装饰性大圆角。
+- 页面留白与控件间距优先收紧；正文和控件保持 `13px` 左右，不能通过缩小字体制造紧凑感。
 - 状态必须同时提供图标或文字。信息提示优先使用中性色，不要新增通用蓝色。
 - 图表按 `--qz-chart-1` 至 `--qz-chart-5` 顺序取色，并提供直接标签、图例或不同线型；面积填充不超过同色 `16%` 不透明度。
 - 键盘焦点使用 `2px` 的 `--qz-focus` 环。输入框不能只靠浅边框识别，应同时有可见标签。
@@ -181,10 +187,11 @@ const result = await client.ai.complete({
 
 ### API 1.4 本地预览
 
-SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中配置的 OpenAI 兼容代理，全部能力要求显式清单权限：
+SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中连接的 OpenAI 兼容服务，全部能力要求显式清单权限：
 
-- **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是已过滤图像模型的可用文本模型（`id`、`title`），`defaultModel` 是底座配置的默认模型。插件用它渲染模型选择器。
+- **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是服务 `/v1/models` 全部返回中过滤出的可用文本模型（`id`、`title`）；底座不再保存指定模型，`defaultModel` 只是目录中的首个文本模型，方便旧插件兼容。新插件应展示目录并由用户或插件逻辑自行选择。
 - **文本补全**：`ai.complete({ model?, messages, temperature?, responseFormat? })` 通过主进程调用配置的代理 `/v1/chat/completions`，返回 `{ content, model }`。`messages` 为 1 到 100 条 `system / user / assistant` 消息，单条不超过 10 万字符；`responseFormat` 仅接受 `text` 或 `json_object`。密钥不出主进程，请求与响应大小受主进程限制。
+- **共享助手**：`ai.assistant.send({ text, model? })` 也可显式传入目录中的模型；省略时沿用该插件会话已选模型，首次会话回退到目录中的首个文本模型。
 - **清单权限**：`permissions.ai` 新增 `text` 值；`api: '^1.4.0'` 声明本能力。旧插件不受影响。
 
 示例：
@@ -192,7 +199,7 @@ SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。
 ```js
 const { models, defaultModel } = await client.ai.textModels();
 const result = await client.ai.complete({
-  model: settings.model || defaultModel,
+  model: models.some(item => item.id === settings.model) ? settings.model : defaultModel,
   messages,
   temperature: 0.2,
   responseFormat: { type: 'json_object' },

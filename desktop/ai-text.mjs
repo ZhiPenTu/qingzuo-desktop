@@ -1,6 +1,6 @@
 import { boundedJson } from './ai-images.mjs';
+import { isChatModel } from './ai-proxy.mjs';
 
-const IMAGE_MODEL = /gpt[-_]?image|nano[-_ ]?banana|image[-_]?generation/i;
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 100_000;
 const MAX_IMAGE_PARTS = 4;
@@ -54,9 +54,9 @@ export class TextRuntime {
   async models() {
     const catalog = await this.proxy.catalog();
     const models = catalog
-      .filter(item => !IMAGE_MODEL.test(item.id) && !IMAGE_MODEL.test(item.type ?? ''))
+      .filter(isChatModel)
       .map(({ id, title }) => ({ id, title }));
-    return { models, defaultModel: this.proxy.settings.model };
+    return { models, defaultModel: models[0]?.id ?? '' };
   }
   async complete(args = {}) {
     const model = args.model === undefined ? '' : String(args.model);
@@ -71,7 +71,9 @@ export class TextRuntime {
       return { role: message.role, content: contentOf(message.content) };
     });
     const connection = await this.proxy.connection();
-    const body = { model: model || connection.model, messages };
+    const selectedModel = model || (await this.proxy.catalog(connection)).filter(isChatModel)[0]?.id;
+    if (!selectedModel) throw new Error('没有可用的文本模型，请检查 AI 服务配置。');
+    const body = { model: selectedModel, messages };
     if (temperature !== undefined) body.temperature = temperature;
     if (responseFormat !== undefined) body.response_format = { type: responseFormat.type };
     if (Buffer.byteLength(JSON.stringify(body)) > MAX_BODY_BYTES) throw new Error('补全请求过大。');

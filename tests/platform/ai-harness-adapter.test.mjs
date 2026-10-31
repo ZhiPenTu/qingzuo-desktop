@@ -136,6 +136,8 @@ test('HTTP and in-band failures retain safe status facts without exposing upstre
   const finish = (await http.run()).at(-1);
   assert.equal(finish.reason.failure.status, 429); assert.equal(finish.reason.failure.code, 'PROXY_HTTP_ERROR');
   assert.ok(!finish.reason.failure.message.includes('fixture-secret'));
+  const incompatible = fixture([], {}, () => new Response('fixture-secret-upstream-error', { status: 400 }));
+  assert.match((await incompatible.run()).at(-1).reason.failure.message, /更换模型/);
   const inBand = fixture([{ error: { message: 'fixture-secret-upstream-error' } }]);
   assert.equal((await inBand.run()).at(-1).reason.failure.message, '助手模型返回错误。');
 });
@@ -169,7 +171,8 @@ test('real Harness persists reasoning and usage, resumes them, and never dispatc
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const invoke = async (_service, method) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture-key', model: 'fixture-model' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture-key' };
+    if (method === 'models') return [{ id: 'fixture-model' }];
     if (method === 'tools.list') { executions++; return { plugins: [] }; }
     if (method === 'event') return;
     return [];

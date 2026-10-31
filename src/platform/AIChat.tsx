@@ -7,16 +7,19 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescri
 import { cn } from '@/lib/utils';
 import { HarnessActivity, HarnessMessage, HarnessParameters } from './HarnessPresentation';
 import { chatInvoke, type ChatSession, type ChatSummary, type ChatPlugin } from './harness-client';
-import { assistantModelLabel, isChatModel } from './ai-providers';
+import { isChatModel, type AIModel } from './ai-providers';
 import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
 
 export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () => void; onOpenPlugin: (id: string) => void }) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [plugins, setPlugins] = useState<ChatPlugin[]>([]);
+  const [connected, setConnected] = useState(false);
   const [ready, setReady] = useState(false);
   const [model, setModel] = useState('');
-  const [address, setAddress] = useState('');
+  const [models, setModels] = useState<AIModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelError, setModelError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [text, setText] = useState('');
@@ -29,28 +32,64 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const input = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+  const modelIds = useRef(new Set<string>());
+  const fallbackModel = useRef('');
   const refreshList = useCallback(async () => setChats(await chatInvoke<ChatSummary[]>('list')), []);
   const load = useCallback(async (id: string) => {
     selected.current = id; setStream(''); setError(''); follow.current = true;
     const value = await chatInvoke<ChatSession>('status', { id });
-    if (selected.current === id) { setSession(value); setStream(value.partial || ''); }
+    if (selected.current === id) {
+      setSession(value);
+      setStream(value.partial || '');
+      setModel(value.model && modelIds.current.has(value.model) ? value.model : fallbackModel.current);
+    }
   }, []);
   useEffect(() => {
     if (!window.commerceDesktop) return;
     let active = true;
-    void Promise.all([chatInvoke<ChatSummary[]>('list'), chatInvoke<ChatPlugin[]>('tools'), window.commerceDesktop?.invoke<{ address?: string; model: string; verified?: string[]; ready?: boolean }>('ai.status')]).then(async ([items, tools, status]) => {
+    void (async () => {
+      const [items, tools, status] = await Promise.all([
+        chatInvoke<ChatSummary[]>('list'),
+        chatInvoke<ChatPlugin[]>('tools'),
+        window.commerceDesktop?.invoke<{ model?: string; verified?: string[]; ready?: boolean }>('ai.status'),
+      ]);
       if (!active) return;
-      setChats(items); setPlugins(tools); setModel(status?.model || ''); setAddress(status?.address || '');
-      setReady(typeof status?.ready === 'boolean' ? status.ready : Boolean(status?.model && status.verified?.includes(status.model) && isChatModel({ id: status.model })));
+      setChats(items);
+      setPlugins(tools);
+      const connected = typeof status?.ready === 'boolean'
+        ? status.ready
+        : Boolean(status?.model && status.verified?.includes(status.model) && isChatModel({ id: status.model }));
+      setConnected(connected);
+      if (connected) {
+        try {
+          const catalog = await window.commerceDesktop?.invoke<{ models: AIModel[]; defaultModel: string }>('ai.textModels');
+          if (!active) return;
+          const available = Array.isArray(catalog?.models) ? catalog.models : [];
+          modelIds.current = new Set(available.map(item => item.id));
+          fallbackModel.current = available.some(item => item.id === catalog?.defaultModel) ? catalog?.defaultModel || '' : available[0]?.id || '';
+          setModels(available);
+          setModel(fallbackModel.current);
+        } catch (reason) {
+          if (active) setModelError(reason instanceof Error ? reason.message : String(reason));
+        }
+      }
+      if (!active) return;
+      setModelsLoading(false);
+      setReady(connected && modelIds.current.size > 0);
       const remembered = localStorage.getItem('qingzuo.ai-chat.selected.v1');
       const id = items.find(item => item.id === remembered)?.id || items[0]?.id;
       if (id) await load(id);
-    }).catch(reason => { if (active) setError(reason.message); });
+    })().catch(reason => { if (active) { setError(reason.message); setModelsLoading(false); } });
     const dispose = window.commerceDesktop?.onAI?.(event => {
       if (event.type === 'navigate') { onOpenPlugin(event.pluginId); return; }
       if (event.chatId !== selected.current) { if (event.type === 'assistant') void refreshList().catch(() => {}); return; }
       if (event.type === 'assistant-delta') setStream(value => event.partial ?? value + event.text);
-      if (event.type === 'assistant') { setSession(value => ({ ...event.session, approvals: value?.approvals || [] })); setStream(event.session.partial || ''); void refreshList().catch(() => {}); }
+      if (event.type === 'assistant') {
+        setSession(value => ({ ...event.session, approvals: value?.approvals || [] }));
+        if (event.session.model && modelIds.current.has(event.session.model)) setModel(event.session.model);
+        setStream(event.session.partial || '');
+        void refreshList().catch(() => {});
+      }
       if (event.type === 'approvals') setSession(value => value ? { ...value, approvals: event.approvals } : value);
     });
     return () => { active = false; dispose?.(); };
@@ -67,14 +106,23 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
     if (operation.current) return; operation.current = true; setBusy(true); setError('');
     try { await work(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { operation.current = false; setBusy(false); }
   }
-  async function create() { const value = await chatInvoke<ChatSession>('create'); selected.current = value.id; setSession(value); setStream(''); setText(''); setHistoryOpen(false); await refreshList(); }
+  async function create() {
+    if (!model) return;
+    const value = await chatInvoke<ChatSession>('create', { model });
+    selected.current = value.id;
+    setSession(value);
+    setStream('');
+    setText('');
+    setHistoryOpen(false);
+    await refreshList();
+  }
   async function send() {
-    const draft = text.trim(); if (!draft || !ready || session?.state === 'running') return;
+    const draft = text.trim(); if (!draft || !ready || !model || session?.state === 'running') return;
     await action(async () => {
       let id = session?.id;
-      if (!id) { const value = await chatInvoke<ChatSession>('create'); id = value.id; selected.current = id; setSession(value); }
+      if (!id) { const value = await chatInvoke<ChatSession>('create', { model }); id = value.id; selected.current = id; setSession(value); }
       follow.current = true; setStream('');
-      const value = await chatInvoke<ChatSession>('send', { id, text: draft });
+      const value = await chatInvoke<ChatSession>('send', { id, text: draft, model });
       setText(''); if (selected.current === id) setSession(current => current?.state === 'running' ? current : value); await refreshList();
     });
   }
@@ -83,7 +131,16 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   function suggest(prompt: string) { setText(prompt); input.current?.focus(); }
   return <div className="ai-chat-layout harness-theme">
     <header className="ai-chat-toolbar">
-      <div className="ai-chat-heading"><div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : '助手待配置'} /></div><p title={assistantModelLabel(address, session?.model || model)}>{assistantModelLabel(address, session?.model || model)}</p></div>
+      <div className="ai-chat-heading">
+        <div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : connected ? '没有可用模型' : '助手待配置'} /></div>
+        <div className="ai-chat-model-row">
+          <label htmlFor="ai-chat-model">对话模型</label>
+          <select id="ai-chat-model" className="ai-chat-model-select" value={model} disabled={busy || running || modelsLoading || !models.length} onChange={event => setModel(event.target.value)}>
+            {!models.length ? <option value="">{modelsLoading ? '正在读取模型…' : '没有可用模型'}</option> : null}
+            {models.map(item => <option key={item.id} value={item.id}>{item.title && item.title !== item.id ? `${item.title} · ${item.id}` : item.id}</option>)}
+          </select>
+        </div>
+      </div>
       <div className="ai-chat-toolbar-actions">
         <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
           <SheetTrigger render={<Button variant="ghost" aria-label="历史对话" title="历史对话" />}><History data-icon="inline-start" /><span>历史对话</span></SheetTrigger>
@@ -98,8 +155,9 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
       </div>
     </header>
     <section className="ai-chat-workspace" aria-label="AI 对话">
-      {!ready ? <Alert><AlertDescription>AI 助手尚未启用。连接服务后即可开始对话。<Button variant="outline" size="sm" onClick={onSettings}>继续设置</Button></AlertDescription></Alert> : null}
-      {error || session?.error ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{error || session?.error}<Button variant="ghost" size="sm" onClick={onSettings}>检查 AI 设置</Button></AlertDescription></Alert> : null}
+      {!connected ? <Alert><AlertDescription>AI 助手尚未启用。连接服务后即可开始对话。<Button variant="outline" size="sm" onClick={onSettings}>继续设置</Button></AlertDescription></Alert> : null}
+      {connected && !modelsLoading && !models.length && !modelError ? <Alert><AlertDescription>没有可用的文本模型，请检查服务账户权限或更换服务。<Button variant="ghost" size="sm" onClick={onSettings}>检查 AI 设置</Button></AlertDescription></Alert> : null}
+      {modelError || error || session?.error ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{modelError || error || session?.error}<Button variant="ghost" size="sm" onClick={onSettings}>检查 AI 设置</Button></AlertDescription></Alert> : null}
       <div ref={transcript} className={cn('ai-transcript', !hasMessages && 'ai-transcript-empty')} role="log" aria-label="对话内容" onScroll={() => { const element = transcript.current; if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
         {!hasMessages ? <div className="ai-chat-empty"><img src={aiChatIcon} alt="" className="ai-chat-empty-icon" /><h2>今天，想让工作轻一点？</h2><p>描述你的想法，让 AI 和插件一起完成。</p><div className="ai-chat-suggestions"><Button variant="outline" onClick={() => suggest('我有哪些插件可以用？')}><LayoutGrid data-icon="inline-start" />发现可用工具</Button><Button variant="outline" onClick={() => suggest('打开 AI 批图，帮我规划白底商品图')}><Image data-icon="inline-start" />规划商品图</Button></div><Button variant="ghost" size="sm" onClick={() => setToolsOpen(true)}>可调用 {plugins.length} 个插件<ChevronRight data-icon="inline-end" /></Button></div> : null}
         <div className="ai-transcript-content">

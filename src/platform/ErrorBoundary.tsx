@@ -47,10 +47,10 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex h-screen w-screen items-center justify-center p-6 bg-background text-foreground">
-          <div className="max-w-md w-full flex flex-col items-center text-center gap-4 p-6 border rounded-xl bg-card shadow-lg">
-            <div className="rounded-full bg-destructive/10 p-3 text-destructive">
-              <AlertCircle className="h-8 w-8" />
+        <div className="flex h-screen w-screen items-center justify-center p-4 bg-background text-foreground">
+          <div className="max-w-md w-full flex flex-col items-center text-center gap-2.5 p-4 border rounded-lg bg-card shadow-lg">
+            <div className="rounded-full bg-destructive/10 p-2.5 text-destructive">
+              <AlertCircle className="h-7 w-7" />
             </div>
             <div className="flex flex-col gap-1">
               <h1 className="text-lg font-semibold">轻作界面遇到异常</h1>
@@ -59,7 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </p>
             </div>
             {this.state.error?.message ? (
-              <div className="w-full text-left p-3 rounded-lg bg-muted text-xs font-mono text-muted-foreground overflow-x-auto max-h-32">
+              <div className="w-full text-left p-2.5 rounded-md bg-muted text-xs font-mono text-muted-foreground overflow-x-auto max-h-32">
                 {this.state.error.message}
               </div>
             ) : null}

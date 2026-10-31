@@ -4,7 +4,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile, readdir, rename, symlink } fro
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
-import { ImageEditor, imageOptions } from '../../desktop/ai-images.mjs';
+import { ImageEditor, imageOptions, isImageModel } from '../../desktop/ai-images.mjs';
 import { BatchRuntime } from '../../desktop/ai-batches.mjs';
 import { FileBroker } from '../../desktop/brokers.mjs';
 import { ProxyRuntime, proxyAddress } from '../../desktop/ai-proxy.mjs';
@@ -86,6 +86,38 @@ test('shared image credentials are reusable by every image plugin and migrate le
   assert.equal(values.has('official.ai-image:openai-image'), false);
 });
 
+test('settings image catalog lists official and compatible image models without plugin permissions', async () => {
+  const values = new Map([
+    ['system.ai:google-image', 'shared-google'],
+    ['system.ai:external', 'shared-compatible'],
+  ]);
+  const shared = {
+    get: async (owner, name) => values.get(owner + ':' + name) ?? null,
+    set: async (owner, name, value) => values.set(owner + ':' + name, value),
+    clear: async (owner, name) => values.delete(owner + ':' + name),
+  };
+  const proxy = {
+    catalog: async () => [
+      { id: 'studio-render', type: 'image-generation', title: 'Studio Render' },
+      { id: 'gpt-image-alias', type: 'openai-image', title: 'Image Alias' },
+      { id: 'text-model', type: 'openai', title: 'Text Model' },
+    ],
+  };
+  const editor = new ImageEditor(shared, async () => { throw new Error('must not call official endpoints'); }, proxy);
+  const catalog = await editor.catalog();
+  assert.deepEqual(catalog.models.map(model => model.id), [
+    'gemini-nano-banana-2.1',
+    'gemini-3-pro-image',
+    'studio-render',
+    'gpt-image-alias',
+  ]);
+  assert.deepEqual(catalog.models.map(model => model.source), ['official', 'official', 'proxy', 'proxy']);
+  assert.equal(catalog.models.find(model => model.id === 'studio-render').provider, 'compatible');
+  assert.equal(catalog.error, null);
+  assert.equal(isImageModel({ id: 'studio-render', type: 'image-generation' }), true);
+  assert.equal(isImageModel({ id: 'vision-only', type: 'openai', title: 'Image understanding' }), false);
+});
+
 test('image failures are explicit and never automatically resubmit', async () => {
   for (const status of [401, 403, 429, 500]) {
     let count = 0; const editor = new ImageEditor(credentials, async () => { count++; return new Response('', { status }); });
@@ -164,24 +196,88 @@ test('shutdown between persistence and request submission never initiates a new 
   assert.equal(count, 0); assert.equal(runtime.batches.get(batch.id).items[0].state, 'pending');
 });
 
-test('proxy address boundary and external tool verification', async context => {
+test('proxy address boundary, external connection and full model discovery', async context => {
   for (const address of ['http://localhost:1234', 'http://192.168.1.1', 'https://user:key@example.com', 'http://127.0.0.1:1/?key=x']) assert.throws(() => proxyAddress(address));
   assert.equal(proxyAddress('http://127.0.0.1:8317/v1'), 'http://127.0.0.1:8317');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-')), requests = [];
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-'));
   const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
-    requests.push({ endpoint, options });
-    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fixture-tool-model', display_name: 'Fixture' }] });
-    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+    assert.equal(endpoint, '/v1/models');
+    assert.equal(options.headers.Authorization, 'Bearer fixture-key');
+    return Response.json({ data: [{ id: 'fixture-chat-model' }, { id: 'gpt-image-2.5', type: 'image_generation' }] });
   } });
   context.after(() => rm(root, { recursive: true, force: true })); await proxy.initialize();
-  await proxy.configure({ mode: 'external', address: 'http://127.0.0.1:8317', model: 'fixture' });
-  await assert.rejects(proxy.connection(true), /验证/); await proxy.verify(); assert.equal((await proxy.connection(true)).model, 'fixture');
-  assert.deepEqual(await proxy.models(), [{ id: 'fixture-tool-model' }]);
+  await proxy.configure({ address: 'http://127.0.0.1:8317', connected: false });
+  await assert.rejects(proxy.connection(true), /连接/);
+  await proxy.verify();
+  assert.deepEqual(await proxy.connection(true), { base: 'http://127.0.0.1:8317', key: 'fixture-key' });
+  assert.deepEqual(await proxy.models(), [
+    { id: 'fixture-chat-model', title: 'fixture-chat-model', type: '' },
+    { id: 'gpt-image-2.5', title: 'gpt-image-2.5', type: 'image_generation' },
+  ]);
+  assert.equal(proxy.status().ready, true);
   assert.equal(proxy.status().mode, 'external');
   for (const operation of ['accounts', 'login', 'loginStatus', 'provider', 'setBinary']) assert.equal(typeof proxy[operation], 'undefined');
 });
 
-test('one-click setup discovers chat models, verifies tools and only then saves', async context => {
+test('model test checks the catalog and sends one bounded chat request', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-test-model-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const requests = []; let chatStatus = 200;
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fixture-chat-model' }, { id: 'gpt-image-2.5', type: 'image' }] });
+    if (endpoint === '/v1/chat/completions') {
+      requests.push(JSON.parse(options.body));
+      if (chatStatus !== 200) return new Response('', { status: chatStatus });
+      return Response.json({ choices: [{ message: { content: 'OK' } }] });
+    }
+    assert.fail('unexpected endpoint');
+  } });
+  await proxy.initialize();
+  await proxy.configure({ address: 'http://127.0.0.1:8317', connected: true });
+
+  const success = await proxy.testModel({ model: 'fixture-chat-model' });
+  assert.equal(success.ok, true);
+  assert.equal(success.model, 'fixture-chat-model');
+  assert.equal(success.response, 'OK');
+  assert.ok(success.latencyMs >= 1);
+  assert.equal(requests[0].model, 'fixture-chat-model');
+  assert.equal(requests[0].stream, false);
+  assert.match(requests[0].messages[0].content, /OK/);
+
+  assert.deepEqual(await proxy.testModel({ model: 'not-listed' }), { ok: false, code: 'model_unavailable', message: '这个模型不在当前服务的可用列表中。', model: 'not-listed' });
+  assert.deepEqual(await proxy.testModel({ model: 'gpt-image-2.5' }), { ok: false, code: 'model_not_chat', message: '这个模型不能用于对话测试。', model: 'gpt-image-2.5' });
+  chatStatus = 400;
+  const incompatible = await proxy.testModel({ model: 'fixture-chat-model' });
+  assert.equal(incompatible.code, 'model_incompatible');
+  assert.doesNotMatch(incompatible.message, /\b400\b/);
+});
+
+test('legacy model settings migrate to a model-independent connection', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-legacy-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'settings.json'), JSON.stringify({
+    schemaVersion: 1,
+    mode: 'external',
+    address: 'https://legacy.example.com/v1',
+    model: 'legacy-chat-model',
+    verified: ['legacy-chat-model'],
+  }));
+  const proxy = new ProxyRuntime({ root, credentials });
+  await proxy.initialize();
+  assert.deepEqual(proxy.status(), {
+    schemaVersion: 2,
+    mode: 'external',
+    address: 'https://legacy.example.com',
+    connected: true,
+    running: true,
+    ready: true,
+    error: null,
+  });
+  assert.equal('model' in proxy.settings, false);
+  assert.deepEqual(await proxy.connection(true), { base: 'https://legacy.example.com', key: 'fixture-key' });
+});
+
+test('one-click setup saves the connection without choosing or testing a model', async context => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-setup-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   let savedKey = ''; const requests = [];
@@ -198,49 +294,17 @@ test('one-click setup discovers chat models, verifies tools and only then saves'
       { id: 'rerank-v2', type: 'rerank' },
       { id: 'deepseek-v4-flash', display_name: 'DeepSeek V4 Flash' },
     ] });
-    const body = JSON.parse(options.body);
-    assert.equal(body.model, 'deepseek-v4-flash');
-    assert.ok(body.tools.some(tool => tool.function.name === 'connection_check'));
-    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+    return assert.fail('setup must not send a model request');
   } });
   await proxy.initialize();
-  const result = await proxy.setup({ address: 'https://api.deepseek.com/v1', apiKey: 'sk-new', preferredModels: ['not-listed', 'deepseek-v4-flash'] });
+  const result = await proxy.setup({ address: 'https://api.deepseek.com/v1', apiKey: 'sk-new' });
   assert.equal(result.ok, true);
-  assert.equal(result.status.model, 'deepseek-v4-flash');
   assert.equal(result.status.address, 'https://api.deepseek.com');
   assert.equal(result.status.ready, true);
+  assert.deepEqual(result.models.map(item => item.id), ['gpt-image-2.5', 'embedding-3', 'rerank-v2', 'deepseek-v4-flash']);
   assert.equal(savedKey, 'sk-new');
-  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8')), { schemaVersion: 1, mode: 'external', address: 'https://api.deepseek.com', model: 'deepseek-v4-flash', verified: ['deepseek-v4-flash'] });
-  assert.equal(requests.filter(item => item.endpoint === '/v1/chat/completions').length, 1);
-});
-
-test('setup prefers the registry order, falls back for missing recommendations and never silently replaces a failed model', async context => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-choice-'));
-  context.after(() => rm(root, { recursive: true, force: true }));
-  let savedKey = ''; const validTools = new Set(['fallback-model', 'second-preferred-model']);
-  const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
-  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
-    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fallback-model' }, { id: 'second-preferred-model' }, { id: 'failing-model' }, { id: 'video-model', type: 'video' }] });
-    const model = JSON.parse(options.body).model;
-    return Response.json({ choices: [{ message: { tool_calls: validTools.has(model) ? [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] : [] } }] });
-  } });
-  await proxy.initialize();
-  const preferred = await proxy.setup({ address: 'https://fallback.example.com', apiKey: 'sk-fallback', preferredModels: ['second-preferred-model', 'fallback-model'] });
-  assert.equal(preferred.ok, true);
-  assert.equal(preferred.status.model, 'second-preferred-model');
-
-  const fallback = await proxy.setup({ address: 'https://fallback.example.com', apiKey: 'sk-fallback', preferredModels: ['missing-model'] });
-  assert.equal(fallback.ok, true);
-  assert.equal(fallback.status.model, 'fallback-model');
-
-  const previous = proxy.status(), previousKey = savedKey;
-  const failed = await proxy.setup({ address: 'https://failed.example.com', apiKey: 'sk-failed', preferredModels: ['failing-model'], model: 'failing-model' });
-  assert.equal(failed.ok, false);
-  assert.equal(failed.code, 'model_incompatible');
-  assert.deepEqual(failed.models.map(item => item.id).sort(), ['failing-model', 'fallback-model', 'second-preferred-model']);
-  assert.deepEqual(proxy.status(), previous);
-  assert.equal(savedKey, previousKey);
-  assert.equal(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8')).address, 'https://fallback.example.com');
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8')), { schemaVersion: 2, mode: 'external', address: 'https://api.deepseek.com', connected: true });
+  assert.equal(requests.filter(item => item.endpoint === '/v1/chat/completions').length, 0);
 });
 
 test('setup restores the previous key when settings cannot be saved', async context => {
@@ -250,11 +314,11 @@ test('setup restores the previous key when settings cannot be saved', async cont
   const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
   const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint) => {
     if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'chat-model' }] });
-    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+    return assert.fail('setup must not send a model request');
   } });
   await proxy.initialize();
   await mkdir(path.join(root, 'settings.json'));
-  const result = await proxy.setup({ address: 'https://save.example.com', apiKey: 'new-key', preferredModels: ['chat-model'] });
+  const result = await proxy.setup({ address: 'https://save.example.com', apiKey: 'new-key' });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'save_failed');
   assert.equal(result.message, '无法保存 AI 设置，请检查磁盘空间后重试。');
@@ -270,48 +334,46 @@ test('setup reuses a key only for the same address and maps actionable failures 
   const proxy = new ProxyRuntime({ root, credentials, request: async (base, endpoint, options) => {
     calls.push(base + endpoint + ':' + options.headers.Authorization);
     if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'chat-model' }] });
-    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+    return assert.fail('setup must not send a model request');
   } });
   await proxy.initialize();
-  await proxy.configure({ address: 'https://reuse.example.com/v1', apiKey: 'stored-key', model: 'old-model' });
-  const reused = await proxy.setup({ address: 'https://reuse.example.com', apiKey: '', preferredModels: ['chat-model'] });
+  await proxy.configure({ address: 'https://reuse.example.com/v1', apiKey: 'stored-key' });
+  const reused = await proxy.setup({ address: 'https://reuse.example.com', apiKey: '' });
   assert.equal(reused.ok, true);
   assert.ok(calls.some(call => call.includes('Bearer stored-key')));
   assert.equal(calls.filter(call => call === 'set').length, 1);
 
-  const missing = await proxy.setup({ address: 'https://other.example.com', apiKey: '', preferredModels: ['chat-model'] });
+  const missing = await proxy.setup({ address: 'https://other.example.com', apiKey: '' });
   assert.equal(missing.code, 'missing_key');
 
   for (const [status, code] of [[401, 'invalid_key'], [403, 'forbidden'], [404, 'incompatible_address'], [429, 'rate_limited']]) {
     const failing = new ProxyRuntime({ root: path.join(root, String(status)), credentials, request: async () => new Response('', { status }) });
     await failing.initialize();
-    const result = await failing.setup({ address: 'https://errors.example.com', apiKey: 'sk-test', preferredModels: [] });
+    const result = await failing.setup({ address: 'https://errors.example.com', apiKey: 'sk-test' });
     assert.equal(result.ok, false); assert.equal(result.code, code); assert.doesNotMatch(result.message, new RegExp(String(status)));
   }
   const timeout = new ProxyRuntime({ root: path.join(root, 'timeout'), credentials, request: async () => { throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); } });
   await timeout.initialize();
-  assert.equal((await timeout.setup({ address: 'https://timeout.example.com', apiKey: 'sk-test', preferredModels: [] })).code, 'network_timeout');
+  assert.equal((await timeout.setup({ address: 'https://timeout.example.com', apiKey: 'sk-test' })).code, 'network_timeout');
 });
 
-test('setup reports no chat models, blocks image models and supports an explicit custom model', async context => {
+test('setup keeps image and other catalog entries but rejects an empty catalog', async context => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-models-'));
   context.after(() => rm(root, { recursive: true, force: true }));
-  let savedKey = 'sk-test'; const requested = [];
+  let savedKey = 'sk-test'; let catalog = [];
   const credentials = { get: async () => savedKey, set: async (_plugin, _name, value) => { savedKey = value; }, clear: async () => { savedKey = ''; } };
-  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
-    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'text-embedding-3-large', type: 'embedding' }, { id: 'gpt-image-2.5', type: 'image' }] });
-    requested.push(JSON.parse(options.body).model);
-    return Response.json({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] });
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint) => {
+    assert.equal(endpoint, '/v1/models');
+    return Response.json({ data: catalog });
   } });
   await proxy.initialize();
-  const empty = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [] });
+  const empty = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test' });
   assert.equal(empty.code, 'no_models');
-  const image = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [], model: 'gpt-image-2.5' });
-  assert.equal(image.code, 'model_not_chat');
-  const custom = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test', preferredModels: [], model: 'team-private-chat' });
+  catalog = [{ id: 'text-embedding-3-large', type: 'embedding' }, { id: 'gpt-image-2.5', type: 'image' }];
+  const custom = await proxy.setup({ address: 'http://127.0.0.1:8317', apiKey: 'sk-test' });
   assert.equal(custom.ok, true);
-  assert.deepEqual(requested, ['team-private-chat']);
-  assert.equal(custom.status.model, 'team-private-chat');
+  assert.deepEqual(custom.models.map(item => item.id), ['text-embedding-3-large', 'gpt-image-2.5']);
+  assert.equal(custom.status.ready, true);
 });
 
 test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', { timeout: 30000 }, async context => {
@@ -336,7 +398,8 @@ test('real Harness executes only planning tools, streams errors, rejects concurr
     return new Promise(resolve => server.close(resolve));
   });
   const invoke = async (_service, method, args) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture', model: 'fixture-tool-model' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture' };
+    if (method === 'models') return [{ id: 'fixture-tool-model' }];
     if (method === 'batch.revise') { assert.equal(args.owner, plugin.id); return runtime.revise(plugin, args); }
     if (method === 'batch.get') return runtime.snapshot(runtime.get(plugin, args.id));
     if (method === 'event') return;

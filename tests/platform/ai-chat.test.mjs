@@ -52,7 +52,8 @@ test('public Harness host chat calls declared plugins only after confirmation an
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const approvals = new PluginApprovals({ plugins: async () => [fixturePlugin], execute: async () => { executions++; return { text: 'hello' }; }, changed: () => {} });
   const invoke = async (_service, method, args) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture', model: 'fixture' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture' };
+    if (method === 'models') return [{ id: 'fixture-tool-model' }, { id: 'fixture-backup-model' }, { id: 'gpt-image-2.5', type: 'image' }];
     if (method === 'tools.list') return { plugins: pluginToolCatalog([fixturePlugin]) };
     if (method === 'tools.call') return approvals.request(args.owner, args);
     if (method === 'event') return;
@@ -68,10 +69,13 @@ test('public Harness host chat calls declared plugins only after confirmation an
   approvals.respond(owner, approvals.list(owner)[0].id, true); await kernel.assistant.handles.get(owner).agent.whenIdle();
   await waitUntil(() => kernel.assistant.status(owner).state === 'idle'); assert.equal(executions, 1);
   assert.ok(requests[0].tools.every(tool => ['list_plugins', 'call_plugin'].includes(tool.function.name)));
+  assert.equal(requests[0].model, 'fixture-tool-model');
   assert.ok(kernel.assistant.status(owner).history.some(entry => entry.role === 'tool' && entry.state === 'succeeded'));
-  const second = await kernel.assistant.createChat(); assert.equal(kernel.assistant.status(HOST_CHAT_PREFIX + second.id).history.length, 0);
+  await assert.rejects(kernel.assistant.createChat('gpt-image-2.5'), /可用列表/);
+  const second = await kernel.assistant.createChat('fixture-backup-model'); assert.equal(second.model, 'fixture-backup-model'); assert.equal(kernel.assistant.status(HOST_CHAT_PREFIX + second.id).history.length, 0);
   await kernel.dispose(); kernel = await bootCommerceKernel({ home, enableAI: true, installAnchor: path.resolve('package.json'), invoke });
   assert.equal(kernel.assistant.listChats().length, 2);
-  await kernel.assistant.send(owner, { text: '继续' }); await kernel.assistant.handles.get(owner).agent.whenIdle();
+  await kernel.assistant.send(owner, { text: '继续', model: 'fixture-backup-model' }); await kernel.assistant.handles.get(owner).agent.whenIdle();
   assert.ok(requests.at(-1).messages.some(message => message.content?.includes('请调用回声插件'))); assert.equal(executions, 1);
+  assert.equal(requests.at(-1).model, 'fixture-backup-model');
 });
