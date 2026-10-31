@@ -9,7 +9,7 @@
 ## 已确定的范围
 
 - Electron + 内置 Node，React + TypeScript 自有界面，主窗口工具标签页。
-- 官方 Harness 包依赖，固定 @deepseek-ai/dsh@0.2.1-alpha.1；自定义 commerce-desktop Profile 和产品 Bundle。上游升级必须经过回归测试，保留 MIT 和第三方声明。
+- 官方 Harness 包依赖，固定 @deepseek-ai/dsh@0.2.2-alpha.2；自定义 commerce-desktop Profile 和产品 Bundle。上游升级必须经过回归测试，保留 MIT 和第三方声明。
 - 首页、市场、插件管理、设置、更新、凭据和沙箱按受保护的系统插件组织。
 - 网页与本地处理插件；SDK、模板、打包、本地导入、独立安装/停用/卸载/更新，以及失败恢复。
 - LabelEdit 默认附带，保留离线 PDF 编辑和 OCR，后端按需启动，改为受控 RPC。

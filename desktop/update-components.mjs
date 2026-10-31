@@ -8,6 +8,7 @@ const DOMAIN = Buffer.from('Qingzuo desktop component update v2\0');
 const LEGACY_DOMAIN = Buffer.from('Qingzuo desktop component update v1\0');
 const IDS = new Set(['core', 'electron', 'dependencies', 'ocr-runtime', 'ocr-models', 'plugin-code']);
 const MAX_MANIFEST = 16 * 1024 ** 2;
+const MAX_FILES = 50000;
 const MAX_EXPANDED = 4 * 1024 ** 3;
 const hashPattern = /^[a-f0-9]{64}$/;
 export const componentManifestName = version => `CommerceTools-${version}-mac-arm64.components.json`;
@@ -70,7 +71,7 @@ export async function inventoryBundle(bundle, signal) {
 export function validateComponentManifest(value, version) {
   if (!value || value.schemaVersion !== 1 || value.product !== 'com.commerce.tools.desktop' || value.platform !== 'darwin-arm64'
     || value.version !== version || !/^\d+\.\d+\.\d+$/.test(version) || value.bundle !== 'Qingzuo.app'
-    || !Array.isArray(value.files) || !value.files.length || value.files.length > 40000
+    || !Array.isArray(value.files) || !value.files.length || value.files.length > MAX_FILES
     || !Array.isArray(value.components) || !value.components.length || value.components.length > IDS.size) throw new Error('组件更新清单与应用不匹配。');
   const groups = new Map();
   for (const component of value.components) {

@@ -1,6 +1,6 @@
 # Harness 对话适配与升级契约
 
-轻作不实现第二套 Agent 循环，也不复制 DeepSeek Harness UI 源码。首版统一固定 `0.2.1-alpha.1` 包族，通过公开 `agents.create/resume`、`agent.followup/cancel/whenIdle`、`tools.register`、`llm.registerAdapter` 与 JSONL 会话持久化服务运行。`desktop/ai-harness.mjs` 是唯一 Agent 适配层；插件不导入 Harness 类型。
+轻作不实现第二套 Agent 循环，也不复制 DeepSeek Harness UI 源码。当前统一固定 `0.2.2-alpha.2` 包族，通过公开 `agents.create/resume`、`agent.followup/cancel/whenIdle`、`agent.model.select`、`tools.register`、`llm.registerAdapter`、独立原生工具执行器与 JSONL 会话持久化服务运行。`desktop/ai-harness.mjs` 是唯一 Agent 适配层；插件不导入 Harness 类型。
 
 ## 对话界面的上游复用
 

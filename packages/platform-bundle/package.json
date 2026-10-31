@@ -3,7 +3,16 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "exports": { "./system": "./system.mjs", "./package.json": "./package.json" },
-  "peerDependencies": { "@deepseek-ai/dsh": "0.2.1-alpha.1" }
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    "./system": "./system.mjs",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-alpha.2"
+  }
 }

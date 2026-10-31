@@ -14,7 +14,7 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
   globalThis.__commerceBridge = { invoke, registerSystem(service) { systems.set(service.id, service); return () => systems.delete(service.id); } };
   let patch = '- insert:\n    - id: commerce-bridge\n      name: ' + JSON.stringify(bridgeFile) + '\n';
   if (enableAI) {
-    for (const service of ['llm', 'session', 'session-projection', 'system-prompt', 'tools', 'agent', 'jobs-local', 'session-persistence-jsonl', 'agent-loop']) {
+    for (const service of ['llm', 'session', 'session-projection', 'system-prompt', 'tools', 'tool-executor-native', 'agent', 'jobs-local', 'session-persistence-jsonl', 'agent-loop']) {
       patch += '    - id: commerce-ai-' + service + '\n      name: "@deepseek-ai/dsh-' + service + '"\n';
       if (service === 'session-persistence-jsonl') patch += '      config:\n        root: ' + JSON.stringify(path.join(home, 'ai-session-logs')) + '\n        compression: none\n';
       if (service === 'agent-loop') patch += '      config:\n        agents: []\n';

@@ -26,9 +26,9 @@ SRI 记录检查与下载校验分开：后续候选 `npm ci` 才会实际校验
 
 ```sh
 node scripts/harness-upstream.mjs prepare \
-  --version 0.2.1-alpha.2 \
-  --directory output/upstream/harness-alpha2 \
-  --report output/upstream/harness-alpha2-prepare.json
+  --version 0.2.2-alpha.2 \
+  --directory output/upstream/harness-0.2.2-alpha.2 \
+  --report output/upstream/harness-0.2.2-alpha.2-prepare.json
 ```
 
 必须传入精确版本。任何直接包尚未发布该版本都会停止整组准备。
@@ -50,15 +50,15 @@ Cordis 的独立版本号不跟随 dsh 包族版本号。求解会审查 group�
 
 ## 原生加载器是硬性升级门槛
 
-当前加载器固定为 `node-addon-require-builtin@0.1.6`，使用 metadata 中记录的官方源码
+当前加载器固定为 `node-addon-require-builtin@0.1.9`，使用 metadata 中记录的官方源码
 commit 与 SHA-256。`scripts/build-harness-native.mjs` 从同一 metadata 读取构建记录。
 如果候选包要求不同范围，脚本会在复制和安装前停止，不能通过改一个 override 绕过。
 必须先审查新的官方源代码、归档校验值、目标系统、N-API、Node 和 Electron 运行时，再更新
 完整原生审查记录及对应测试。
 
-2026-10-11 的 npm 检查发现 `0.2.1-alpha.2`，但该版本要求加载器 `^0.1.9`。
-候选准备已按这个门槛阻止升级；当前仍保持 `0.2.1-alpha.1` 与已审查的 `0.1.6`。
-上游发布发现与候选通过验证是两件独立的结果。
+2026-11-01 完成 `0.2.2-alpha.2` 整组候选验证。该版本要求加载器 `^0.1.9`，对应官方
+源码提交 `a58d3599a2e551d7d706d1ff796c9fd4bbaff63c`；Node 24 与 Electron 44 的实际原生
+探针均通过。上游发布发现与候选通过验证仍是两件独立的结果。
 
 ## 执行候选验证
 
@@ -74,7 +74,7 @@ node scripts/harness-upstream.mjs validate \
 随后构建固定官方原生源码（macOS），在 Node 和 Electron 中实际获取内部模块加载器，
 检查公开根导出、执行 TypeScript / Vite 构建，以及以下本地契约：
 
-- 受保护的七个宿主系统服务、AI 服务加载与内核清理。
+- 受保护的七个宿主系统服务、AI 服务与独立工具执行器加载、内核清理。
 - 官方 Agent 工具调用、插件身份隔离、确认/拒绝与取消。
 - 流式文字、推理、usage、SSE 分块和异常；截断响应不会执行未完成工具。
 - 冻结的 alpha.1 JSONL 继续对话、历史工具结果、已完成调用不重放。
