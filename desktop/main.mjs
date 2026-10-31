@@ -421,7 +421,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
       if (operation === 'chat.status') return { ...value, approvals: approvals.list(HOST_CHAT_PREFIX + args.id) };
       return value;
     }
-    const operations = { 'ai.status': () => proxy.status(), 'ai.setup': () => proxy.setup(args), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.textModels': () => textRuntime.models(), 'ai.verify': () => proxy.verify(), 'ai.imageStatus': () => imageEditor.sharedStatus(), 'ai.configureImage': () => imageEditor.configureShared(args) };
+    const operations = { 'ai.status': () => proxy.status(), 'ai.setup': () => proxy.setup(args), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.textModels': () => textRuntime.models(), 'ai.testModel': () => proxy.testModel(args), 'ai.verify': () => proxy.verify(), 'ai.imageStatus': () => imageEditor.sharedStatus(), 'ai.configureImage': () => imageEditor.configureShared(args) };
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
   }

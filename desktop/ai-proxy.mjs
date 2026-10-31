@@ -68,6 +68,24 @@ function setupFailure(error, models = []) {
   return { ok: false, code: 'network_error', message: '无法连接 AI 服务，请检查网络或服务地址后重试。', ...(models.length ? { models } : {}) };
 }
 
+function modelTestFailure(error) {
+  if (error instanceof AISetupError) return { ok: false, code: error.code, message: error.message };
+  if (error instanceof AIHttpError) {
+    if (error.status === 401) return { ok: false, code: 'invalid_key', message: '访问密钥无效，请检查后重新配置。' };
+    if (error.status === 403) return { ok: false, code: 'forbidden', message: '这个密钥没有调用该模型的权限。' };
+    if (error.status === 404) return { ok: false, code: 'model_unavailable', message: '模型不存在，或服务没有提供对话接口。' };
+    if (error.status === 408) return { ok: false, code: 'network_timeout', message: '模型测试超时，请稍后重试。' };
+    if (error.status === 429) return { ok: false, code: 'rate_limited', message: '请求过于频繁或额度不足，请稍后再试。' };
+    if (error.status === 400 || error.status === 422) return { ok: false, code: 'model_incompatible', message: '模型未通过对话测试，可能不支持当前聊天接口。' };
+    if (error.status >= 500) return { ok: false, code: 'service_unavailable', message: '模型服务暂时不可用，请稍后重试。' };
+    return { ok: false, code: 'request_failed', message: '模型测试失败，请检查服务配置。' };
+  }
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return { ok: false, code: 'network_timeout', message: '模型测试超时，请稍后重试。' };
+  }
+  return { ok: false, code: 'request_failed', message: '模型测试失败，请稍后重试。' };
+}
+
 export class ProxyRuntime {
   constructor({ root, credentials, request = proxyRequest }) {
     Object.assign(this, { root, credentials, request });
@@ -177,6 +195,41 @@ export class ProxyRuntime {
       return { ok: true, status: this.status(), models };
     } catch (error) {
       return setupFailure(error, models);
+    }
+  }
+  async testModel(options = {}) {
+    let model = '';
+    try {
+      model = typeof options.model === 'string' ? options.model.trim() : '';
+      if (!model || model.length > 160) throw new AISetupError('invalid_model', '模型标识无效。');
+      if (!isChatModel({ id: model })) throw new AISetupError('model_not_chat', '这个模型不能用于对话测试。');
+      const connection = await this.connection(true);
+      const catalog = await this.catalog(connection);
+      if (!catalog.some(item => item.id === model)) throw new AISetupError('model_unavailable', '这个模型不在当前服务的可用列表中。');
+      const started = performance.now();
+      const response = await this.request(connection.base, '/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + connection.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'Reply with OK only.' }],
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new AIHttpError(response.status, 'test');
+      }
+      const value = await boundedJson(response, 1024 ** 2);
+      const message = value?.choices?.[0]?.message;
+      const content = typeof message?.content === 'string'
+        ? message.content.trim()
+        : typeof message?.reasoning_content === 'string' ? message.reasoning_content.trim() : '';
+      if (!content) throw new AISetupError('empty_response', '模型已连接，但没有返回可识别的文本响应。');
+      return { ok: true, model, latencyMs: Math.max(1, Math.round(performance.now() - started)), response: content.slice(0, 160) };
+    } catch (error) {
+      return { ...modelTestFailure(error), model };
     }
   }
   async verify() {

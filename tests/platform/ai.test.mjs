@@ -187,6 +187,39 @@ test('proxy address boundary, external connection and full model discovery', asy
   for (const operation of ['accounts', 'login', 'loginStatus', 'provider', 'setBinary']) assert.equal(typeof proxy[operation], 'undefined');
 });
 
+test('model test checks the catalog and sends one bounded chat request', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-test-model-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const requests = []; let chatStatus = 200;
+  const proxy = new ProxyRuntime({ root, credentials, request: async (_base, endpoint, options) => {
+    if (endpoint === '/v1/models') return Response.json({ data: [{ id: 'fixture-chat-model' }, { id: 'gpt-image-2.5', type: 'image' }] });
+    if (endpoint === '/v1/chat/completions') {
+      requests.push(JSON.parse(options.body));
+      if (chatStatus !== 200) return new Response('', { status: chatStatus });
+      return Response.json({ choices: [{ message: { content: 'OK' } }] });
+    }
+    assert.fail('unexpected endpoint');
+  } });
+  await proxy.initialize();
+  await proxy.configure({ address: 'http://127.0.0.1:8317', connected: true });
+
+  const success = await proxy.testModel({ model: 'fixture-chat-model' });
+  assert.equal(success.ok, true);
+  assert.equal(success.model, 'fixture-chat-model');
+  assert.equal(success.response, 'OK');
+  assert.ok(success.latencyMs >= 1);
+  assert.equal(requests[0].model, 'fixture-chat-model');
+  assert.equal(requests[0].stream, false);
+  assert.match(requests[0].messages[0].content, /OK/);
+
+  assert.deepEqual(await proxy.testModel({ model: 'not-listed' }), { ok: false, code: 'model_unavailable', message: '这个模型不在当前服务的可用列表中。', model: 'not-listed' });
+  assert.deepEqual(await proxy.testModel({ model: 'gpt-image-2.5' }), { ok: false, code: 'model_not_chat', message: '这个模型不能用于对话测试。', model: 'gpt-image-2.5' });
+  chatStatus = 400;
+  const incompatible = await proxy.testModel({ model: 'fixture-chat-model' });
+  assert.equal(incompatible.code, 'model_incompatible');
+  assert.doesNotMatch(incompatible.message, /\b400\b/);
+});
+
 test('legacy model settings migrate to a model-independent connection', async context => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-proxy-legacy-'));
   context.after(() => rm(root, { recursive: true, force: true }));

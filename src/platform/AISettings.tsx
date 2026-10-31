@@ -47,6 +47,25 @@ interface SetupFailure {
   message: string;
 }
 
+interface ModelTestSuccess {
+  ok: true;
+  model: string;
+  latencyMs: number;
+  response: string;
+}
+
+interface ModelTestFailure {
+  ok: false;
+  model: string;
+  code: string;
+  message: string;
+}
+
+type ModelTestState =
+  | { state: 'testing' }
+  | { state: 'success'; latencyMs: number; response: string }
+  | { state: 'error'; message: string };
+
 type SetupResult = SetupSuccess | SetupFailure;
 type ImageProviderId = 'google' | 'openai';
 
@@ -67,6 +86,16 @@ function statusReady(status: ProxyStatus | null) {
   if (!status) return false;
   if (typeof status.ready === 'boolean') return status.ready;
   return Boolean(status.model && Array.isArray(status.verified) && status.verified.includes(status.model));
+}
+
+function nonChatModelType(model: AIModel) {
+  const signature = `${model.id} ${model.type ?? ''}`.toLowerCase();
+  if (/image|imagen|dall-e|stable-diffusion|flux/.test(signature)) return '图像模型';
+  if (/embedding|embed|bge/.test(signature)) return '向量模型';
+  if (/rerank/.test(signature)) return '重排模型';
+  if (/audio|speech|tts|whisper|transcri/.test(signature)) return '语音模型';
+  if (/video|sora|veo|kling/.test(signature)) return '视频模型';
+  return '非对话模型';
 }
 
 function unexpectedSetupFailure(reason: unknown): SetupFailure {
@@ -91,9 +120,11 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   const [editing, setEditing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [setupError, setSetupError] = useState<SetupFailure | null>(null);
-  const [modelCount, setModelCount] = useState<number | null>(null);
-  const [textModelCount, setTextModelCount] = useState(0);
+  const [models, setModels] = useState<AIModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState('');
+  const [testingModel, setTestingModel] = useState('');
+  const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
   const [imageStatus, setImageStatus] = useState<SharedImageStatus | null>(null);
   const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
   const [imageKeys, setImageKeys] = useState<Record<ImageProviderId, string>>({ google: '', openai: '' });
@@ -121,20 +152,24 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   }, []);
 
   const loadModels = useCallback(async (value: ProxyStatus) => {
+    setModelsLoading(true);
     setModelsError('');
     if (!statusReady(value)) {
-      setModelCount(null);
-      setTextModelCount(0);
+      setModels([]);
+      setModelTests({});
+      setModelsLoading(false);
       return;
     }
     try {
-      const models = await invoke<AIModel[]>('models');
-      setModelCount(models.length);
-      setTextModelCount(models.filter(isChatModel).length);
+      const next = await invoke<AIModel[]>('models');
+      setModels(next);
+      setModelTests({});
     } catch (reason) {
-      setModelCount(null);
-      setTextModelCount(0);
+      setModels([]);
+      setModelTests({});
       setModelsError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setModelsLoading(false);
     }
   }, [invoke]);
 
@@ -166,6 +201,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   const provider = AI_PROVIDERS.find(item => item.id === providerId) ?? null;
   const providerName = provider?.name ?? '自定义服务';
   const ready = statusReady(status);
+  const textModelCount = models.filter(isChatModel).length;
   const canReuseKey = Boolean(status && normalizeAIAddress(status.address) === normalizeAIAddress(address));
   const partial = Boolean(status && !ready && (status.model || status.address !== DEFAULT_PROXY_ADDRESS));
   const ProviderIcon = provider ? providerIcons[provider.id] : Server;
@@ -249,6 +285,28 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
     }
   }
 
+  async function testModel(item: AIModel) {
+    if (testingModel || !isChatModel(item)) return;
+    setTestingModel(item.id);
+    setModelTests(value => ({ ...value, [item.id]: { state: 'testing' } }));
+    try {
+      const result = await invoke<ModelTestSuccess | ModelTestFailure>('testModel', { model: item.id });
+      setModelTests(value => ({
+        ...value,
+        [item.id]: result.ok
+          ? { state: 'success', latencyMs: result.latencyMs, response: result.response }
+          : { state: 'error', message: result.message },
+      }));
+    } catch (reason) {
+      setModelTests(value => ({
+        ...value,
+        [item.id]: { state: 'error', message: reason instanceof Error ? reason.message : '模型测试失败，请稍后重试。' },
+      }));
+    } finally {
+      setTestingModel('');
+    }
+  }
+
   function changeService() {
     clearFeedback();
     setEditing(true);
@@ -276,7 +334,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
         <div className="ai-ready-copy">
           <span>已启用</span>
           <h1>AI 助手已连接 {providerName}</h1>
-          <p>{modelCount === null ? 'AI 对话和插件会读取并选择可用模型。' : modelCount && textModelCount ? `已读取 ${modelCount} 个模型，AI 对话和插件会选择可用的文本模型自行接入。` : modelCount ? `已读取 ${modelCount} 个模型，但没有可用于文本对话的模型。` : '服务没有返回任何模型，请检查服务账户权限。'}</p>
+          <p>{modelsLoading ? '正在读取可用模型。' : models.length && textModelCount ? `已读取 ${models.length} 个模型，AI 对话和插件会选择可用的文本模型自行接入。` : models.length ? `已读取 ${models.length} 个模型，但没有可用于文本对话的模型。` : '服务没有返回任何模型，请检查服务账户权限。'}</p>
         </div>
         <div className="ai-ready-actions">
           <Button disabled={!onOpenChat} onClick={onOpenChat}><MessageCircle data-icon="inline-start" />开始 AI 对话</Button>
@@ -357,6 +415,38 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
         </Card>
       </form>
     </>}
+
+    {ready && status ? <Card className="ai-model-catalog">
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}><Layers3 className="ai-section-icon" />可用模型{modelsLoading ? null : <span className="ai-model-count">{models.length}</span>}</CardTitle>
+        <CardDescription>这里展示服务返回的全部模型。测试会发送一条最小对话请求，可能产生少量费用。</CardDescription>
+        <CardAction><Button variant="ghost" size="sm" disabled={modelsLoading} onClick={() => void loadModels(status)}><RefreshCw data-icon="inline-start" />刷新</Button></CardAction>
+      </CardHeader>
+      <CardContent className="ai-model-catalog-content">
+        {modelsLoading && !models.length ? <div className="ai-model-empty" role="status"><LoaderCircle className="animate-spin" />正在读取模型…</div> : null}
+        {!modelsLoading && !models.length ? <div className="ai-model-empty">服务没有返回模型。</div> : null}
+        {models.length ? <div className="ai-model-list" role="list" aria-label="可用模型列表">
+          {models.map(item => {
+            const chat = isChatModel(item);
+            const test = modelTests[item.id];
+            const title = item.title && item.title !== item.id ? item.title : item.id;
+            return <div className="ai-model-row" role="listitem" key={item.id}>
+              <div className="ai-model-copy">
+                <div><strong>{title}</strong><span className={cn('ai-model-kind', !chat && 'is-muted')}>{chat ? '文本' : '非文本'}</span></div>
+                {title !== item.id ? <code>{item.id}</code> : null}
+                {!chat ? <small>{nonChatModelType(item)}</small> : null}
+              </div>
+              <div className="ai-model-test">
+                {test?.state === 'testing' ? <span className="ai-model-testing" role="status"><LoaderCircle className="animate-spin" />正在测试</span> : null}
+                {test?.state === 'success' ? <div className="ai-model-test-result is-success" role="status"><span><CheckCircle2 />连接正常 · {test.latencyMs} ms</span>{test.response ? <small title={test.response}>回复：{test.response}</small> : null}</div> : null}
+                {test?.state === 'error' ? <div className="ai-model-test-result is-error" role="status"><AlertCircle /><span>{test.message}</span></div> : null}
+                {chat ? <Button type="button" variant="outline" size="sm" aria-label={'测试模型 ' + item.id} disabled={Boolean(testingModel)} onClick={() => void testModel(item)}>{testingModel === item.id ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}测试</Button> : <span className="ai-model-unsupported">不可用于对话</span>}
+              </div>
+            </div>;
+          })}
+        </div> : null}
+      </CardContent>
+    </Card> : null}
 
     {modelsError ? <Alert variant="destructive"><AlertCircle /><AlertDescription><strong>暂时无法读取可用模型</strong><p>{modelsError}</p><Button variant="outline" size="sm" onClick={() => void loadStatus()}><RefreshCw data-icon="inline-start" />重新读取</Button></AlertDescription></Alert> : null}
 

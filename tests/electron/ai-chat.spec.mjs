@@ -25,7 +25,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
       return;
     }
     const body = JSON.parse(input); requests.push(body);
-    if (!body.stream) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'connection_check', arguments: '{"ok":true}' } }] } }] })); return; }
+    if (!body.stream) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ choices: [{ message: { content: 'OK' } }] })); return; }
     round++; response.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const tool = round === 1 ? { name: 'list_plugins', arguments: '{}' } : round === 2 ? { name: 'call_plugin', arguments: JSON.stringify({ pluginId: 'local.chat-echo', tool: 'echo', args: { text: '真实沙箱回声' } }) } : null;
     response.write('data: ' + JSON.stringify({ choices: [{ delta: tool ? { tool_calls: [{ index: 0, id: 'call-' + round, function: tool }] } : { content: '**插件已调用**，真实沙箱回声。' }, finish_reason: null }] }) + '\n\n');
@@ -71,6 +71,14 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await expect(page.getByLabel('AI 助手状态', { exact: true })).toBeVisible();
     await expect(page.getByText('AI 助手已连接 自定义服务', { exact: true })).toBeVisible();
     await expect(page.getByText('已读取 2 个模型，AI 对话和插件会选择可用的文本模型自行接入。', { exact: true })).toBeVisible();
+    const modelList = page.getByRole('list', { name: '可用模型列表', exact: true });
+    await expect(modelList).toContainText('Fixture Tool Model');
+    await expect(modelList).toContainText('gpt-image-2.5');
+    await page.getByRole('button', { name: '测试模型 fixture-tool-model', exact: true }).click();
+    await expect(page.getByText(/连接正常 · \d+ ms/)).toBeVisible();
+    await expect(page.getByText('回复：OK', { exact: true })).toBeVisible();
+    expect(requests.some(request => !request.stream && request.model === 'fixture-tool-model')).toBe(true);
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI模型目录与测试.png') });
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
     for (const [width, height] of [[1440, 900], [1280, 720], [700, 900], [390, 844]]) {

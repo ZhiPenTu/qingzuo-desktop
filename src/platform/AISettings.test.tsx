@@ -20,7 +20,7 @@ const unconfiguredImages = {
   proxy: { configured: false },
 };
 
-function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; models?: () => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
+function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; models?: () => unknown; testModel?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
   let status = structuredClone(options.status ?? unconfigured);
   let imageStatus = structuredClone(options.imageStatus ?? unconfiguredImages);
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>): Promise<unknown> => {
@@ -31,6 +31,7 @@ function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<strin
       return { ok: true, status: structuredClone(status), models: [{ id: 'deepseek-flash' }, { id: 'deepseek-chat' }] };
     }
     if (method === 'ai.models') return options.models ? options.models() : [{ id: 'deepseek-flash', title: 'DeepSeek Flash' }, { id: 'deepseek-chat', title: 'DeepSeek Chat' }];
+    if (method === 'ai.testModel') return options.testModel ? options.testModel(args ?? {}) : { ok: true, model: String(args?.model), latencyMs: 18, response: 'OK' };
     if (method === 'ai.imageStatus') return structuredClone(imageStatus);
     if (method === 'ai.configureImage') {
       if (options.configureImage) return options.configureImage(args ?? {});
@@ -85,9 +86,41 @@ it('connects without choosing a model and reads the available model catalog', as
   expect(invoke).toHaveBeenCalledWith('ai.models', undefined);
   expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
   expect(screen.getByText('已读取 2 个模型，AI 对话和插件会选择可用的文本模型自行接入。')).toBeTruthy();
+  expect(screen.getByRole('list', { name: '可用模型列表' })).toBeTruthy();
+  expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
+  expect(screen.getByText('DeepSeek Chat')).toBeTruthy();
   expect(screen.queryByLabelText('指定模型（可选）')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '测试模型 deepseek-flash' }));
+  await screen.findByText('连接正常 · 18 ms');
+  expect(invoke).toHaveBeenCalledWith('ai.testModel', { model: 'deepseek-flash' });
+  expect(screen.getByText('回复：OK')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '开始 AI 对话' }));
   expect(onOpenChat).toHaveBeenCalledOnce();
+});
+
+it('displays non-text catalog entries without offering a chat test', async () => {
+  mockDesktop({
+    status: enabled,
+    models: () => [{ id: 'deepseek-chat', title: 'DeepSeek Chat' }, { id: 'gpt-image-2.5', title: 'GPT Image 2.5', type: 'image_generation' }],
+  });
+  render(<AISettings />);
+  await screen.findByText('GPT Image 2.5');
+  expect(screen.getByRole('button', { name: '测试模型 deepseek-chat' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '测试模型 gpt-image-2.5' })).toBeNull();
+  expect(screen.getByText('不可用于对话')).toBeTruthy();
+  expect(screen.getByText('gpt-image-2.5')).toBeTruthy();
+  expect(screen.getByText('图像模型')).toBeTruthy();
+});
+
+it('shows a safe model test failure', async () => {
+  const invoke = mockDesktop({
+    status: enabled,
+    testModel: args => ({ ok: false, model: String(args.model), code: 'model_incompatible', message: '模型未通过对话测试，可能不支持当前聊天接口。' }),
+  });
+  render(<AISettings />);
+  fireEvent.click(await screen.findByRole('button', { name: '测试模型 deepseek-flash' }));
+  await screen.findByText('模型未通过对话测试，可能不支持当前聊天接口。');
+  expect(invoke).toHaveBeenCalledWith('ai.testModel', { model: 'deepseek-flash' });
 });
 
 it('configures shared image credentials without naming a plugin', async () => {
