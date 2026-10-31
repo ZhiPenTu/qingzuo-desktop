@@ -30,8 +30,6 @@ jobs:
       COMMERCE_DESKTOP_SIGNING: unsigned
       COMMERCE_PLUGIN_PUBLIC_KEY: ${{ vars.COMMERCE_PLUGIN_PUBLIC_KEY }}
       COMMERCE_MARKET_PUBLIC_KEY: ${{ vars.COMMERCE_MARKET_PUBLIC_KEY }}
-      ELECTRON_ENABLE_LOGGING: '1'
-      ELECTRON_ENABLE_STACK_DUMPING: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -56,11 +54,6 @@ jobs:
           npm run test:platform
           node scripts/test-plugin-navigation.mjs
           npm run test:desktop
-      - name: Collect macOS crash reports
-        if: failure() && runner.os == 'macOS'
-        run: |
-          mkdir -p output/electron-tests/crash-reports
-          find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name '*.ips' -mmin -15 -exec cp {} output/electron-tests/crash-reports/ \;
       - name: Package and verify standalone platform
         run: |
           node scripts/package-desktop.mjs --dir
