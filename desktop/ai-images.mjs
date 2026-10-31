@@ -10,12 +10,18 @@ export const imageModels = Object.freeze([
   { id: 'gpt-image-2.5-sunburst', provider: 'openai', title: 'GPT Image 2.5 Sunburst', sizes: ['auto', '1024x1024', '1536x1024', '1024x1536', '1536x864', '864x1536', '2560x1440', '1440x2560'], qualities: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] },
   { id: 'gpt-image-2.5-flare', provider: 'openai', title: 'GPT Image 2.5 Flare', sizes: ['auto', '1024x1024', '1536x1024', '1024x1536', '1536x864', '864x1536', '2560x1440', '1440x2560'], qualities: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] },
 ]);
+export function isImageModel(item) {
+  const identity = [item?.id, item?.version, item?.title, item?.display_name].filter(Boolean).join(' ').toLowerCase();
+  const type = String(item?.type ?? '').toLowerCase();
+  return /gemini[- ][^/]*image|(?:gemini[- ])?nano[- ]banana|(?:^|[/_. -])gpt[-_ ]?image(?:$|[/_. -])|image[-_ ]?generat/.test(identity)
+    || /^(?:image|images|image[-_ ]?(?:generation|generative|edit|editing)|openai[-_]image)$/.test(type);
+}
 export function proxyImageModels(catalog) {
   return catalog.flatMap(item => {
     const identity = [item.id, item.version, item.title].filter(Boolean).join(' ').toLowerCase();
     const google = /gemini[- ][^/]*image|(?:gemini[- ])?nano[- ]banana/.test(identity);
     const openai = /(?:^|\/)gpt-image-/.test(item.id) || /^gpt-image-/.test(item.version || '');
-    if (!google && !openai && item.type !== 'openai-image') return [];
+    if (!isImageModel(item)) return [];
     const known = imageModels.find(model => model.id === item.id || model.id === item.version);
     const model = { id: item.id, title: item.title || item.id, provider: google && item.type !== 'openai-image' ? 'google' : openai ? 'openai' : 'compatible', source: 'proxy', sizes: [] };
     if (model.provider === 'google') {
@@ -95,6 +101,28 @@ export class ImageEditor {
       return [provider, { configured: Boolean(shared.value), source: shared.source }];
     }));
     return { ...Object.fromEntries(entries), proxy: { configured: Boolean(externalKey) } };
+  }
+  async catalog() {
+    const status = await this.sharedStatus();
+    const official = imageModels
+      .filter(model => status[model.provider].configured)
+      .map(model => ({ ...model, source: 'official' }));
+    let compatible = [];
+    let error = null;
+    if (status.proxy.configured && this.proxy) {
+      try {
+        compatible = proxyImageModels(await this.proxy.catalog());
+      } catch {
+        error = '无法读取兼容服务中的图片模型，请检查服务地址或重新连接。';
+      }
+    }
+    const seen = new Set();
+    const models = [...official, ...compatible].filter(model => {
+      if (seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    });
+    return { models, error };
   }
   async configureShared({ provider, apiKey, clear = false } = {}) {
     if (!IMAGE_PROVIDERS.includes(provider)) throw new Error('图像服务无效。');

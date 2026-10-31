@@ -75,6 +75,21 @@ interface SharedImageStatus {
   proxy: { configured: boolean };
 }
 
+interface ImageCatalogModel {
+  id: string;
+  title?: string;
+  provider: 'google' | 'openai' | 'compatible';
+  source: 'official' | 'proxy';
+  sizes?: string[];
+  ratios?: string[];
+  qualities?: string[];
+}
+
+interface ImageCatalog {
+  models: ImageCatalogModel[];
+  error: string | null;
+}
+
 const CUSTOM_PROVIDER_ID = 'custom';
 const providerIcons = { deepseek: BrainCircuit, openai: Sparkles, siliconflow: Layers3 } as const;
 const imageProviders = [
@@ -131,6 +146,9 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   const [imageKeyVisible, setImageKeyVisible] = useState<Record<ImageProviderId, boolean>>({ google: false, openai: false });
   const [imageBusy, setImageBusy] = useState<ImageProviderId | null>(null);
   const [imageError, setImageError] = useState('');
+  const [imageModels, setImageModels] = useState<ImageCatalogModel[]>([]);
+  const [imageModelsLoading, setImageModelsLoading] = useState(true);
+  const [imageModelsError, setImageModelsError] = useState('');
   const operation = useRef(false);
 
   const invoke = useCallback(async <Value,>(method: string, args?: unknown) => {
@@ -196,7 +214,26 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
     }
   }, [invoke]);
 
-  useEffect(() => { void loadStatus(); void loadImageStatus(); }, [loadStatus, loadImageStatus]);
+  const loadImageCatalog = useCallback(async () => {
+    setImageModelsLoading(true);
+    setImageModelsError('');
+    try {
+      const catalog = await invoke<ImageCatalog>('imageModels');
+      setImageModels(catalog.models);
+      setImageModelsError(catalog.error ?? '');
+    } catch {
+      setImageModels([]);
+      setImageModelsError('暂时无法读取图片模型，请检查服务配置后重试。');
+    } finally {
+      setImageModelsLoading(false);
+    }
+  }, [invoke]);
+
+  useEffect(() => {
+    void loadStatus();
+    void loadImageStatus();
+    void loadImageCatalog();
+  }, [loadImageCatalog, loadImageStatus, loadStatus]);
 
   const provider = AI_PROVIDERS.find(item => item.id === providerId) ?? null;
   const providerName = provider?.name ?? '自定义服务';
@@ -253,6 +290,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
       const next = await invoke<SharedImageStatus>('configureImage', { provider, ...(clear ? { clear: true } : { apiKey }) });
       setImageStatus(next);
       setImageKeys(value => ({ ...value, [provider]: '' }));
+      await loadImageCatalog();
     } catch (reason) {
       setImageError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -276,7 +314,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
         return;
       }
       hydrate(result.status);
-      await loadModels(result.status);
+      await Promise.all([loadModels(result.status), loadImageStatus(), loadImageCatalog()]);
     } catch (reason) {
       setSetupError(unexpectedSetupFailure(reason));
     } finally {
@@ -470,6 +508,33 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
             <div><strong>兼容服务</strong><span>沿用上方连接；可用图片模型取决于服务商支持。</span></div>
             <span className={cn('ai-image-provider-state', imageStatus?.proxy.configured && 'is-configured')}>{!imageStatus ? '读取中' : imageStatus.proxy.configured ? '已配置' : '未配置'}</span>
           </div>
+        </div>
+        <div className="ai-image-model-catalog">
+          <div className="ai-image-model-heading">
+            <div>
+              <strong>可用图片模型{imageModelsLoading ? null : <span className="ai-model-count">{imageModels.length}</span>}</strong>
+              <small>列出当前图像服务可用的模型，图像工具会从这些模型中选择。</small>
+            </div>
+            <Button variant="ghost" size="sm" disabled={imageModelsLoading} onClick={() => { void loadImageStatus(); void loadImageCatalog(); }}>
+              <RefreshCw data-icon="inline-start" />刷新
+            </Button>
+          </div>
+          {imageModelsLoading && !imageModels.length ? <div className="ai-model-empty" role="status"><LoaderCircle className="animate-spin" />正在读取图片模型…</div> : null}
+          {!imageModelsLoading && !imageModels.length && !imageModelsError ? <div className="ai-model-empty">配置图像服务后，这里会显示可用模型。</div> : null}
+          {imageModels.length ? <div className="ai-model-list ai-image-model-list" role="list" aria-label="可用图片模型">
+            {imageModels.map(model => {
+              const title = model.title && model.title !== model.id ? model.title : model.id;
+              const provider = model.provider === 'google' ? 'Google' : model.provider === 'openai' ? 'OpenAI' : '兼容服务';
+              return <div className="ai-model-row ai-image-model-row" role="listitem" key={model.source + ':' + model.id}>
+                <div className="ai-model-copy">
+                  <div><strong>{title}</strong><span className="ai-model-kind">{provider}</span></div>
+                  {title !== model.id ? <code>{model.id}</code> : null}
+                </div>
+                <span className="ai-image-model-source">{model.source === 'official' ? '官方服务' : '兼容服务'}</span>
+              </div>;
+            })}
+          </div> : null}
+          {imageModelsError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{imageModelsError}</AlertDescription></Alert> : null}
         </div>
         {imageError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{imageError}</AlertDescription></Alert> : null}
         {imageSettingsOpen ? <div className="ai-image-key-settings">

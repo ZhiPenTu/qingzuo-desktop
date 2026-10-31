@@ -20,7 +20,7 @@ const unconfiguredImages = {
   proxy: { configured: false },
 };
 
-function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; models?: () => unknown; testModel?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
+function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; models?: () => unknown; testModel?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; imageModels?: () => unknown; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
   let status = structuredClone(options.status ?? unconfigured);
   let imageStatus = structuredClone(options.imageStatus ?? unconfiguredImages);
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>): Promise<unknown> => {
@@ -33,6 +33,7 @@ function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<strin
     if (method === 'ai.models') return options.models ? options.models() : [{ id: 'deepseek-flash', title: 'DeepSeek Flash' }, { id: 'deepseek-chat', title: 'DeepSeek Chat' }];
     if (method === 'ai.testModel') return options.testModel ? options.testModel(args ?? {}) : { ok: true, model: String(args?.model), latencyMs: 18, response: 'OK' };
     if (method === 'ai.imageStatus') return structuredClone(imageStatus);
+    if (method === 'ai.imageModels') return options.imageModels ? options.imageModels() : { models: [], error: null };
     if (method === 'ai.configureImage') {
       if (options.configureImage) return options.configureImage(args ?? {});
       imageStatus = { ...imageStatus, [String(args?.provider)]: { configured: true, source: 'dedicated' } };
@@ -137,6 +138,27 @@ it('configures shared image credentials without naming a plugin', async () => {
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.configureImage', { provider: 'google', apiKey: 'image-secret' }));
   await screen.findByText('已配置');
   expect(screen.queryByText(/AI 批图/)).toBeNull();
+});
+
+it('shows all available image models from official and compatible services', async () => {
+  const invoke = mockDesktop({
+    imageModels: () => ({
+      models: [
+        { id: 'gemini-nano-banana-2.1', title: 'Nano Banana 2.1', provider: 'google', source: 'official' },
+        { id: 'studio-render', title: 'Studio Render', provider: 'compatible', source: 'proxy' },
+      ],
+      error: null,
+    }),
+  });
+  render(<AISettings />);
+  const list = await screen.findByRole('list', { name: '可用图片模型' });
+  expect(list.textContent).toContain('Nano Banana 2.1');
+  expect(list.textContent).toContain('gemini-nano-banana-2.1');
+  expect(list.textContent).toContain('官方服务');
+  expect(list.textContent).toContain('Studio Render');
+  expect(list.textContent).toContain('studio-render');
+  expect(list.textContent).toContain('兼容服务');
+  expect(invoke).toHaveBeenCalledWith('ai.imageModels', undefined);
 });
 
 it('shows a shared compatible connection and lets an old image key be cleared', async () => {

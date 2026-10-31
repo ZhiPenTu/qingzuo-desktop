@@ -4,7 +4,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile, readdir, rename, symlink } fro
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
-import { ImageEditor, imageOptions } from '../../desktop/ai-images.mjs';
+import { ImageEditor, imageOptions, isImageModel } from '../../desktop/ai-images.mjs';
 import { BatchRuntime } from '../../desktop/ai-batches.mjs';
 import { FileBroker } from '../../desktop/brokers.mjs';
 import { ProxyRuntime, proxyAddress } from '../../desktop/ai-proxy.mjs';
@@ -84,6 +84,38 @@ test('shared image credentials are reusable by every image plugin and migrate le
   await editor.edit(other, { modelId: 'gpt-image-2.5-sunburst', prompt: 'edit', bytes: png, mime: 'image/png' });
   assert.equal(values.get('system.ai:openai-image'), 'legacy-openai');
   assert.equal(values.has('official.ai-image:openai-image'), false);
+});
+
+test('settings image catalog lists official and compatible image models without plugin permissions', async () => {
+  const values = new Map([
+    ['system.ai:google-image', 'shared-google'],
+    ['system.ai:external', 'shared-compatible'],
+  ]);
+  const shared = {
+    get: async (owner, name) => values.get(owner + ':' + name) ?? null,
+    set: async (owner, name, value) => values.set(owner + ':' + name, value),
+    clear: async (owner, name) => values.delete(owner + ':' + name),
+  };
+  const proxy = {
+    catalog: async () => [
+      { id: 'studio-render', type: 'image-generation', title: 'Studio Render' },
+      { id: 'gpt-image-alias', type: 'openai-image', title: 'Image Alias' },
+      { id: 'text-model', type: 'openai', title: 'Text Model' },
+    ],
+  };
+  const editor = new ImageEditor(shared, async () => { throw new Error('must not call official endpoints'); }, proxy);
+  const catalog = await editor.catalog();
+  assert.deepEqual(catalog.models.map(model => model.id), [
+    'gemini-nano-banana-2.1',
+    'gemini-3-pro-image',
+    'studio-render',
+    'gpt-image-alias',
+  ]);
+  assert.deepEqual(catalog.models.map(model => model.source), ['official', 'official', 'proxy', 'proxy']);
+  assert.equal(catalog.models.find(model => model.id === 'studio-render').provider, 'compatible');
+  assert.equal(catalog.error, null);
+  assert.equal(isImageModel({ id: 'studio-render', type: 'image-generation' }), true);
+  assert.equal(isImageModel({ id: 'vision-only', type: 'openai', title: 'Image understanding' }), false);
 });
 
 test('image failures are explicit and never automatically resubmit', async () => {

@@ -2,10 +2,9 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicJson } from './ai-batches.mjs';
-import { boundedJson } from './ai-images.mjs';
+import { boundedJson, isImageModel } from './ai-images.mjs';
 import { secureRequest } from './network-transport.mjs';
 
-const IMAGE_MODEL = /gpt[-_]?image|nano[-_ ]?banana|image[-_]?generat/i;
 const NON_CHAT_MODEL = /(?:^|[/_. -])(?:embedding|embed|rerank|reranker|bge|whisper|transcri(?:be|ption)|speech|audio|tts|video|sora|veo|kling|imagen|dall-e|stable-diffusion|flux)(?:$|[/_. -])/i;
 
 export function proxyAddress(value) {
@@ -16,7 +15,7 @@ export function proxyAddress(value) {
 
 export function isChatModel(item) {
   const signature = `${item?.id ?? ''} ${item?.title ?? ''} ${item?.type ?? ''}`;
-  return !IMAGE_MODEL.test(signature) && !NON_CHAT_MODEL.test(signature);
+  return !isImageModel(item) && !NON_CHAT_MODEL.test(signature);
 }
 
 export async function proxyRequest(base, endpoint, options = {}) {

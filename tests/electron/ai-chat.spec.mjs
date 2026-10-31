@@ -52,6 +52,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await page.getByLabel('Google 官方访问密钥', { exact: true }).fill('fixture-google-image');
     await googleImageRow.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.locator('.ai-image-provider-row').filter({ hasText: 'Google 官方' })).toContainText('已配置');
+    await expect(page.getByRole('list', { name: '可用图片模型', exact: true })).toContainText('Nano Banana 2.1');
     expect((await page.evaluate(() => window.commerceDesktop.invoke('ai.imageStatus'))).google).toMatchObject({ configured: true, source: 'dedicated' });
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '共享图像能力.png') });
     await googleImageRow.getByRole('button', { name: '清除', exact: true }).click();
@@ -74,11 +75,17 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     const modelList = page.getByRole('list', { name: '可用模型列表', exact: true });
     await expect(modelList).toContainText('Fixture Tool Model');
     await expect(modelList).toContainText('gpt-image-2.5');
+    const imageModelList = page.getByRole('list', { name: '可用图片模型', exact: true });
+    await expect(imageModelList).toContainText('gpt-image-2.5');
     await page.getByRole('button', { name: '测试模型 fixture-tool-model', exact: true }).click();
     await expect(page.getByText(/连接正常 · \d+ ms/)).toBeVisible();
     await expect(page.getByText('回复：OK', { exact: true })).toBeVisible();
     expect(requests.some(request => !request.stream && request.model === 'fixture-tool-model')).toBe(true);
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI模型目录与测试.png') });
+    if (process.env.QINGZUO_UI_EVIDENCE_DIR) {
+      await imageModelList.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '可用图片模型.png') });
+    }
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
     for (const [width, height] of [[1440, 900], [1280, 720], [700, 900], [390, 844]]) {
