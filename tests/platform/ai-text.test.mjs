@@ -3,12 +3,11 @@ import assert from 'node:assert/strict';
 import { TextRuntime } from '../../desktop/ai-text.mjs';
 import { API_VERSION, validateManifest } from '../../packages/plugin-sdk/manifest.mjs';
 
-function runtime({ catalog = [], model = 'gpt-5.6-terra', key = 'base-key', request } = {}) {
+function runtime({ catalog = [{ id: 'gpt-5.6-terra', title: 'Terra' }], key = 'base-key', request } = {}) {
   return new TextRuntime({
     proxy: {
-      settings: { model },
       catalog: async () => catalog,
-      connection: async () => ({ base: 'https://proxy.example.test', key, model }),
+      connection: async () => ({ base: 'https://proxy.example.test', key }),
       request,
     },
   });
@@ -16,8 +15,9 @@ function runtime({ catalog = [], model = 'gpt-5.6-terra', key = 'base-key', requ
 const completion = content => new Response(JSON.stringify({ choices: [{ message: { content } }] }));
 const messages = [{ role: 'user', content: '翻译这段文案' }];
 
-test('text model catalog filters image models and reports the configured default', async () => {
+test('text model catalog filters non-chat models and derives a fallback from the catalog', async () => {
   const result = await runtime({ catalog: [
+    { id: 'text-embedding-3-large', title: 'Embedding', type: 'embedding' },
     { id: 'gpt-5.6-terra', title: 'Terra' },
     { id: 'gpt-image-2.5-sunburst', title: 'Sunburst', type: 'openai-image' },
     { id: 'gemini-nano-banana-2.1', title: 'Banana' },
@@ -38,6 +38,16 @@ test('complete posts through the configured proxy and returns the answer', async
   const body = JSON.parse(requests[0].options.body);
   assert.deepEqual(body, { model: 'gpt-5.6-terra', messages, temperature: 0.2, response_format: { type: 'json_object' } });
   assert.deepEqual(await ai.complete({ model: 'gpt-5.6-luna', messages }), { content: '{"title":"ok"}', model: 'gpt-5.6-luna' });
+});
+
+test('complete uses the first available text model when the caller does not choose one', async () => {
+  const requests = [];
+  const ai = runtime({ catalog: [
+    { id: 'embedding-3', title: 'Embedding', type: 'embedding' },
+    { id: 'catalog-chat', title: 'Catalog Chat' },
+  ], request: async (_base, _endpoint, options) => { requests.push(JSON.parse(options.body)); return completion('ok'); } });
+  assert.deepEqual(await ai.complete({ messages }), { content: 'ok', model: 'catalog-chat' });
+  assert.equal(requests[0].model, 'catalog-chat');
 });
 
 test('complete rejects invalid plugin input before any network call', async () => {

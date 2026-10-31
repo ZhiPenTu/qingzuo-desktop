@@ -23,13 +23,13 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { AI_PROVIDERS, DEFAULT_PROXY_ADDRESS, friendlyModelName, isChatModel, normalizeAIAddress, providerForAddress, type AIModel } from './ai-providers';
+import { AI_PROVIDERS, DEFAULT_PROXY_ADDRESS, isChatModel, normalizeAIAddress, providerForAddress, type AIModel } from './ai-providers';
 
 interface ProxyStatus {
   mode: string;
   address: string;
-  model: string;
   running: boolean;
+  model?: string;
   verified?: string[];
   ready?: boolean;
   error: string | null;
@@ -38,13 +38,13 @@ interface ProxyStatus {
 interface SetupSuccess {
   ok: true;
   status: ProxyStatus;
+  models?: Array<{ id: string; title?: string; type?: string }>;
 }
 
 interface SetupFailure {
   ok: false;
   code: string;
   message: string;
-  models?: AIModel[];
 }
 
 type SetupResult = SetupSuccess | SetupFailure;
@@ -64,9 +64,9 @@ const imageProviders = [
 ] as const;
 
 function statusReady(status: ProxyStatus | null) {
-  if (!status || !status.model) return false;
+  if (!status) return false;
   if (typeof status.ready === 'boolean') return status.ready;
-  return Array.isArray(status.verified) && status.verified.includes(status.model) && isChatModel({ id: status.model });
+  return Boolean(status.model && Array.isArray(status.verified) && status.verified.includes(status.model));
 }
 
 function unexpectedSetupFailure(reason: unknown): SetupFailure {
@@ -87,12 +87,13 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
   const [address, setAddress] = useState(AI_PROVIDERS[0].address);
   const [key, setKey] = useState('');
   const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [editing, setEditing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [setupError, setSetupError] = useState<SetupFailure | null>(null);
-  const [recoveryModels, setRecoveryModels] = useState<AIModel[]>([]);
+  const [modelCount, setModelCount] = useState<number | null>(null);
+  const [textModelCount, setTextModelCount] = useState(0);
+  const [modelsError, setModelsError] = useState('');
   const [imageStatus, setImageStatus] = useState<SharedImageStatus | null>(null);
   const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
   const [imageKeys, setImageKeys] = useState<Record<ImageProviderId, string>>({ google: '', openai: '' });
@@ -108,17 +109,34 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const hydrate = useCallback((value: ProxyStatus) => {
     const savedProvider = providerForAddress(value.address);
-    const hasSavedConnection = value.address !== DEFAULT_PROXY_ADDRESS || Boolean(value.model);
+    const hasSavedConnection = value.address !== DEFAULT_PROXY_ADDRESS || Boolean(value.ready || value.model);
     const nextProvider = savedProvider?.id ?? (hasSavedConnection ? CUSTOM_PROVIDER_ID : AI_PROVIDERS[0].id);
     setStatus(value);
     setProviderId(nextProvider);
     setAddress(savedProvider?.address ?? (hasSavedConnection ? value.address : AI_PROVIDERS[0].address));
-    setModel(value.model);
     setAdvancedOpen(nextProvider === CUSTOM_PROVIDER_ID);
     setEditing(!statusReady(value));
     setKey('');
     setShowKey(false);
   }, []);
+
+  const loadModels = useCallback(async (value: ProxyStatus) => {
+    setModelsError('');
+    if (!statusReady(value)) {
+      setModelCount(null);
+      setTextModelCount(0);
+      return;
+    }
+    try {
+      const models = await invoke<AIModel[]>('models');
+      setModelCount(models.length);
+      setTextModelCount(models.filter(isChatModel).length);
+    } catch (reason) {
+      setModelCount(null);
+      setTextModelCount(0);
+      setModelsError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, [invoke]);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -126,12 +144,13 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
     try {
       const value = await invoke<ProxyStatus>('status');
       hydrate(value);
+      await loadModels(value);
     } catch (reason) {
       setLoadError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setLoading(false);
     }
-  }, [hydrate, invoke]);
+  }, [hydrate, invoke, loadModels]);
 
   const loadImageStatus = useCallback(async () => {
     setImageError('');
@@ -153,7 +172,6 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
 
   function clearFeedback() {
     setSetupError(null);
-    setRecoveryModels([]);
   }
 
   function selectProvider(id: string) {
@@ -165,11 +183,9 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
     const saved = status ? providerForAddress(status.address) : null;
     if (known) {
       setAddress(known.address);
-      setModel(saved?.id === id ? status?.model ?? '' : '');
       setAdvancedOpen(false);
     } else {
       setAddress(saved ? '' : status?.address ?? '');
-      setModel(saved ? '' : status?.model ?? '');
       setAdvancedOpen(true);
     }
   }
@@ -218,20 +234,13 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
       const result = await invoke<SetupResult>('setup', {
         address: address.trim(),
         ...(key.trim() ? { apiKey: key.trim() } : {}),
-        preferredModels: provider?.preferredModels ?? [],
-        ...(model.trim() ? { model: model.trim() } : {}),
       });
       if (!result.ok) {
         setSetupError(result);
-        const available = (result.models ?? []).filter(item => isChatModel(item));
-        setRecoveryModels(available);
-        if (available.length) {
-          setModel('');
-          setAdvancedOpen(true);
-        }
         return;
       }
       hydrate(result.status);
+      await loadModels(result.status);
     } catch (reason) {
       setSetupError(unexpectedSetupFailure(reason));
     } finally {
@@ -267,7 +276,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
         <div className="ai-ready-copy">
           <span>已启用</span>
           <h1>AI 助手已连接 {providerName}</h1>
-          <p>{friendlyModelName(status!.address, status!.model)}</p>
+          <p>{modelCount === null ? 'AI 对话和插件会读取并选择可用模型。' : modelCount && textModelCount ? `已读取 ${modelCount} 个模型，AI 对话和插件会选择可用的文本模型自行接入。` : modelCount ? `已读取 ${modelCount} 个模型，但没有可用于文本对话的模型。` : '服务没有返回任何模型，请检查服务账户权限。'}</p>
         </div>
         <div className="ai-ready-actions">
           <Button disabled={!onOpenChat} onClick={onOpenChat}><MessageCircle data-icon="inline-start" />开始 AI 对话</Button>
@@ -276,7 +285,7 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
       </section>
 
     </> : <>
-      {partial ? <div className="ai-partial-note" role="status"><AlertCircle /><div><strong>已保存，尚未启用</strong><span>{status?.model ? `已选择 ${friendlyModelName(status.address, status.model)}，还需要完成连接验证。` : '还需要完成连接验证才能开始对话。'}</span></div></div> : null}
+      {partial ? <div className="ai-partial-note" role="status"><AlertCircle /><div><strong>已保存，尚未启用</strong><span>还需要完成连接验证才能开始对话。</span></div></div> : null}
 
       <section className="ai-provider-section" aria-labelledby="ai-provider-heading">
         <div className="ai-wizard-heading">
@@ -305,20 +314,12 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
         <Card className="ai-connect-card">
           <CardHeader>
             <CardTitle role="heading" aria-level={2}><ProviderIcon className="ai-section-icon" />连接 {providerName}</CardTitle>
-            <CardDescription>{provider ? `填写 ${provider.name} 的访问密钥，地址已经自动配置。` : '填写兼容 OpenAI 接口的服务地址和访问密钥。'}</CardDescription>
+            <CardDescription>{provider ? `填写 ${provider.name} 的访问密钥，地址已经自动配置。` : '填写兼容 OpenAI 接口的服务地址和访问密钥，连接后可读取全部可用模型。'}</CardDescription>
             {provider ? <CardAction><Button type="button" variant="ghost" size="sm" onClick={() => void openKeyPage()}>如何获取<ExternalLink data-icon="inline-end" /></Button></CardAction> : null}
           </CardHeader>
           <CardContent className="ai-connect-content">
             {setupError ? <Alert variant="destructive" className="ai-setup-error"><AlertCircle /><AlertDescription>
               <strong>{setupError.message}</strong>
-              {recoveryModels.length ? <div className="ai-model-recovery">
-                <FieldLabel htmlFor="ai-recovery-model">可用模型</FieldLabel>
-                <select id="ai-recovery-model" className="ai-select" value={model} onChange={event => setModel(event.target.value)}>
-                  <option value="">请选择模型</option>
-                  {recoveryModels.map(item => <option key={item.id} value={item.id}>{item.title && item.title !== item.id ? `${item.title} · ${item.id}` : item.id}</option>)}
-                </select>
-                <span>选择后重新验证，不会自动改用其他模型。</span>
-              </div> : null}
             </AlertDescription></Alert> : null}
 
             <FieldGroup className="ai-key-field">
@@ -336,16 +337,11 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
               <button type="button" className="ai-advanced-toggle" aria-expanded={advancedOpen || providerId === CUSTOM_PROVIDER_ID} onClick={() => setAdvancedOpen(value => !value)}>
                 <SlidersHorizontal />高级设置<ChevronDown className={advancedOpen || providerId === CUSTOM_PROVIDER_ID ? 'is-open' : ''} />
               </button>
-              {advancedOpen || providerId === CUSTOM_PROVIDER_ID ? <div className="ai-advanced-fields">
+              {advancedOpen || providerId === CUSTOM_PROVIDER_ID ? <div className="ai-advanced-fields is-single">
                 <Field>
                   <FieldLabel htmlFor="ai-address">服务地址</FieldLabel>
                   <Input id="ai-address" value={address} disabled={busy} onChange={event => { setAddress(event.target.value); clearFeedback(); }} placeholder="https://your-service.example.com/v1" />
                   <FieldDescription>支持 HTTPS；本机服务也可以使用 HTTP。</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="ai-model-override">指定模型（可选）</FieldLabel>
-                  <Input id="ai-model-override" value={model} disabled={busy} onChange={event => { setModel(event.target.value); clearFeedback(); }} placeholder="留空自动选择推荐模型" />
-                  <FieldDescription>只有需要使用特定模型时才填写。</FieldDescription>
                 </Field>
               </div> : null}
             </div>
@@ -356,11 +352,13 @@ export function AISettings({ onOpenChat }: { onOpenChat?: () => void }) {
               {busy ? '正在连接…' : setupError ? '重新验证' : partial ? '完成启用' : '连接并启用'}
             </Button>
             {ready && editing ? <Button type="button" variant="ghost" disabled={busy} onClick={() => { setEditing(false); clearFeedback(); }}>取消</Button> : null}
-            <p>连接时会发送一次测试消息，可能产生少量费用。</p>
+            <p>连接时只读取可用模型，不会产生模型调用费用。</p>
           </CardFooter>
         </Card>
       </form>
     </>}
+
+    {modelsError ? <Alert variant="destructive"><AlertCircle /><AlertDescription><strong>暂时无法读取可用模型</strong><p>{modelsError}</p><Button variant="outline" size="sm" onClick={() => void loadStatus()}><RefreshCw data-icon="inline-start" />重新读取</Button></AlertDescription></Alert> : null}
 
     <Card className="ai-shared-image">
       <CardHeader>

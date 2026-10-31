@@ -181,10 +181,11 @@ const result = await client.ai.complete({
 
 ### API 1.4 本地预览
 
-SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中配置的 OpenAI 兼容代理，全部能力要求显式清单权限：
+SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中连接的 OpenAI 兼容服务，全部能力要求显式清单权限：
 
-- **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是已过滤图像模型的可用文本模型（`id`、`title`），`defaultModel` 是底座配置的默认模型。插件用它渲染模型选择器。
+- **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是服务 `/v1/models` 全部返回中过滤出的可用文本模型（`id`、`title`）；底座不再保存指定模型，`defaultModel` 只是目录中的首个文本模型，方便旧插件兼容。新插件应展示目录并由用户或插件逻辑自行选择。
 - **文本补全**：`ai.complete({ model?, messages, temperature?, responseFormat? })` 通过主进程调用配置的代理 `/v1/chat/completions`，返回 `{ content, model }`。`messages` 为 1 到 100 条 `system / user / assistant` 消息，单条不超过 10 万字符；`responseFormat` 仅接受 `text` 或 `json_object`。密钥不出主进程，请求与响应大小受主进程限制。
+- **共享助手**：`ai.assistant.send({ text, model? })` 也可显式传入目录中的模型；省略时沿用该插件会话已选模型，首次会话回退到目录中的首个文本模型。
 - **清单权限**：`permissions.ai` 新增 `text` 值；`api: '^1.4.0'` 声明本能力。旧插件不受影响。
 
 示例：
@@ -192,7 +193,7 @@ SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。
 ```js
 const { models, defaultModel } = await client.ai.textModels();
 const result = await client.ai.complete({
-  model: settings.model || defaultModel,
+  model: models.some(item => item.id === settings.model) ? settings.model : defaultModel,
   messages,
   temperature: 0.2,
   responseFormat: { type: 'json_object' },

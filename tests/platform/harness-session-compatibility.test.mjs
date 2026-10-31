@@ -34,7 +34,8 @@ test('frozen alpha.1 JSONL restores prior messages and completed tools without r
   let kernel;
   context.after(async () => { await kernel?.dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(home, { recursive: true, force: true }); });
   const invoke = async (_service, method) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture', model: 'fixture-harness' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture' };
+    if (method === 'models') return [{ id: 'fixture-harness' }];
     if (method === 'tools.call') { calls++; assert.fail('Completed tools must not replay while restoring old JSONL.'); }
     if (method === 'event') return;
     return [];
@@ -75,7 +76,8 @@ test('old index interruption clears prior authorization; a new tool still requir
   let kernel;
   context.after(async () => { approvals.dispose(); await kernel?.dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(home, { recursive: true, force: true }); });
   const invoke = async (_service, method, args) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture', model: 'fixture-harness' };
+    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture' };
+    if (method === 'models') return [{ id: 'fixture-harness' }];
     if (method === 'tools.call') return approvals.request(args.owner, args);
     if (method === 'event') return;
     return [];

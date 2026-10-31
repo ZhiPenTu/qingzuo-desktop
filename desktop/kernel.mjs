@@ -52,7 +52,7 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
       if (!assistant) throw new Error('AI 服务未启动。');
       if (method.startsWith('chat.') && caller !== undefined) throw new Error('插件不能访问工作台对话。');
       if (method === 'chat.list') return assistant.listChats();
-      if (method === 'chat.create') return assistant.createChat();
+      if (method === 'chat.create') return assistant.createChat(args.model);
       if (method === 'chat.status') return assistant.status(assistant.chatOwner(args.id));
       if (method === 'chat.send') return assistant.send(assistant.chatOwner(args.id), args);
       if (method === 'chat.cancel') return assistant.cancel(assistant.chatOwner(args.id));

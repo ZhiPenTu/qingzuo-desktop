@@ -3,15 +3,18 @@ import { afterEach, expect, it, vi } from 'vitest';
 import AIChat from './AIChat';
 import type { ChatEvent, ChatSession } from './harness-client';
 
-function fixture(verified = true, overrides: { address?: string; model?: string; ready?: boolean; legacy?: boolean; sessionModel?: string } = {}) {
+function fixture(verified = true, overrides: { model?: string; ready?: boolean; legacy?: boolean; sessionModel?: string; models?: { id: string; title: string }[] } = {}) {
   let session: ChatSession = { id: 'fixture-chat', title: '测试对话', model: overrides.sessionModel ?? 'fixture-model', state: 'idle', history: [] };
+  const models = overrides.models ?? [{ id: 'fixture-model', title: 'Fixture Model' }, { id: 'fixture-backup', title: 'Backup Model' }];
   let listener: (event: ChatEvent) => void = () => {};
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>) => {
-    if (method === 'ai.status') return { address: overrides.address ?? 'https://custom.example.com', model: overrides.model ?? 'fixture-model', verified: verified ? [overrides.model ?? 'fixture-model'] : [], ...(overrides.legacy ? {} : { ready: overrides.ready ?? verified }) };
+    if (method === 'ai.status') return { model: overrides.model ?? 'fixture-model', verified: verified ? [overrides.model ?? 'fixture-model'] : [], ...(overrides.legacy ? {} : { ready: overrides.ready ?? verified }) };
+    if (method === 'ai.textModels') return { models, defaultModel: models[0]?.id ?? '' };
     if (method === 'ai.chat.list') return [{ id: session.id, title: session.title, state: session.state, updated: 1 }];
     if (method === 'ai.chat.tools') return [{ id: 'local.fixture', title: '示例插件', description: '', tools: [{ name: 'open', title: '打开插件' }] }];
-    if (method === 'ai.chat.status' || method === 'ai.chat.create') return structuredClone(session);
-    if (method === 'ai.chat.send') { session = { ...session, state: 'running', history: [...session.history, { role: 'user', text: String(args?.text) }] }; return structuredClone(session); }
+    if (method === 'ai.chat.status') return structuredClone(session);
+    if (method === 'ai.chat.create') { session = { ...session, model: String(args?.model ?? session.model), history: [] }; return structuredClone(session); }
+    if (method === 'ai.chat.send') { session = { ...session, model: String(args?.model ?? session.model), state: 'running', history: [...session.history, { role: 'user', text: String(args?.text) }] }; return structuredClone(session); }
     if (method === 'ai.chat.cancel') { session = { ...session, state: 'idle', approvals: [] }; return structuredClone(session); }
     return {};
   });
@@ -36,19 +39,29 @@ it('honors ai.status.ready while keeping the older verified list compatible', as
 });
 it('derives readiness from the legacy verified list without enabling image models', async () => {
   fixture(true, { legacy: true }); const { unmount } = render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
-  await screen.findByText('fixture-model');
+  await screen.findByRole('option', { name: 'Fixture Model · fixture-model' });
   fireEvent.change(screen.getByLabelText('消息'), { target: { value: 'legacy' } });
   expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false);
   unmount(); cleanup();
   fixture(true, { legacy: true, model: 'gpt-image-2.5', sessionModel: 'gpt-image-2.5' }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
   await screen.findByText(/AI 助手尚未启用/);
 });
-it('shows a friendly provider model and falls back to the id for custom services', async () => {
-  fixture(true, { address: 'https://api.deepseek.com', model: 'fixture-model', sessionModel: 'fixture-model' }); const { unmount } = render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
-  await screen.findByText(/Fixture Model/);
+it('shows the discovered model catalog and uses the id when no display name exists', async () => {
+  fixture(true, { model: 'fixture-model', sessionModel: 'fixture-model' }); const { unmount } = render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByRole('option', { name: 'Fixture Model · fixture-model' });
   unmount(); cleanup();
-  fixture(true, { address: 'https://custom.example.com', model: 'team-private-chat', sessionModel: 'team-private-chat' }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
-  await screen.findByText('team-private-chat');
+  fixture(true, { model: 'team-private-chat', sessionModel: 'team-private-chat', models: [{ id: 'team-private-chat', title: 'team-private-chat' }] }); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByRole('option', { name: 'team-private-chat' });
+  expect((screen.getByLabelText('对话模型') as HTMLSelectElement).value).toBe('team-private-chat');
+});
+it('lets the conversation choose a different model from the base catalog', async () => {
+  const { invoke } = fixture(); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  const select = await screen.findByLabelText('对话模型');
+  await waitFor(() => expect((select as HTMLSelectElement).value).toBe('fixture-model'));
+  fireEvent.change(select, { target: { value: 'fixture-backup' } });
+  fireEvent.change(screen.getByLabelText('消息'), { target: { value: '换一个模型' } });
+  fireEvent.click(screen.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.send', { id: 'fixture-chat', text: '换一个模型', model: 'fixture-backup' }));
 });
 it('streams upstream Markdown, handles IME, stops and retains history', async () => {
   const { invoke, emit } = fixture(); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
@@ -78,7 +91,7 @@ it('ignores other sessions and unsubscribes when leaving the view', async () => 
 });
 it('fills and focuses suggestions without sending, and shows plugin capabilities on demand', async () => {
   const { invoke } = fixture(); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
-  await screen.findByText('fixture-model');
+  await screen.findByRole('option', { name: 'Fixture Model · fixture-model' });
   fireEvent.click(screen.getByRole('button', { name: '规划商品图' }));
   expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe('打开 AI 批图，帮我规划白底商品图');
   expect(document.activeElement).toBe(screen.getByLabelText('消息'));
@@ -106,5 +119,5 @@ it('keeps history in a dismissible drawer and restores focus without losing the 
   fireEvent.click(await screen.findByRole('button', { name: '测试对话' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.create', undefined));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.create', { model: 'fixture-model' }));
 });

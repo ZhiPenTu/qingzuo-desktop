@@ -70,7 +70,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await page.getByRole('button', { name: '连接并启用', exact: true }).click();
     await expect(page.getByLabel('AI 助手状态', { exact: true })).toBeVisible();
     await expect(page.getByText('AI 助手已连接 自定义服务', { exact: true })).toBeVisible();
-    await expect(page.getByText('fixture-tool-model', { exact: true })).toBeVisible();
+    await expect(page.getByText('已读取 2 个模型，AI 对话和插件会选择可用的文本模型自行接入。', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI设置概览.png') });
     await expect(page.getByRole('button', { name: '登录 Codex' })).not.toBeVisible();
     for (const [width, height] of [[1440, 900], [1280, 720], [700, 900], [390, 844]]) {
@@ -84,6 +84,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
     await expect(page.locator('.commerce-heading')).toHaveCount(0); await expect(page.locator('.commerce-topbar')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '今天，想让工作轻一点？' })).toBeVisible();
+    await expect(page.getByLabel('对话模型', { exact: true })).toHaveValue('fixture-tool-model');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
     await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI对话改版.png') });

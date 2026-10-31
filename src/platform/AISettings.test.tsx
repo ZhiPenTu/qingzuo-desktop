@@ -5,31 +5,32 @@ import { AISettings } from './AISettings';
 interface MockStatus {
   mode: string;
   address: string;
-  model: string;
   running: boolean;
-  verified: string[];
+  model?: string;
+  verified?: string[];
   ready?: boolean;
   error: string | null;
 }
 
-const unconfigured: MockStatus = { mode: 'external', address: 'http://127.0.0.1:8317', model: '', running: true, verified: [], error: null };
-const enabled: MockStatus = { mode: 'external', address: 'https://api.deepseek.com', model: 'deepseek-flash', running: true, verified: ['deepseek-flash'], ready: true, error: null };
+const unconfigured: MockStatus = { mode: 'external', address: 'http://127.0.0.1:8317', running: true, ready: false, error: null };
+const enabled: MockStatus = { mode: 'external', address: 'https://api.deepseek.com', running: true, ready: true, error: null };
 const unconfiguredImages = {
   google: { configured: false, source: 'none' },
   openai: { configured: false, source: 'none' },
   proxy: { configured: false },
 };
 
-function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
+function mockDesktop(options: { status?: MockStatus; setup?: (args: Record<string, unknown>) => unknown; models?: () => unknown; imageStatus?: typeof unconfiguredImages; configureImage?: (args: Record<string, unknown>) => unknown } = {}) {
   let status = structuredClone(options.status ?? unconfigured);
   let imageStatus = structuredClone(options.imageStatus ?? unconfiguredImages);
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>): Promise<unknown> => {
     if (method === 'ai.status') return structuredClone(status);
     if (method === 'ai.setup') {
       if (options.setup) return options.setup(args ?? {});
-      status = { ...enabled, address: String(args?.address ?? enabled.address), model: String(args?.model || 'deepseek-flash'), verified: [String(args?.model || 'deepseek-flash')] };
-      return { ok: true, status: structuredClone(status) };
+      status = { ...enabled, address: String(args?.address ?? enabled.address) };
+      return { ok: true, status: structuredClone(status), models: [{ id: 'deepseek-flash' }, { id: 'deepseek-chat' }] };
     }
+    if (method === 'ai.models') return options.models ? options.models() : [{ id: 'deepseek-flash', title: 'DeepSeek Flash' }, { id: 'deepseek-chat', title: 'DeepSeek Chat' }];
     if (method === 'ai.imageStatus') return structuredClone(imageStatus);
     if (method === 'ai.configureImage') {
       if (options.configureImage) return options.configureImage(args ?? {});
@@ -74,15 +75,17 @@ it('shows the key on demand and opens the provider key page', async () => {
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('openExternal', { url: 'https://platform.deepseek.com/api_keys' }));
 });
 
-it('connects and enables the assistant with one action using the provider recommendation', async () => {
+it('connects without choosing a model and reads the available model catalog', async () => {
   const invoke = mockDesktop(); const onOpenChat = vi.fn();
   render(<AISettings onOpenChat={onOpenChat} />);
   fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
   fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
   await screen.findByLabelText('AI 助手状态');
-  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://api.deepseek.com', apiKey: 'sk-secret', preferredModels: ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-chat'] });
+  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://api.deepseek.com', apiKey: 'sk-secret' });
+  expect(invoke).toHaveBeenCalledWith('ai.models', undefined);
   expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
-  expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
+  expect(screen.getByText('已读取 2 个模型，AI 对话和插件会选择可用的文本模型自行接入。')).toBeTruthy();
+  expect(screen.queryByLabelText('指定模型（可选）')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '开始 AI 对话' }));
   expect(onOpenChat).toHaveBeenCalledOnce();
 });
@@ -137,7 +140,7 @@ it('shows a concise enabled state and lets the user replace the service', async 
 });
 
 it('recognizes an older enabled status without the ready field', async () => {
-  const { ready: _ready, ...legacyEnabled } = enabled;
+  const { ready: _ready, ...legacyEnabled } = { ...enabled, model: 'deepseek-flash', verified: ['deepseek-flash'] };
   mockDesktop({ status: legacyEnabled }); render(<AISettings />);
   await screen.findByLabelText('AI 助手状态');
   expect(screen.getByText('AI 助手已连接 DeepSeek')).toBeTruthy();
@@ -148,7 +151,7 @@ it('surfaces a saved but unverified configuration with one completion action', a
   await screen.findByText('已保存，尚未启用');
   expect(screen.getByRole('button', { name: '完成启用' })).toBeTruthy();
   expect(screen.getByLabelText('服务地址')).toBeTruthy();
-  expect(screen.getByLabelText('指定模型（可选）')).toHaveProperty('value', 'team-private-chat');
+  expect(screen.queryByLabelText('指定模型（可选）')).toBeNull();
 });
 
 it.each([
@@ -166,33 +169,20 @@ it.each([
   expect(screen.queryByLabelText('AI 助手状态')).toBeNull();
 });
 
-it('offers discovered chat models after a failed tool check and never selects one silently', async () => {
-  const invoke = mockDesktop({ setup: () => ({ ok: false, code: 'model_incompatible', message: '这个模型不支持 AI 助手所需的工具调用，请选择其他模型。', models: [{ id: 'team-private-chat', title: '私有对话模型' }, { id: 'gpt-image-2.5' }] }) });
-  render(<AISettings />);
-  fireEvent.change(await screen.findByLabelText('访问密钥'), { target: { value: 'sk-secret' } });
-  fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
-  const select = await screen.findByLabelText('可用模型');
-  expect(screen.getByRole('option', { name: '私有对话模型 · team-private-chat' })).toBeTruthy();
-  expect(screen.queryByRole('option', { name: 'gpt-image-2.5' })).toBeNull();
-  expect((select as HTMLSelectElement).value).toBe('');
-  fireEvent.change(select, { target: { value: 'team-private-chat' } });
-  expect((screen.getByLabelText('指定模型（可选）') as HTMLInputElement).value).toBe('team-private-chat');
-  expect(screen.getByRole('button', { name: '重新验证' })).toBeTruthy();
-  expect(invoke.mock.calls.filter(([method]) => method === 'ai.setup')).toHaveLength(1);
-});
-
-it('supports a custom OpenAI-compatible address and explicit model', async () => {
-  const invoke = mockDesktop({ setup: args => ({ ok: true, status: { ...enabled, address: String(args.address), model: String(args.model), ready: true } }) });
+it('supports a custom OpenAI-compatible address without a model field', async () => {
+  const invoke = mockDesktop({
+    setup: args => ({ ok: true, status: { ...enabled, address: String(args.address), ready: true } }),
+    models: () => [{ id: 'team-private-chat', title: '私有对话模型' }, { id: 'team-private-json', title: '私有 JSON 模型' }],
+  });
   render(<AISettings />);
   fireEvent.click(await screen.findByRole('button', { name: /自定义服务/ }));
   await screen.findByLabelText('服务地址');
   fireEvent.change(screen.getByLabelText('服务地址'), { target: { value: 'https://gateway.example.com/v1' } });
-  fireEvent.change(screen.getByLabelText('指定模型（可选）'), { target: { value: 'team-private-chat' } });
   fireEvent.change(screen.getByLabelText('访问密钥'), { target: { value: 'sk-custom' } });
   fireEvent.click(screen.getByRole('button', { name: '连接并启用' }));
   await screen.findByLabelText('AI 助手状态');
-  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://gateway.example.com/v1', apiKey: 'sk-custom', preferredModels: [], model: 'team-private-chat' });
-  expect(screen.getByText('team-private-chat')).toBeTruthy();
+  expect(invoke).toHaveBeenCalledWith('ai.setup', { address: 'https://gateway.example.com/v1', apiKey: 'sk-custom' });
+  expect(screen.getByText('已读取 2 个模型，AI 对话和插件会选择可用的文本模型自行接入。')).toBeTruthy();
 });
 
 it('retries a failed settings read without replacing the saved configuration', async () => {

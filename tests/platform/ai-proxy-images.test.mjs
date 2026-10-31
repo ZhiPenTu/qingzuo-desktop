@@ -30,7 +30,7 @@ async function fixture(context, request) {
     return Response.json(endpoint.startsWith('/v1beta') ? { candidates: [{ content: { parts: [{ inline_data: { data: png.toString('base64') } }] } }] } : { data: [{ b64_json: png.toString('base64') }] });
   } });
   await proxy.initialize();
-  await proxy.configure({ mode: 'external', address: 'http://127.0.0.1:8317', model: 'gemini-3.8-flash-high' });
+  await proxy.configure({ address: 'http://127.0.0.1:8317' });
   const editor = new ImageEditor({ get: async () => { throw new Error('Must not read plugin keys'); } }, async () => { throw new Error('Must not use official endpoints'); }, proxy);
   const output = path.join(root, 'output'); await mkdir(output);
   const files = new FileBroker(path.join(root, 'files'), { showOpenDialog: async () => ({ canceled: false, filePaths: [output] }) }); await files.initialize();
@@ -52,7 +52,7 @@ test('proxy discovery filters text models, preserves image aliases and reveals n
   assert.ok(models.every(model => model.source === 'proxy'));
   assert.ok(!JSON.stringify(models).includes('shared-fixture'));
   assert.deepEqual(secrets, [['system.ai', 'external']]); assert.equal(edits(calls).length, 0);
-  assert.equal(proxy.settings.model, 'gemini-3.8-flash-high'); assert.deepEqual(proxy.settings.verified, []);
+  assert.equal(proxy.status().ready, false);
   await assert.rejects(editor.models({ ...plugin, permissions: {} }, { source: 'proxy' }), /未授权/);
   assert.equal(calls.length, 1);
   await assert.rejects(editor.resolve(plugin, { source: 'proxy', modelId: 'gpt-text' }), /无效/);
@@ -122,7 +122,7 @@ test('changed proxy destination blocks pending generation but does not block res
   const conflict = path.join(output, 'original-ai-' + batch.id.slice(0, 8) + '-1.png'); await writeFile(conflict, 'keep');
   await finish(runtime, batch, grant); assert.equal(runtime.get(plugin, batch.id).items[0].state, 'save-failed');
   const pending = await runtime.create(plugin, input(token));
-  await proxy.configure({ mode: 'external', address: 'http://127.0.0.1:9999', model: 'gemini-3.8-flash-high' });
+  await proxy.configure({ address: 'http://127.0.0.1:9999' });
   await assert.rejects(runtime.start(plugin, { id: pending.id, revision: 1, directoryToken: grant.token }), /连接已改变/);
   assert.equal(runtime.get(plugin, pending.id).state, 'draft'); assert.equal(edits(calls).length, 1);
   await rm(conflict); await finish(runtime, batch, grant);

@@ -71,28 +71,29 @@ function setupFailure(error, models = []) {
 export class ProxyRuntime {
   constructor({ root, credentials, request = proxyRequest }) {
     Object.assign(this, { root, credentials, request });
-    this.settings = { schemaVersion: 1, mode: 'external', address: 'http://127.0.0.1:8317', model: '', verified: [] };
+    this.settings = { schemaVersion: 2, mode: 'external', address: 'http://127.0.0.1:8317', connected: false };
     this.error = null;
   }
   async initialize() {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     try {
       const value = JSON.parse(await readFile(path.join(this.root, 'settings.json'), 'utf8'));
-      if (value.schemaVersion !== 1) throw new Error('AI 配置版本不受支持。');
-      this.settings = { ...this.settings, ...value, mode: 'external', address: proxyAddress(value.address || 'http://127.0.0.1:8317'), verified: Array.isArray(value.verified) ? value.verified : [] };
+      if (![1, 2].includes(value.schemaVersion)) throw new Error('AI 配置版本不受支持。');
+      const connected = value.schemaVersion === 1
+        ? Boolean(value.model && Array.isArray(value.verified) && value.verified.includes(value.model))
+        : value.connected === true;
+      this.settings = { schemaVersion: 2, mode: 'external', address: proxyAddress(value.address || 'http://127.0.0.1:8317'), connected };
     } catch (error) {
       if (error.code !== 'ENOENT') this.error = 'AI 配置读取失败，请重新设置。';
     }
   }
   status() {
-    return { ...this.settings, mode: 'external', running: true, ready: Boolean(this.settings.model && this.settings.verified.includes(this.settings.model) && !IMAGE_MODEL.test(this.settings.model)), error: this.error };
+    return { ...this.settings, mode: 'external', running: true, ready: Boolean(this.settings.connected), error: this.error };
   }
   async configure(options) {
-    if (typeof options.model !== 'string' || options.model.length > 160) throw new Error('AI 配置无效。');
     const address = proxyAddress(options.address || this.settings.address);
     if (options.apiKey) await this.credentials.set('system.ai', 'external', options.apiKey);
-    const changed = address !== this.settings.address || Boolean(options.apiKey);
-    this.settings = { schemaVersion: 1, mode: 'external', address, model: options.model, verified: changed ? [] : this.settings.verified };
+    this.settings = { schemaVersion: 2, mode: 'external', address, connected: options.connected === true };
     await atomicJson(path.join(this.root, 'settings.json'), this.settings);
     return this.status();
   }
@@ -103,15 +104,14 @@ export class ProxyRuntime {
     return this.status();
   }
   async connection(requireVerified = false) {
-    if (requireVerified && /gpt[-_]?image|nano[-_ ]?banana|image[-_]?generation/i.test(this.settings.model)) throw new Error('图像模型不能用作文本助手，请选择支持工具调用的文本型号。');
     const base = this.settings.address;
     const key = await this.credentials.get('system.ai', 'external');
     if (!key) throw new Error('请配置代理访问密钥。');
-    if (requireVerified && (!this.settings.model || !this.settings.verified.includes(this.settings.model))) throw new Error('请在 AI 模型设置中选择模型并验证工具调用。');
-    return { base, key, model: this.settings.model };
+    if (requireVerified && !this.settings.connected) throw new Error('请先完成 AI 服务连接。');
+    return { base, key };
   }
   async models() {
-    return (await this.catalog()).map(item => ({ id: item.id }));
+    return (await this.catalog()).map(({ id, title, type }) => ({ id, title, type }));
   }
   async imageConnection() {
     const connection = await this.connection();
@@ -134,21 +134,7 @@ export class ProxyRuntime {
     if (!saved) throw new AISetupError('missing_key', '请填写访问密钥。');
     return saved;
   }
-  async verifyModel(connection, model) {
-    if (IMAGE_MODEL.test(model)) throw new AISetupError('model_not_chat', '这个模型不能用于 AI 助手，请选择文本模型。');
-    const { base, key } = connection;
-    const response = await this.request(base, '/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Call the connection_check tool with ok=true.' }], tools: [{ type: 'function', function: { name: 'connection_check', description: 'Verify tool calling', parameters: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false } } }], tool_choice: { type: 'function', function: { name: 'connection_check' } }, stream: false }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!response.ok) { await response.body?.cancel(); throw new AIHttpError(response.status, 'verify'); }
-    const result = await boundedJson(response, 1024 ** 2), call = result.choices?.[0]?.message?.tool_calls?.find(item => item.function?.name === 'connection_check');
-    let args; try { args = JSON.parse(call?.function?.arguments); } catch { }
-    if (args?.ok !== true) throw new AISetupError('model_incompatible', '这个模型不支持 AI 助手所需的工具调用，请选择其他模型。');
-  }
-  async commitSetup(address, apiKey, model) {
+  async commitSetup(address, apiKey) {
     const previousSettings = this.settings;
     let previousKey = null, keyChanged = false;
     try {
@@ -165,7 +151,7 @@ export class ProxyRuntime {
           throw new AISetupError('credential_error', '无法保存访问密钥，请检查应用数据目录权限后重试。');
         }
       }
-      this.settings = { schemaVersion: 1, mode: 'external', address, model, verified: [model] };
+      this.settings = { schemaVersion: 2, mode: 'external', address, connected: true };
       try {
         await atomicJson(path.join(this.root, 'settings.json'), this.settings);
       } catch {
@@ -183,27 +169,21 @@ export class ProxyRuntime {
     let models = [];
     try {
       const address = proxyAddress(options.address || this.settings.address);
-      if (!Array.isArray(options.preferredModels) || options.preferredModels.length > 20 || options.preferredModels.some(value => typeof value !== 'string' || !value || value.length > 160)) throw new AISetupError('invalid_config', '推荐模型配置无效。');
-      const explicitModel = options.model === undefined ? '' : String(options.model).trim();
-      if (explicitModel.length > 160) throw new AISetupError('invalid_config', '模型标识无效。');
-      if (explicitModel && IMAGE_MODEL.test(explicitModel)) throw new AISetupError('model_not_chat', '这个模型不能用于 AI 助手，请选择文本模型。');
       const key = await this.setupKey(address, options.apiKey);
       const catalog = await this.catalog({ base: address, key });
-      models = catalog.filter(isChatModel).map(({ id, title }) => ({ id, title }));
-      const model = explicitModel || options.preferredModels.find(candidate => models.some(item => item.id === candidate)) || models[0]?.id;
-      if (!model) throw new AISetupError('no_models', '没有找到可用于对话的模型，请检查账户权限或改选其他服务。');
-      if (IMAGE_MODEL.test(model)) throw new AISetupError('model_not_chat', '这个模型不能用于 AI 助手，请选择文本模型。', models);
-      await this.verifyModel({ base: address, key }, model);
-      await this.commitSetup(address, options.apiKey?.trim(), model);
-      return { ok: true, status: this.status() };
+      models = catalog.map(({ id, title, type }) => ({ id, title, type }));
+      if (!models.length) throw new AISetupError('no_models', '服务没有返回任何可用模型，请检查账户权限或服务地址。');
+      await this.commitSetup(address, options.apiKey?.trim());
+      return { ok: true, status: this.status(), models };
     } catch (error) {
       return setupFailure(error, models);
     }
   }
   async verify() {
-    if (IMAGE_MODEL.test(this.settings.model)) throw new Error('图像模型不能用作文本助手，不会发送验证请求。');
-    const { base, key, model } = await this.connection(); if (!model) throw new Error('请选择助手模型。');
-    await this.verifyModel({ base, key }, model);
-    this.settings.verified = [...new Set([...this.settings.verified, model])]; await atomicJson(path.join(this.root, 'settings.json'), this.settings); return this.status();
+    const connection = await this.connection();
+    await this.catalog(connection);
+    this.settings.connected = true;
+    await atomicJson(path.join(this.root, 'settings.json'), this.settings);
+    return this.status();
   }
 }
