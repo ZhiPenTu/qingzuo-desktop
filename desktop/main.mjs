@@ -491,6 +491,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     const next = { x, y, width: Math.max(1, Math.min(Math.floor(args.width), width - x)), height: Math.max(1, Math.min(Math.floor(args.height), height - y)) };
     for (const [id, other] of views) if (id !== target) other.setVisible(false);
     visible = target;
+    if (Number.isFinite(args.radius)) view.setBorderRadius(Math.max(0, Math.min(32, args.radius)));
     view.setBounds(next);
     view.setVisible(true);
     return;

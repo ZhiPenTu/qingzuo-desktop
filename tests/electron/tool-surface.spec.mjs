@@ -31,6 +31,7 @@ const surfaceState = application => application.evaluate(({ BrowserWindow }) => 
   visible: child.getVisible?.() ?? null,
   url: child.webContents?.getURL?.() ?? null,
   bounds: child.getBounds?.() ?? null,
+  radius: child.__surfaceRadius ?? null,
 })));
 
 test('leaving a tool while it reloads keeps the native surface hidden', async () => {
@@ -52,9 +53,17 @@ test('leaving a tool while it reloads keeps the native surface hidden', async ()
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
 
     await page.getByRole('button', { name: '工具中心', exact: true }).click();
+    await application.evaluate(({ WebContentsView }) => {
+      const setBorderRadius = WebContentsView.prototype.setBorderRadius;
+      WebContentsView.prototype.setBorderRadius = function (radius) {
+        this.__surfaceRadius = radius;
+        return setBorderRadius.call(this, radius);
+      };
+    });
     await page.getByRole('button', { name: '打开', exact: true }).click();
     await page.getByRole('tab', { name: /Surface fixture/ }).waitFor();
     await expect.poll(async () => (await surfaceState(application)).some(view => view.visible)).toBe(true);
+    await expect.poll(async () => (await surfaceState(application)).find(view => view.visible)?.radius).toBe(18);
 
     // Open the settings entry of the tool that is already on screen, then leave
     // for the tool centre before that navigation finishes. The tool must not
