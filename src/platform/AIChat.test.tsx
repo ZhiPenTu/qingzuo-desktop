@@ -103,21 +103,34 @@ it('fills and focuses suggestions without sending, and shows plugin capabilities
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe('打开 AI 批图，帮我规划白底商品图');
 });
-it('keeps history in a dismissible drawer and restores focus without losing the draft', async () => {
+it('shows history beside the conversation and keeps the draft when switching', async () => {
   const { invoke } = fixture(); render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
   await waitFor(() => expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBe('fixture-chat'));
-  expect(screen.queryByRole('navigation', { name: '历史对话' })).toBeNull();
+  await screen.findByRole('navigation', { name: '历史对话' });
+  const activeChat = screen.getByRole('button', { name: '测试对话' });
+  expect(activeChat.getAttribute('aria-current')).toBe('page');
   fireEvent.change(screen.getByLabelText('消息'), { target: { value: '保留草稿' } });
-  fireEvent.click(screen.getByRole('button', { name: '历史对话' }));
-  const dialog = await screen.findByRole('dialog', { name: '历史对话' });
-  expect(screen.getByRole('button', { name: '测试对话' })).toBeTruthy();
-  fireEvent.keyDown(dialog, { key: 'Escape' });
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: '历史对话' }));
+  fireEvent.click(activeChat);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.status', { id: 'fixture-chat' }));
   expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe('保留草稿');
-  fireEvent.click(screen.getByRole('button', { name: '历史对话' }));
-  fireEvent.click(await screen.findByRole('button', { name: '测试对话' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.create', { model: 'fixture-model' }));
+});
+it('moves history into a drawer when the window is too narrow', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 700;
+  try {
+    fixture();
+    render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+    await waitFor(() => expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBe('fixture-chat'));
+    expect(screen.queryByRole('navigation', { name: '历史对话' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '历史对话' }));
+    const dialog = await screen.findByRole('dialog', { name: '历史对话' });
+    expect(screen.getByRole('button', { name: '测试对话' })).toBeTruthy();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '历史对话' }));
+  } finally {
+    window.innerWidth = originalWidth;
+  }
 });

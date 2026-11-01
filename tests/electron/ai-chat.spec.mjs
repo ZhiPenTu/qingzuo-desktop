@@ -101,6 +101,7 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await expect(page.locator('.commerce-heading')).toHaveCount(0); await expect(page.locator('.commerce-topbar')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '今天，想让工作轻一点？' })).toBeVisible();
     await expect(page.getByLabel('对话模型', { exact: true })).toHaveValue('fixture-tool-model');
+    await expect(page.getByRole('navigation', { name: '历史对话', exact: true })).toBeVisible();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
     await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI对话改版.png') });
@@ -135,10 +136,9 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     expect(completed.history.find(entry => entry.tool === 'call_plugin').text).toContain('真实沙箱回声');
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI对话界面.png') });
     await page.getByRole('button', { name: '新建对话', exact: true }).click(); await expect(page.getByRole('log')).not.toContainText('插件已调用');
-    await page.getByRole('button', { name: '历史对话', exact: true }).click();
     await expect(page.getByRole('button', { name: '请调用回声插件', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '请调用回声插件', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByRole('log')).toContainText('插件已调用');
+    await expect(page.getByRole('log')).toContainText('插件已调用');
     await app.close(); page = await launch();
     const chats = await page.evaluate(() => window.commerceDesktop.invoke('ai.chat.list')); expect(chats).toHaveLength(2);
     const restored = await page.evaluate(id => window.commerceDesktop.invoke('ai.chat.status', { id }), chatId); expect(restored.history).toEqual(completed.history); expect(restored.approvals).toEqual([]);

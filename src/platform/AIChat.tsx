@@ -10,6 +10,45 @@ import { chatInvoke, type ChatSession, type ChatSummary, type ChatPlugin } from 
 import { isChatModel, type AIModel } from './ai-providers';
 import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
 
+const HISTORY_SIDEBAR_BREAKPOINT = 980;
+
+function ChatHistoryPanel({
+  chats,
+  activeId,
+  busy,
+  canCreate,
+  canDelete,
+  showHeading,
+  onCreate,
+  onSelect,
+  onDelete
+}: {
+  chats: ChatSummary[];
+  activeId?: string;
+  busy: boolean;
+  canCreate: boolean;
+  canDelete: boolean;
+  showHeading: boolean;
+  onCreate: () => void;
+  onSelect: (id: string) => void;
+  onDelete: () => void;
+}) {
+  return <div className="ai-chat-history-panel">
+    {showHeading ? <div className="ai-chat-history-heading"><div><History /><span>历史对话</span></div><small>{chats.length}</small></div> : null}
+    <Button className="ai-chat-history-new" variant="outline" disabled={busy || !canCreate} onClick={onCreate}><Plus data-icon="inline-start" />新建对话</Button>
+    <div className="ai-chat-history-label"><span>最近</span></div>
+    <nav className="ai-chat-history" aria-label="历史对话">
+      {chats.map(chat => <Button key={chat.id} className={cn('ai-chat-history-item', activeId === chat.id && 'is-active')} variant="ghost" aria-label={chat.title} aria-current={activeId === chat.id ? 'page' : undefined} disabled={busy} onClick={() => onSelect(chat.id)}>
+        <MessageCircle data-icon="inline-start" />
+        <span className="ai-chat-history-title">{chat.title}</span>
+        {chat.state === 'running' ? <span className="connection-dot connected" aria-label="处理中" /> : null}
+      </Button>)}
+      {!chats.length ? <div className="ai-chat-history-empty"><MessageCircle /><strong>还没有历史对话</strong><p>发送第一条消息后，会在这里保存。</p></div> : null}
+    </nav>
+    {activeId ? <div className="ai-chat-history-footer"><Button variant="ghost" disabled={busy || !canDelete} onClick={onDelete}><Trash2 data-icon="inline-start" />删除当前对话</Button></div> : null}
+  </div>;
+}
+
 export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () => void; onOpenPlugin: (id: string) => void }) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -21,6 +60,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelError, setModelError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [compactHistory, setCompactHistory] = useState(() => window.innerWidth <= HISTORY_SIDEBAR_BREAKPOINT);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [text, setText] = useState('');
   const [stream, setStream] = useState('');
@@ -44,6 +84,14 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
       setModel(value.model && modelIds.current.has(value.model) ? value.model : fallbackModel.current);
     }
   }, []);
+  useEffect(() => {
+    const updateLayout = () => setCompactHistory(window.innerWidth <= HISTORY_SIDEBAR_BREAKPOINT);
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, []);
+  useEffect(() => {
+    if (!compactHistory) setHistoryOpen(false);
+  }, [compactHistory]);
   useEffect(() => {
     if (!window.commerceDesktop) return;
     let active = true;
@@ -116,6 +164,18 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
     setHistoryOpen(false);
     await refreshList();
   }
+  function deleteCurrent() {
+    if (!session || !window.confirm('删除这条对话记录？删除后无法在列表中找回。')) return;
+    void action(async () => {
+      await chatInvoke('delete', { id: session.id });
+      selected.current = '';
+      localStorage.removeItem('qingzuo.ai-chat.selected.v1');
+      setSession(null);
+      setStream('');
+      setHistoryOpen(false);
+      await refreshList();
+    });
+  }
   async function send() {
     const draft = text.trim(); if (!draft || !ready || !model || session?.state === 'running') return;
     await action(async () => {
@@ -129,7 +189,10 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const running = session?.state === 'running';
   const hasMessages = Boolean(session?.history.length || stream || session?.approvals?.length);
   function suggest(prompt: string) { setText(prompt); input.current?.focus(); }
-  return <div className="ai-chat-layout harness-theme">
+  const historyPanel = <ChatHistoryPanel chats={chats} activeId={session?.id} busy={busy} canCreate={Boolean(model)} canDelete={!running} showHeading={!compactHistory} onCreate={() => void action(create)} onSelect={id => void action(async () => { await load(id); setHistoryOpen(false); })} onDelete={deleteCurrent} />;
+  return <div className="ai-chat-shell harness-theme">
+    {!compactHistory ? <aside className="ai-chat-history-sidebar"><ChatHistoryPanel chats={chats} activeId={session?.id} busy={busy} canCreate={Boolean(model)} canDelete={!running} showHeading onCreate={() => void action(create)} onSelect={id => void action(async () => { await load(id); })} onDelete={deleteCurrent} /></aside> : null}
+    <div className="ai-chat-layout">
     <header className="ai-chat-toolbar">
       <div className="ai-chat-heading">
         <div><h1>{hasMessages ? session?.title || 'AI 对话' : 'AI 对话'}</h1><span className={cn('connection-dot', ready && 'connected')} aria-label={ready ? '助手已就绪' : connected ? '没有可用模型' : '助手待配置'} /></div>
@@ -142,15 +205,14 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
         </div>
       </div>
       <div className="ai-chat-toolbar-actions">
-        <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        {compactHistory ? <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
           <SheetTrigger render={<Button variant="ghost" aria-label="历史对话" title="历史对话" />}><History data-icon="inline-start" /><span>历史对话</span></SheetTrigger>
-          <SheetContent className="ai-chat-panel">
+          <SheetContent className="ai-chat-panel ai-chat-history-sheet">
             <SheetHeader><SheetTitle>历史对话</SheetTitle><SheetDescription>会话保存在本机，选择一个继续。</SheetDescription></SheetHeader>
-            <nav className="ai-chat-history" aria-label="历史对话">{chats.map(chat => <Button key={chat.id} variant={session?.id === chat.id ? 'secondary' : 'ghost'} disabled={busy} onClick={() => void action(async () => { await load(chat.id); setHistoryOpen(false); })}><MessageCircle data-icon="inline-start" /><span className="truncate">{chat.title}</span>{chat.state === 'running' ? <span className="connection-dot connected" aria-label="处理中" /> : null}</Button>)}{!chats.length ? <p>还没有历史对话。发送第一条消息后，会在这里保存。</p> : null}</nav>
-            <div className="ai-chat-panel-footer"><Button variant="outline" disabled={busy} onClick={() => void action(create)}><Plus data-icon="inline-start" />新建对话</Button>{session ? <Button variant="ghost" disabled={busy || running} onClick={() => { if (window.confirm('删除这条对话记录？删除后无法在列表中找回。')) void action(async () => { await chatInvoke('delete', { id: session.id }); selected.current = ''; setSession(null); setStream(''); await refreshList(); }); }}><Trash2 data-icon="inline-start" />删除当前对话</Button> : null}</div>
+            {historyPanel}
           </SheetContent>
-        </Sheet>
-        <Button variant="ghost" aria-label="新建对话" title="新建对话" disabled={busy} onClick={() => void action(create)}><Plus data-icon="inline-start" /><span>新建对话</span></Button>
+        </Sheet> : null}
+        {compactHistory ? <Button variant="ghost" aria-label="新建对话" title="新建对话" disabled={busy || !model} onClick={() => void action(create)}><Plus data-icon="inline-start" /><span>新建对话</span></Button> : null}
         <Button variant="ghost" aria-label="AI 设置" title="AI 设置" onClick={onSettings}><Settings data-icon="inline-start" /><span>AI 设置</span></Button>
       </div>
     </header>
@@ -170,5 +232,6 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
       <div className="ai-composer-dock"><form onSubmit={event => { event.preventDefault(); void send(); }}><InputGroup className="ai-composer"><InputGroupTextarea ref={input} aria-label="消息" placeholder="告诉我你想完成什么…" maxLength={16000} disabled={busy} value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><InputGroupAddon align="block-end" className="ai-composer-actions"><div className="ai-composer-privacy"><small><ShieldCheck />插件调用需你确认</small>{hasMessages ? <Button variant="ghost" size="icon-sm" aria-label="可调用插件" title="可调用插件" onClick={() => setToolsOpen(true)}><Puzzle /></Button> : null}</div>{running ? <Button type="button" variant="outline" size="icon-lg" aria-label="停止" title="停止生成" disabled={busy} onClick={() => void action(async () => { const value = await chatInvoke<ChatSession>('cancel', { id: session.id }); setSession(value); setStream(''); await refreshList(); })}><Square /></Button> : <Button type="submit" size="icon-lg" aria-label="发送" title="发送" disabled={busy || !ready || !text.trim()}><Send /></Button>}</InputGroupAddon></InputGroup></form><div className="ai-composer-meta"><span>Enter 发送 · Shift + Enter 换行</span></div></div>
     </section>
     <Sheet open={toolsOpen} onOpenChange={setToolsOpen}><SheetContent className="ai-chat-panel"><SheetHeader><SheetTitle>可调用插件</SheetTitle><SheetDescription>只提供已启用的能力。每次调用都需要你确认。</SheetDescription></SheetHeader><div className="ai-chat-plugin-list">{plugins.map(plugin => { const iconSrc = resolvePluginIcon(plugin.id); return <section key={plugin.id}><div>{iconSrc ? <img src={iconSrc} alt="" className="ai-chat-plugin-icon" /> : <Puzzle />}<h3>{plugin.title}</h3></div>{plugin.description ? <p>{plugin.description}</p> : null}<ul>{plugin.tools.map(tool => <li key={tool.name}>{tool.title}</li>)}</ul></section>; })}{!plugins.length ? <p>安装并启用插件后，助手才能调用。</p> : null}</div></SheetContent></Sheet>
+    </div>
   </div>;
 }
