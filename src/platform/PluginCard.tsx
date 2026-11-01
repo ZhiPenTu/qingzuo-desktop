@@ -26,6 +26,7 @@ const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact', comp
 export function formatDownloadCount(downloads: number) {
   return downloads >= 1000 ? compactNumber.format(downloads) : exactNumber.format(downloads);
 }
+const sourceLabel = (source?: string) => ({ bundled: '内置工具', local: '本地导入', market: '市场安装' }[source ?? ''] ?? source);
 interface PluginCardProps {
   entry: ToolEntry; installed?: Plugin; mode: 'installed' | 'catalog'; disabled: boolean; ready: boolean; install?: PluginInstallState;
   onOpen: (settings?: boolean) => void; onAction: (method: string, args: unknown) => void;
@@ -62,23 +63,27 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
     <CardHeader>
       <span className={cn('commerce-tool-icon', iconSrc && 'has-image')}>{iconSrc ? <img src={iconSrc} alt="" /> : <Icon />}</span>
       <div className="plugin-info">
-        <span className="plugin-category">{toolCategory(entry)}</span>
         <CardTitle role="heading" aria-level={2}>{entry.title}</CardTitle>
-        <CardDescription title={entry.description}>{entry.description}</CardDescription>
+        <span className="plugin-category">{toolCategory(entry)}</span>
       </div>
     </CardHeader>
     <CardContent>
+      <CardDescription className="plugin-description" title={entry.description}>{entry.description}</CardDescription>
       {entry.compatible === false ? <p role="alert">请先将轻作更新到较新版本，再安装这个工具。</p> : null}
       {entry.sourceUnavailable ? <p role="status">暂时无法获取最新版本，请稍后重试。</p> : null}
       {notesOpen && entry.releaseNotes ? <div className="plugin-notes-panel" id={notesId}><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></div> : null}
       {mode === 'catalog' ? <>
         {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : null}
+        <span className="plugin-market-meta">
+          <span className="plugin-version">v{entry.version}</span>
+          {downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}
+        </span>
       </> : <ul className="plugin-state">
         <li className="plugin-state-version">v{displayVersion}</li>
         {updateAvailable ? <li className="plugin-state-chip is-update">可更新到 v{entry.version}</li> : null}
-        <li className="plugin-state-chip">{installed?.enabled ? '已启用' : '已停用'}</li>
+        <li className={cn('plugin-state-chip', installed?.enabled ? 'is-enabled' : 'is-disabled')}>{installed?.enabled ? '已启用' : '已停用'}</li>
         {installed?.missing.length ? <li className="plugin-state-chip is-warning">缺少所需组件</li> : null}
-        <li className="plugin-state-chip">{({ bundled: '内置工具', local: '本地导入', market: '市场安装' }[installed?.source ?? ''] ?? installed?.source)}</li>
+        <li className="plugin-state-chip">{sourceLabel(installed?.source)}</li>
       </ul>}
       {mode === 'installed' && manageOpen ? <div id={manageId} className="plugin-manage-panel" role="group" aria-label={`${entry.title} 管理`}>
         <Button variant="outline" size="sm" disabled={unavailable} onClick={() => manage('plugins.enable', { id: entry.id, enabled: !installed?.enabled })}>{installed?.enabled ? '停用' : '启用'}</Button>
@@ -96,7 +101,9 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {failed ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{install.error || '插件安装失败，请重试。'}{mode === 'installed' ? <Button variant="outline" size="sm" disabled={disabled || entry.sourceUnavailable} onClick={retry}>{retryLabel}</Button> : null}</AlertDescription></Alert> : null}
     </CardContent>
     <CardFooter>
-      {mode === 'catalog' ? <><span className="plugin-market-meta">{downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}<span className="plugin-version">v{entry.version}</span></span>{notesToggle}<Button size="sm" disabled={unavailable || entry.sourceUnavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.sourceUnavailable ? '暂不可用' : entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : <>
+      {mode === 'catalog' ? <>{notesToggle}<div className="plugin-card-actions">
+        <Button size="sm" disabled={unavailable || entry.sourceUnavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.sourceUnavailable ? '暂不可用' : entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button>
+      </div></> : <>
         {notesToggle}
         <div className="plugin-card-actions">
           {updateAvailable && !entry.sourceUnavailable ? <Button variant="outline" size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
