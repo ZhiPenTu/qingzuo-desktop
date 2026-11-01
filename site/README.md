@@ -6,7 +6,8 @@
 site/
 ├── index.html          页面结构与文案
 ├── assets/styles.css   配色与排版（与桌面端设计令牌一致）
-├── assets/site.js      外观切换 + 最新版本直链解析 + 插件市场目录
+├── assets/site.js      外观切换 + 最新版本直链解析 + 下载线路 + 插件市场目录
+├── assets/download-sources.js  官网下载线路地址改写
 ├── assets/*.png        应用图标与工作台插画（复制自 src/assets）
 └── .nojekyll           避免 Pages 走 Jekyll 处理
 ```
@@ -58,6 +59,16 @@ https://api.github.com/repos/ZhiPenTu/qingzuo-desktop/releases/latest
 
 因此访客点击按钮会直接下载最新版本安装包，而不是跳到发布页面。
 
+## 下载线路
+
+下载区提供 GitHub 官方、gh-proxy、ghfast 与 GitCode 四条线路。选择结果保存在当前浏览器中，并同时作用于版本信息请求和安装包直链：
+
+- GitHub 官方：使用原始 `api.github.com` 与 `github.com` 地址。
+- gh-proxy / ghfast：在完整 GitHub URL 前添加对应镜像前缀。
+- GitCode：将 Release 页面、安装包和 API 地址转换为 GitCode 对应路径。
+
+页面会优先通过所选线路读取最新 Release；线路不可用时依次尝试其他线路，安装包链接仍使用用户当前选择的下载线路。国内网络建议选择 gh-proxy 或 ghfast。
+
 容错行为：
 
 | 场景 | 行为 |
@@ -65,7 +76,7 @@ https://api.github.com/repos/ZhiPenTu/qingzuo-desktop/releases/latest
 | 正常 | 按钮指向最新安装包，并显示版本号、体积与发布日期 |
 | 30 分钟内重复访问 | 使用 `localStorage` 缓存结果，避免触发 GitHub API 限流 |
 | 有缓存但网络失败 | 继续使用缓存直链，状态提示「离线缓存」 |
-| 无缓存且网络失败 | 按钮退回 `releases` 页面，状态区提示手动下载 |
+| 无缓存且网络失败 | 按钮退回所选线路的 Releases 页面，状态区提示切换线路或手动下载 |
 
 未登录用户调用 GitHub API 有 60 次/小时限制，缓存与「取不到就退回发布页」的策略就是为了避免在这种限制下失效。
 

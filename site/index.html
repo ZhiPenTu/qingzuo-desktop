@@ -100,6 +100,19 @@
               </div>
             </div>
 
+            <div class="download-source-row">
+              <label class="download-source-field">
+                <span>下载线路</span>
+                <select data-download-source aria-label="选择下载线路">
+                  <option value="github">GitHub 官方</option>
+                  <option value="gh-proxy">gh-proxy 加速</option>
+                  <option value="gh-fast">ghfast 加速</option>
+                  <option value="gitcode">GitCode 国内镜像</option>
+                </select>
+              </label>
+              <span class="download-source-note">国内网络建议选择加速线路</span>
+            </div>
+
             <p class="download-status" id="download-status" role="status">
               <span class="status-dot" aria-hidden="true"></span>
               <span data-status-text>正在获取最新版本…</span>
@@ -255,28 +268,41 @@
               下载按钮会直接获取最新版本安装包，安装后即可在插件市场安装工具。
             </p>
           </div>
-          <div class="hero-actions">
-            <div class="download-row" data-download-row="mac">
-              <a
-                class="button button-primary download-button"
-                data-download-cta
-                data-target="mac"
-                href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
-                rel="noopener"
-                >下载 macOS 版</a
-              >
-              <p class="download-meta" data-download-meta="mac">macOS 15+ · Apple Silicon</p>
+          <div class="download-panel-actions">
+            <div class="hero-actions">
+              <div class="download-row" data-download-row="mac">
+                <a
+                  class="button button-primary download-button"
+                  data-download-cta
+                  data-target="mac"
+                  href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                  rel="noopener"
+                  >下载 macOS 版</a
+                >
+                <p class="download-meta" data-download-meta="mac">macOS 15+ · Apple Silicon</p>
+              </div>
+              <div class="download-row" data-download-row="win">
+                <a
+                  class="button button-secondary download-button"
+                  data-download-cta
+                  data-target="win"
+                  href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
+                  rel="noopener"
+                  >下载 Windows 版</a
+                >
+                <p class="download-meta" data-download-meta="win">Windows 10+ · x64</p>
+              </div>
             </div>
-            <div class="download-row" data-download-row="win">
-              <a
-                class="button button-secondary download-button"
-                data-download-cta
-                data-target="win"
-                href="https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest"
-                rel="noopener"
-                >下载 Windows 版</a
-              >
-              <p class="download-meta" data-download-meta="win">Windows 10+ · x64</p>
+            <div class="download-source-row download-source-row-panel">
+              <label class="download-source-field">
+                <span>下载线路</span>
+                <select data-download-source aria-label="选择下载线路">
+                  <option value="github">GitHub 官方</option>
+                  <option value="gh-proxy">gh-proxy 加速</option>
+                  <option value="gh-fast">ghfast 加速</option>
+                  <option value="gitcode">GitCode 国内镜像</option>
+                </select>
+              </label>
             </div>
           </div>
         </div>
@@ -294,6 +320,6 @@
       </div>
     </footer>
 
-    <script src="assets/site.js" defer></script>
+    <script type="module" src="assets/site.js"></script>
   </body>
 </html>

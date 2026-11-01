@@ -6,6 +6,12 @@
  * browser_download_url —— 点击即下载最新安装包，而不是跳到发布页面。
  * 解析结果缓存在 localStorage，避免频繁触发 GitHub API 限流；失败时按钮退回发布页。
  */
+import {
+  DOWNLOAD_SOURCE_OPTIONS,
+  normalizeDownloadSource,
+  rewriteGitHubUrl,
+} from './download-sources.js';
+
 (function () {
   'use strict';
 
@@ -14,6 +20,9 @@
   var API_LATEST = 'https://api.github.com/repos/' + REPO + '/releases/latest';
   var CACHE_KEY = 'qingzuo.site.release.v1';
   var CACHE_TTL_MS = 30 * 60 * 1000;
+  var DOWNLOAD_SOURCE_KEY = 'qingzuo.site.download-source.v1';
+  var API_TIMEOUT_MS = 8000;
+  var releaseState = { latest: null, request: 0 };
 
   var ASSET_PATTERNS = {
     mac: /-mac-arm64\.dmg$/,
@@ -58,6 +67,59 @@
         /* 忽略写入失败。 */
       }
       applyTheme(next);
+    });
+  }
+
+  // ---------- 下载线路 ----------
+
+  function readDownloadSource() {
+    try {
+      return normalizeDownloadSource(localStorage.getItem(DOWNLOAD_SOURCE_KEY));
+    } catch (error) {
+      return 'github';
+    }
+  }
+
+  function writeDownloadSource(source) {
+    try {
+      localStorage.setItem(DOWNLOAD_SOURCE_KEY, normalizeDownloadSource(source));
+    } catch (error) {
+      /* 隐私模式下 storage 可能不可用。 */
+    }
+  }
+
+  function downloadSourceControls() {
+    return Array.prototype.slice.call(document.querySelectorAll('[data-download-source]'));
+  }
+
+  function syncDownloadSourceControls(source) {
+    downloadSourceControls().forEach(function (select) {
+      select.value = source;
+    });
+  }
+
+  function setReleaseFallback(source) {
+    var releasePage = rewriteGitHubUrl(RELEASES_PAGE, source);
+    allCtas().forEach(function (cta) {
+      cta.removeAttribute('data-resolved');
+      cta.setAttribute('href', releasePage);
+    });
+  }
+
+  function setupDownloadSources() {
+    var source = readDownloadSource();
+    syncDownloadSourceControls(source);
+    downloadSourceControls().forEach(function (select) {
+      select.addEventListener('change', function (event) {
+        var next = normalizeDownloadSource(event.target.value);
+        writeDownloadSource(next);
+        syncDownloadSourceControls(next);
+        if (releaseState.latest) applyRelease(releaseState.latest);
+        else {
+          setReleaseFallback(next);
+          fetchLatest();
+        }
+      });
     });
   }
 
@@ -160,8 +222,10 @@
   }
 
   function applyRelease(release) {
+    releaseState.latest = release;
     var version = String(release.tag_name || release.tagName || '').replace(/^v/, '') || '最新版本';
     var published = formatDate(release.published_at || release.created_at);
+    var source = readDownloadSource();
     var resolved = 0;
 
     ['mac', 'win'].forEach(function (platform) {
@@ -172,7 +236,7 @@
         var target = cta.getAttribute('data-target');
         if (target === platform || target === 'auto') {
           if (target === 'auto' && detectPlatform() !== platform) return;
-          cta.setAttribute('href', asset.browser_download_url);
+          cta.setAttribute('href', rewriteGitHubUrl(asset.browser_download_url, source));
           cta.setAttribute('data-resolved', 'true');
         }
       });
@@ -192,22 +256,72 @@
     if (resolved === 2) {
       setStatus('ready', '');
     } else if (resolved === 1) {
-      setStatus('ready', '部分平台安装包暂缺，请前往 GitHub Releases 查看');
+      setStatus('ready', '部分平台安装包暂缺，请切换下载线路或前往 Releases 查看');
     } else {
-      setStatus('error', '未找到安装包，请前往 GitHub Releases 手动下载');
+      setReleaseFallback(source);
+      setStatus('error', '未找到安装包，请切换下载线路或前往 Releases 手动下载');
     }
   }
 
-  function fetchLatest() {
-    return fetch(API_LATEST, { headers: { Accept: 'application/vnd.github+json' } })
+  function fetchJsonWithTimeout(url) {
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = controller
+      ? setTimeout(function () {
+          controller.abort();
+        }, API_TIMEOUT_MS)
+      : null;
+    return fetch(url, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: controller ? controller.signal : undefined,
+    })
       .then(function (response) {
-        if (!response.ok) throw new Error('GitHub API ' + response.status);
+        if (!response.ok) throw new Error('Release API ' + response.status);
         return response.json();
       })
+      .finally(function () {
+        if (timer) clearTimeout(timer);
+      });
+  }
+
+  function releaseApiSources() {
+    var selected = readDownloadSource();
+    var sources = [selected];
+    DOWNLOAD_SOURCE_OPTIONS.forEach(function (source) {
+      if (sources.indexOf(source.id) === -1) sources.push(source.id);
+    });
+    return sources;
+  }
+
+  function fetchLatest() {
+    var request = ++releaseState.request;
+    var sources = releaseApiSources();
+    if (!releaseState.latest) setStatus('loading', '正在获取最新版本…');
+
+    function attempt(index, previousError) {
+      if (index >= sources.length) return Promise.reject(previousError || new Error('release lookup failed'));
+      var source = sources[index];
+      return fetchJsonWithTimeout(rewriteGitHubUrl(API_LATEST, source)).catch(function (error) {
+        return attempt(index + 1, error);
+      });
+    }
+
+    return attempt(0)
       .then(function (release) {
+        if (request !== releaseState.request) return;
         if (!release || !Array.isArray(release.assets)) throw new Error('unexpected payload');
         writeCache(release);
         applyRelease(release);
+      })
+      .catch(function (error) {
+        if (request !== releaseState.request) return;
+        if (releaseState.latest) {
+          applyRelease(releaseState.latest);
+          setStatus('ready', '版本信息暂时无法更新，继续使用上次结果');
+          return;
+        }
+        setReleaseFallback(readDownloadSource());
+        setStatus('error', '版本信息加载失败，请切换下载线路后重试。');
+        if (window.console) window.console.warn('[qingzuo-site] release lookup failed', error);
       });
   }
 
@@ -222,18 +336,7 @@
       setStatus('ready', '');
     }
     if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return;
-
-    fetchLatest().catch(function (error) {
-      if (cached) {
-        setStatus('ready', '已就绪 · 离线缓存的版本信息，稍后自动校验');
-        return;
-      }
-      setStatus('error', '获取最新版本失败，请前往 GitHub Releases 下载');
-      allCtas().forEach(function (cta) {
-        cta.setAttribute('href', RELEASES_PAGE);
-      });
-      if (window.console) window.console.warn('[qingzuo-site] release lookup failed', error);
-    });
+    fetchLatest();
   }
 
   // ---------- 插件市场目录 ----------
@@ -534,6 +637,7 @@
   }
 
   setupTheme();
+  setupDownloadSources();
   initRelease();
   initMarket();
 })();

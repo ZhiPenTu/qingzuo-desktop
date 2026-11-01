@@ -326,6 +326,44 @@ h1 {
   font-size: 12px;
 }
 
+.download-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.download-source-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.download-source-field select {
+  height: 34px;
+  padding: 0 32px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.download-source-field select:hover {
+  border-color: var(--primary);
+}
+
+.download-source-note {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .download-status[hidden],
 .market-status[hidden] {
   display: none;
@@ -733,6 +771,16 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.download-panel-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.download-source-row-panel {
+  margin-top: 12px;
+}
+
 .download-panel .section-lede {
   margin-bottom: 0;
 }
@@ -836,6 +884,20 @@ h1 {
   .download-button {
     width: 100%;
     min-width: 0;
+  }
+
+  .download-source-row,
+  .download-source-field {
+    width: 100%;
+  }
+
+  .download-source-field {
+    justify-content: space-between;
+  }
+
+  .download-source-field select {
+    min-width: 0;
+    flex: 1;
   }
 }
 
