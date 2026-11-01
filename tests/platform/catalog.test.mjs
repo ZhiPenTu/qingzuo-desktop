@@ -38,6 +38,15 @@ test('source failures keep the legacy snapshot but mark it unavailable', async (
  assert.equal(resolved.sourceUnavailable,true);assert.equal(resolved.version,entry.version);
 });
 
+test('new releases do not reuse release notes from the legacy snapshot', async () => {
+ const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
+ const sourceEntry={...entry,id:'official.fixture',releaseNotes:'旧版本说明',source:{type:'github-release',repository}};
+ const version='0.2.0',url=expectedReleaseArtifactUrl(repository,sourceEntry.id,version,platform);
+ const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,api:'^1.0.0',artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+ const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
+ assert.equal(resolved.releaseNotes,undefined);
+});
+
 test('release fragments must keep the artifact inside the registered repository and version', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
  const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};

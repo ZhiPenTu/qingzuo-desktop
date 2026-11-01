@@ -129,8 +129,10 @@ export class PluginManager {
         const m = await unpackPackage(bytes, staged);
         if (record && (record.id !== m.id || record.version !== m.version)) throw new Error('市场清单与插件包不一致。');
         if (record?.api && record.api !== m.api) throw new Error('市场 API 声明与插件包不一致。');
-        for (const field of ['title', 'description', 'category', 'releaseNotes', 'icon']) {
-          if (record?.[field] !== undefined && (record[field] ?? '') !== (m[field] ?? '')) throw new Error('市场展示信息与插件包不一致。');
+        if (record?.verification === 'github-release') {
+          for (const field of ['title', 'description', 'category', 'releaseNotes', 'icon']) {
+            if (record[field] !== undefined && (record[field] ?? '') !== (m[field] ?? '')) throw new Error('市场展示信息与插件包不一致。');
+          }
         }
         const installed = (await this.list()).find(p => p.id === m.id);
         if (source === 'market' && installed && !semver.gt(m.version, installed.version)) throw new Error('市场版本必须高于已安装版本。');

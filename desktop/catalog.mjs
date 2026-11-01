@@ -133,6 +133,7 @@ export async function resolveMarketEntries(value, {
       return {
         ...entry,
         ...release,
+        releaseNotes: release.releaseNotes,
         category: release.category ?? entry.category,
         icon: release.icon ?? entry.icon,
         source: entry.source,
