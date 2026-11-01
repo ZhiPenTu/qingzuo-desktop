@@ -26,7 +26,7 @@
 ```mermaid
 flowchart TB
   subgraph surfaces["主界面"]
-    Shell["React 主界面<br/>工具中心 · 插件市场 · AI 对话 · 设置"]
+    Shell["React 主界面<br/>工具中心 · AI 对话 · 设置"]
   end
 
   subgraph trusted["受信任宿主"]
@@ -64,7 +64,7 @@ flowchart TB
 
 ## 快速开始
 
-从 [最新 Release](https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest) 下载对应平台安装包，安装后打开「插件市场」选择需要的工具。
+从 [最新 Release](https://github.com/ZhiPenTu/qingzuo-desktop/releases/latest) 下载对应平台安装包，安装后打开「工具中心」，在「全部」页签里挑选需要的工具。
 
 - macOS：Apple Silicon，macOS 15 或更高版本。
 - Windows：x64，Windows 10 或更高版本。

@@ -23,7 +23,7 @@ export async function launchPluginTestHost({ executablePath, artifactPath, plugi
     const title = status.plugins.find(candidate => candidate.id === pluginId)?.title;
     if (!title) throw new Error('Test plugin did not install.');
     await page.getByRole('button', { name: '工具中心', exact: true }).click();
-    await page.locator('[data-slot="card"]').filter({ has: page.getByRole('heading', { name: title, exact: true }) }).getByRole('button', { name: '打开工具', exact: true }).click();
+    await page.locator('[data-slot="card"]').filter({ has: page.getByRole('heading', { name: title, exact: true }) }).getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => app.context().pages().some(candidate => candidate.url().startsWith('commerce-plugin://' + pluginId + '/')), { timeout: 60000 }).toBe(true);
     const plugin = app.context().pages().find(candidate => candidate.url().startsWith('commerce-plugin://' + pluginId + '/'));
     return { app, page, plugin, temporary, async close() { await app.close(); await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } };

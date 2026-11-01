@@ -485,25 +485,31 @@ export default function Platform() {
         {migrationInstall?.status === 'error' ? <p className="mt-2 text-destructive">{migrationInstall.error || 'LabelEdit 恢复失败，请重试。'}</p> : null}
       </AlertDescription></Alert> : null}
       {status?.kernel.error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{status.kernel.error}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => act('kernel.retry')}>重新启动工具服务</Button><Button variant="outline" size="sm" onClick={() => openIssueReport(status.kernel.error, '工具服务')}>反馈报错</Button></div></AlertDescription></Alert> : null}
-      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className="commerce-content-inner">
-        <div className="commerce-heading"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
+      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className={cn('commerce-content-inner', page === 'home' && 'commerce-content-inner-tools')}>
+        <div className="commerce-heading">
+          <div className="commerce-heading-copy"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
+          {page === 'home' ? <div className="commerce-page-actions">
+            <InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup>
+            <Button variant="outline" size="sm" onClick={() => void openBrowserPane()}><Globe data-icon="inline-start" />打开浏览器</Button>
+          </div> : null}
+        </div>
         {page === 'home' ? <>
           <div className="tool-center-bar">
             <div className="tool-tabs" role="tablist" aria-label="工具视图">
               <button type="button" role="tab" id="tool-tab-installed" aria-selected={toolTab === 'installed'} aria-controls="tool-panel-installed" className={cn('tool-tab', toolTab === 'installed' && 'is-active')} onClick={() => selectToolTab('installed')}>已安装<span className="tool-tab-count" aria-hidden="true">{plugins.length}</span></button>
               <button type="button" role="tab" id="tool-tab-all" aria-selected={toolTab === 'all'} aria-controls="tool-panel-all" className={cn('tool-tab', toolTab === 'all' && 'is-active')} onClick={() => selectToolTab('all')}>全部{marketState === 'ready' ? <span className="tool-tab-count" aria-hidden="true">{market.length}</span> : null}</button>
             </div>
-            <div className="commerce-page-actions">
-              <InputGroup className="commerce-search"><InputGroupInput aria-label="搜索工具" placeholder="搜索工具名称或用途" value={query} onChange={e => setQuery(e.target.value)} /><InputGroupAddon><Search /></InputGroupAddon></InputGroup>
-              {toolTab === 'all' ? <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button> : null}
-              <Button variant="outline" size="sm" onClick={() => void openBrowserPane()}><Globe data-icon="inline-start" />打开浏览器</Button>
-            </div>
+            {toolTab === 'installed' ? <div className="tool-center-status">
+              <span className="tool-status-text" role="status">
+                <span className={cn('tool-status-title', pluginUpdates.length > 0 && 'is-update')}>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</span>
+                {marketCheckedAt ? <span className="tool-status-time">上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}
+              </span>
+              <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
+            </div> : <div className="tool-center-actions">
+              <Button variant="outline" size="sm" disabled={!desktop || busy} onClick={() => act('plugins.import')}><Upload data-icon="inline-start" />导入插件</Button>
+            </div>}
           </div>
           {toolTab === 'installed' ? <div id="tool-panel-installed" role="tabpanel" aria-labelledby="tool-tab-installed" className="tool-tab-panel">
-            <div className="plugin-check-toolbar" role="status">
-              <div><strong>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</strong>{marketCheckedAt ? <span>上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}</div>
-              <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
-            </div>
             {pluginCheckError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{pluginCheckError}</AlertDescription></Alert> : null}
             <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`installed:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="installed" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
             {!results.length ? <Empty><EmptyHeader><Boxes /><EmptyTitle>{query ? '没有找到工具' : '还没有安装工具'}</EmptyTitle><EmptyDescription>{query ? '换个关键词试试。' : '从全部工具中挑选，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query ? <Button variant="outline" onClick={() => setQuery('')}>清除筛选</Button> : <Button variant="outline" onClick={() => selectToolTab('all')}>浏览全部工具<ArrowRight data-icon="inline-end" /></Button>}</Empty> : null}
