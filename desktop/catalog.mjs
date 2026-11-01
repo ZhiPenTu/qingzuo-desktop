@@ -5,6 +5,7 @@ const PLUGIN_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PLATFORMS = new Set(['darwin-arm64', 'win32-x64']);
 export const RELEASE_FRAGMENT_BYTES = 256 * 1024;
+const RELEASE_FRAGMENT_CONCURRENCY = 6;
 
 function validRepository(value) {
   if (typeof value !== 'string' || value.length > 160 || !REPOSITORY.test(value)) return false;
@@ -114,6 +115,20 @@ function validateReleaseFragment(value, entry, platform) {
   };
 }
 
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 export async function resolveMarketEntries(value, {
   platform,
   load,
@@ -123,7 +138,9 @@ export async function resolveMarketEntries(value, {
   if (!PLATFORMS.has(platform)) throw new Error('当前平台不支持插件市场。');
   if (typeof load !== 'function') throw new Error('插件市场加载器无效。');
   const entries = validateCatalog(value).filter(entry => id === undefined || entry.id === id);
-  return Promise.all(entries.map(async entry => {
+  // 全量刷新时目录最多 1000 条，全部并发拉取发布清单会触发 GitHub 限流并拖慢首屏；
+  // 用有界并发，单条 id 查询时仍等价于直接请求。
+  return mapWithConcurrency(entries, RELEASE_FRAGMENT_CONCURRENCY, async entry => {
     if (!entry.source) return entry;
     try {
       const bytes = await load(releaseFragmentUrl(entry.source.repository, platform), RELEASE_FRAGMENT_BYTES);
@@ -144,5 +161,5 @@ export async function resolveMarketEntries(value, {
       if (signal?.aborted) throw signal.reason;
       return { ...entry, sourceUnavailable: true };
     }
-  }));
+  });
 }

@@ -61,3 +61,14 @@ test('source-only catalog entries are accepted while unsafe repository paths are
  for(const repository of ['owner','owner/..','owner/repo/extra']) assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{id:'official.fixture',version:'0.1.0',title:'工具',description:'说明',source:{...source,repository}}]}));
  assert.equal(validateCatalog({schemaVersion:1,plugins:[{...entry,verification:'github-release',sourceUnavailable:true}]})[0].verification,undefined);
 });
+
+test('release resolution bounds concurrent fragment loads for large catalogs', async () => {
+ const platform='darwin-arm64';
+ const plugins=Array.from({length:24},(_,index)=>({id:`official.fixture${index}`,version:'0.1.0',title:'工具',description:'说明',source:{type:'github-release',repository:'ZhiPenTu/qingzuo-plugin-fixture'}}));
+ let inFlight=0,maxInFlight=0;
+ const load=async()=>{inFlight+=1;maxInFlight=Math.max(maxInFlight,inFlight);await new Promise(resolve=>setTimeout(resolve,5));inFlight-=1;throw new Error('offline');};
+ const resolved=await resolveMarketEntries({schemaVersion:1,plugins},{platform,load});
+ assert.equal(resolved.length,24);
+ assert.ok(resolved.every(item=>item.sourceUnavailable===true));
+ assert.ok(maxInFlight<=6,`expected at most 6 concurrent loads, saw ${maxInFlight}`);
+});

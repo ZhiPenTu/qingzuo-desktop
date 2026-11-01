@@ -78,6 +78,15 @@ flowchart TB
 - `plugin-preload.cjs` 只暴露身份绑定的 IPC、AI 事件、浏览器事件和清理回调。
 - 文件、凭据、网络和浏览器操作都由主进程重新检查插件身份、启用状态和清单权限。
 
+### 插件制品来源与校验
+
+市场插件的安装制品有两种来源，校验强度不同，必须区分：
+
+- **签名制品**：市场目录直接给出 `artifacts`，从 `market.json` 中内置的公钥校验 Ed25519 签名，同时校验 SHA-256、大小和平台。信任根是底座内置公钥。
+- **发布来源制品（`source.type === 'github-release'`）**：目录只登记发布仓库（`repository`），安装时从该仓库 `releases/latest` 解析当前平台的发布清单，再按清单里的地址和 SHA-256 下载制品。此模式**只校验 SHA-256 和制品地址，不校验签名**，因为清单与制品都来自同一个发布方。信任根因此从底座内置公钥下放到该 GitHub 仓库的发布权限。
+
+因此，插件是否可被信任取决于它登记的是签名制品还是发布来源制品。发布来源清单必须与目录登记的 `id`、版本和预期制品地址完全一致，且展示字段（标题、描述、分类、说明、图标）必须与插件包清单一致，防止跨仓库或跨版本的投毒替换。发布清单获取失败时，条目以 `sourceUnavailable` 标记回退到旧快照，不参与更新判断也不允许安装，避免基于陈旧版本误判。
+
 ### Harness 内核
 
 - 内核由 `desktop/kernel-host.mjs` 在独立 utility process 中启动。
@@ -108,7 +117,7 @@ sequenceDiagram
   UI->>Main: market.install(id)
   Main->>Market: 获取并校验目录
   Main->>Release: 下载当前平台制品
-  Main->>Main: 校验签名、哈希、大小和平台
+  Main->>Main: 校验哈希、大小和平台（签名制品另校验签名）
   Main->>Manager: 解包到暂存区并检查清单
   Manager->>Manager: 探测、原子替换、保留上一版本
   Main->>Kernel: 同步工具与服务描述符
