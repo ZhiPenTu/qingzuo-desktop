@@ -254,11 +254,11 @@ SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回�
 
 API 1.1 增加 files.url(token) 与 files.release(token)。URL 只在插件自身隔离会话中有效；其他插件不能读取令牌。network.request 支持 multipart.fields 和 multipart.files（field/token），不能与 json 同时使用；上传总量最多 25 MB。responseType: file 返回 status/mime/file，普通响应返回 status/mime/data；响应上限分别为 64 MB 和 8 MB。HTTP 错误状态由插件解释，凭据注入、网络边界和取消由底座执行，失败不会自动重试。
 
-目录维护位于 ZhiPenTu/qingzuo-market。发布者生成双平台目录片段，市场验证原始 Release 制品后签名并自动更新目录。目录条目的 api 是可选兼容范围，旧条目默认 ^1.0.0，不兼容插件在界面和安装入口均被阻止。
+目录维护位于 ZhiPenTu/qingzuo-market。市场条目只收录插件身份、展示信息和固定的 GitHub Release 来源。桌面端读取插件自己的 `releases/latest/download/catalog-<平台>.json` 获取最新版本、变更日志、API 范围和制品信息；插件发版不需要等待市场目录更新。市场目录保留最后一次审核的版本和签名制品，供旧客户端兼容使用。
 
-官方制品需 Ed25519 签名与 SHA-256。使用 `COMMERCE_PLUGIN_SIGNING_KEY` 环境变量运行 `npm run plugin -- sign <artifact>`，不要将私钥写入源码或插件包。目录每个条目仅保留最新版本及其变更日志；每个平台记录 URL、哈希和签名。示例结构由 `scripts/market-artifacts.mjs` 生成。
+新客户端从收录来源读取发布清单后，会校验插件身份、版本、平台、制品 URL、大小和 SHA-256，再解包校验清单与权限。旧目录条目继续校验市场 Ed25519 签名；市场私钥不要写入插件仓库。官方插件仍应发布双平台 `.ecplugin` 和 `catalog-<平台>.json`。
 
-发布仓库生成目录片段后，市场会校验并自动更新在线目录；它不依赖底座安装包重发。开发者自助发布、支付和账号不属于首版范围。市场下载会校验签名、平台、身份和版本；本地包同样进入暂存校验与启动探测。失败恢复原版本，插件管理可显式恢复上一版本。
+发布仓库生成目录片段后即可被新客户端发现，不需要同步修改市场目录；旧客户端仍读取目录中保留的兼容快照。开发者自助发布、支付和账号不属于首版范围。市场下载会校验平台、身份和版本；本地包同样进入暂存校验与启动探测。失败恢复原版本，插件管理可显式恢复上一版本。
 
 目录可携带 `stats.downloads`，表示该插件所有正式 Release 中双平台 `.ecplugin` 制品的历史累计下载数。该数字包含重复下载与市场验签产生的下载，不代表唯一用户数或成功安装数；旧客户端会忽略这个可选字段。
 

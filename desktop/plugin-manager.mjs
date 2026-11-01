@@ -6,8 +6,10 @@ import semver from 'semver';
 import { validateManifest, safeRelative, confinedPath, TARGET } from './security.mjs';
 export const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
 export function verifyArtifact(bytes, record, publicKey) {
-  if (!publicKey || !record?.signature || !record?.sha256 || record.platform !== TARGET) throw new Error('市场制品缺少可信签名或平台信息。');
+  if (!record?.sha256 || record.platform !== TARGET) throw new Error('市场制品缺少摘要或平台信息。');
   if (createHash('sha256').update(bytes).digest('hex') !== record.sha256) throw new Error('插件包校验失败。');
+  if (record.verification === 'github-release') return;
+  if (!publicKey || !record.signature) throw new Error('市场制品缺少可信签名。');
   const key = typeof publicKey === 'string' || Buffer.isBuffer(publicKey) ? createPublicKey(publicKey) : publicKey;
   if (key.asymmetricKeyType !== 'ed25519') throw new Error('市场签名必须使用 Ed25519。');
   if (!verify(null, bytes, key, Buffer.from(record.signature, 'base64'))) throw new Error('插件签名无效。');
@@ -127,6 +129,9 @@ export class PluginManager {
         const m = await unpackPackage(bytes, staged);
         if (record && (record.id !== m.id || record.version !== m.version)) throw new Error('市场清单与插件包不一致。');
         if (record?.api && record.api !== m.api) throw new Error('市场 API 声明与插件包不一致。');
+        for (const field of ['title', 'description', 'category', 'releaseNotes', 'icon']) {
+          if (record?.[field] !== undefined && (record[field] ?? '') !== (m[field] ?? '')) throw new Error('市场展示信息与插件包不一致。');
+        }
         const installed = (await this.list()).find(p => p.id === m.id);
         if (source === 'market' && installed && !semver.gt(m.version, installed.version)) throw new Error('市场版本必须高于已安装版本。');
         const conflicts = (await this.list()).filter(p => p.id !== m.id && p.enabled && (p.services?.provides ?? []).some(service => m.services?.provides?.includes(service)));

@@ -38,7 +38,7 @@ describe('PluginCard installation state', () => {
     const { container, rerender } = render(<PluginCard {...props} />);
     fireEvent.click(screen.getByRole('button', { name: '管理' }));
     rerender(<PluginCard {...props} install={job('verifying')} />);
-    expect(screen.getByText('正在校验插件签名…')).toBeTruthy();
+    expect(screen.getByText('正在校验插件包…')).toBeTruthy();
     expect(screen.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(false);
     const track = container.querySelector('[data-slot="progress-track"]');
     const shimmer = container.querySelector('[data-slot="progress-shimmer"]');
@@ -86,6 +86,19 @@ describe('PluginCard installation state', () => {
     expect(screen.getByLabelText('累计下载 31,000 次').textContent).toContain('31K');
     rerender(<PluginCard entry={{ ...entry, stats: { downloads: 0 } }} mode="catalog" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
     expect(screen.queryByLabelText(/累计下载/)).toBeNull();
+  });
+
+  it('disables install and update actions when the release source is unavailable', () => {
+    const onAction = vi.fn();
+    const { container, rerender } = render(<PluginCard entry={{ ...entry, sourceUnavailable: true }} mode="catalog" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
+    expect(screen.getByText('暂时无法获取最新版本，请稍后重试。')).toBeTruthy();
+    const install = screen.getByRole('button', { name: '暂不可用' });
+    expect(install.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(install);
+    expect(onAction).not.toHaveBeenCalled();
+    rerender(<PluginCard entry={{ ...entry, sourceUnavailable: true }} installed={installed} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={onAction} />);
+    expect(screen.queryByRole('button', { name: '更新插件' })).toBeNull();
+    expect(container.textContent).toContain('暂时无法获取最新版本');
   });
 
   it('keeps release notes hidden until explicitly opened', async () => {

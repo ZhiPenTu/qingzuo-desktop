@@ -11,7 +11,7 @@ import gte from 'semver/functions/gte';
 const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'));
 
 export interface ToolEntry {
-  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; stats?: { downloads?: number };
+  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; sourceUnavailable?: boolean; stats?: { downloads?: number };
 }
 export interface Plugin extends ToolEntry {
   enabled: boolean; source: string; local: boolean; missing: string[]; settings?: { title: string }; error?: string;
@@ -51,7 +51,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const [manageOpen, setManageOpen] = useState(false);
   const hasNotes = Boolean(entry.releaseNotes);
   const notesToggle = hasNotes ? <Button className="plugin-notes-toggle" variant="ghost" size="xs" aria-label={notesOpen ? '收起版本说明' : '查看版本说明'} aria-expanded={notesOpen} aria-controls={notesId} onClick={() => setNotesOpen(open => !open)}>版本说明<ChevronDown aria-hidden="true" /></Button> : null;
-  const phase = install ? ({ checking: '正在检查插件版本…', downloading: installed ? '正在下载新版本…' : '正在下载插件…', verifying: '正在校验插件签名…', installing: installed ? '正在安装新版本…' : '正在安装插件…', syncing: '正在刷新工具…', installed: `安装完成${install.version ? ` · v${install.version}` : ''}`, error: '' }[install.status]) : '';
+  const phase = install ? ({ checking: '正在检查插件版本…', downloading: installed ? '正在下载新版本…' : '正在下载插件…', verifying: '正在校验插件包…', installing: installed ? '正在安装新版本…' : '正在安装插件…', syncing: '正在刷新工具…', installed: `安装完成${install.version ? ` · v${install.version}` : ''}`, error: '' }[install.status]) : '';
   const retryLabel = installed ? '重试更新' : '重试安装';
   const retry = () => onAction('market.install', { id: entry.id });
   const manage = (method: string, args: unknown) => {
@@ -69,6 +69,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
     </CardHeader>
     <CardContent>
       {entry.compatible === false ? <p role="alert">请先将轻作更新到较新版本，再安装这个工具。</p> : null}
+      {entry.sourceUnavailable ? <p role="status">暂时无法获取最新版本，请稍后重试。</p> : null}
       {notesOpen && entry.releaseNotes ? <div className="plugin-notes-panel" id={notesId}><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></div> : null}
       {mode === 'catalog' ? <>
         {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : null}
@@ -92,13 +93,13 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
         {install?.status === 'downloading' && (install.transferred > 0 || install.total > 0) ? <span className="plugin-update-hint">{megabytes(install.transferred)}{install.total > 0 ? ` / ${megabytes(install.total)}` : ''}</span> : null}
       </div> : null}
       {install?.status === 'installed' && installed?.version === install.version ? <p className="plugin-update-hint" role="status"><Check />{phase}</p> : null}
-      {failed ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{install.error || '插件安装失败，请重试。'}{mode === 'installed' ? <Button variant="outline" size="sm" disabled={disabled} onClick={retry}>{retryLabel}</Button> : null}</AlertDescription></Alert> : null}
+      {failed ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{install.error || '插件安装失败，请重试。'}{mode === 'installed' ? <Button variant="outline" size="sm" disabled={disabled || entry.sourceUnavailable} onClick={retry}>{retryLabel}</Button> : null}</AlertDescription></Alert> : null}
     </CardContent>
     <CardFooter>
-      {mode === 'catalog' ? <><span className="plugin-market-meta">{downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}<span className="plugin-version">v{entry.version}</span></span>{notesToggle}<Button size="sm" disabled={unavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : <>
+      {mode === 'catalog' ? <><span className="plugin-market-meta">{downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}<span className="plugin-version">v{entry.version}</span></span>{notesToggle}<Button size="sm" disabled={unavailable || entry.sourceUnavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.sourceUnavailable ? '暂不可用' : entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button></> : <>
         {notesToggle}
         <div className="plugin-card-actions">
-          {updateAvailable ? <Button variant="outline" size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
+          {updateAvailable && !entry.sourceUnavailable ? <Button variant="outline" size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
           <Button variant="outline" size="sm" disabled={unavailable} aria-expanded={manageOpen} aria-controls={manageId} onClick={() => setManageOpen(open => !open)}>管理</Button>
           <Button size="sm" disabled={unavailable || !ready || !installed?.enabled || Boolean(installed?.missing.length)} onClick={() => onOpen()}>打开</Button>
         </div>
