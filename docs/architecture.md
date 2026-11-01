@@ -33,8 +33,8 @@ flowchart TB
     Worker["插件 Worker<br/>逐行 JSON-RPC"]
   end
 
-  Market["插件市场仓库"] -->|"catalog.json"| Installer
-  Releases["GitHub Releases"] -->|"签名插件制品"| Installer
+  Market["插件市场仓库"] -->|"收录来源与展示信息"| Installer
+  Releases["插件 GitHub Releases"] -->|"最新清单与插件制品"| Installer
   Shell -->|"preload IPC"| Main
   PluginUI -->|"Plugin SDK"| Main
   Main <-->|"utilityProcess RPC"| Kernel

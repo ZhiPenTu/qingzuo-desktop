@@ -81,6 +81,55 @@ test('package signature binds artifact bytes, target, plugin identity and versio
   const { privateKey, publicKey } = generateKeyPairSync('ed25519'); const bytes = archive(); const record = { platform: TARGET, sha256: createHash('sha256').update(bytes).digest('hex'), signature: sign(null, bytes, privateKey).toString('base64') };
   verifyArtifact(bytes, record, publicKey); assert.throws(() => verifyArtifact(Buffer.concat([bytes, Buffer.from('tampered')]), record, publicKey)); assert.throws(() => verifyArtifact(bytes, { ...record, platform: 'invalid' }, publicKey)); assert.throws(() => verifyArtifact(bytes, record, null));
 });
+test('registered GitHub releases use an explicit digest-only verification mode', () => {
+  const bytes = archive(), record = { platform: TARGET, sha256: createHash('sha256').update(bytes).digest('hex'), verification: 'github-release' };
+  verifyArtifact(bytes, record, null);
+  assert.throws(() => verifyArtifact(Buffer.concat([bytes, Buffer.from('tampered')]), record, null), /校验失败/);
+  assert.throws(() => verifyArtifact(bytes, { ...record, verification: undefined }, null), /可信签名/);
+});
+test('legacy signed records keep their original package metadata contract', async () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519'), bytes = archive();
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-legacy-record-')), bundled = path.join(root, 'bundled');
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled, { publicKey });
+  const record = {
+    id: 'local.fixture',
+    version: '0.1.0',
+    api: '^1.0.0',
+    platform: TARGET,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    signature: sign(null, bytes, privateKey).toString('base64'),
+    title: '旧目录标题',
+    category: '旧目录分类',
+    releaseNotes: '旧版本说明',
+  };
+  try {
+    await mkdir(bundled); await manager.initialize();
+    await manager.install(bytes, { source: 'market', record });
+    assert.equal((await manager.get('local.fixture')).version, '0.1.0');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('registered GitHub releases install through the normal atomic manager transaction', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-release-manager-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  const bytes = archive(), record = {
+    id: 'local.fixture',
+    version: '0.1.0',
+    api: '^1.0.0',
+    platform: TARGET,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    verification: 'github-release',
+  };
+  try {
+    await manager.initialize();
+    await manager.install(bytes, { source: 'market', record });
+    assert.equal((await manager.get('local.fixture')).version, '0.1.0');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test('path traversal and symlink package entries are rejected before extraction', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-malicious-'));
   try {

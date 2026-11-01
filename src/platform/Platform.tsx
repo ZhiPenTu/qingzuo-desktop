@@ -389,7 +389,10 @@ export default function Platform() {
   const checkPluginUpdates = async () => {
     if (pluginCheckBusy || !desktop) return;
     setPluginCheckBusy(true); setPluginCheckError(null);
-    try { await loadMarket(true); }
+    try {
+      const items = await loadMarket(true);
+      if (items.some(item => item.sourceUnavailable)) setPluginCheckError('部分插件暂时无法检查更新，请稍后重试。');
+    }
     catch (reason) { setPluginCheckError(formatError(reason)); }
     finally { setPluginCheckBusy(false); }
   };
@@ -409,11 +412,11 @@ export default function Platform() {
   const migrationInstall = status?.migration ? installFor(status.migration.id) : undefined;
   const migrationRunning = pluginInstallActive(migrationInstall);
   const migrationProgress = migrationInstall?.status === 'downloading' && migrationInstall.progress !== null ? Math.min(100, Math.max(0, migrationInstall.progress)) : null;
-  const migrationPhase = migrationInstall ? ({ checking: '正在检查插件版本…', downloading: '正在下载插件…', verifying: '正在校验插件签名…', installing: '正在安装插件…', syncing: '正在刷新工具…', installed: '', error: '' }[migrationInstall.status]) : '';
+  const migrationPhase = migrationInstall ? ({ checking: '正在检查插件版本…', downloading: '正在下载插件…', verifying: '正在校验插件包…', installing: '正在安装插件…', syncing: '正在刷新工具…', installed: '', error: '' }[migrationInstall.status]) : '';
   const marketById = useMemo(() => new Map(market.map(entry => [entry.id, entry])), [market]);
   const pluginUpdates = useMemo(() => plugins.filter(plugin => {
     const candidate = marketById.get(plugin.id);
-    try { return Boolean(candidate && gt(candidate.version, plugin.version)); } catch { return false; }
+    try { return Boolean(candidate && !candidate.sourceUnavailable && gt(candidate.version, plugin.version)); } catch { return false; }
   }), [plugins, marketById]);
   const installedEntries = useMemo(() => plugins.map(plugin => {
     const candidate = marketById.get(plugin.id);

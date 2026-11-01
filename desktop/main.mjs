@@ -13,7 +13,7 @@ import { Credentials } from './credentials.mjs';
 import { PluginStorage } from './plugin-storage.mjs';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
-import {validateCatalog} from './catalog.mjs';
+import {resolveMarketEntries} from './catalog.mjs';
 import { UpdateService, nativeUpdateAdapter } from './update-service.mjs';
 import { PluginInstallService } from './plugin-install-service.mjs';
 import { macUpdateAdapter, previousUpdateError } from './mac-update.mjs';
@@ -336,11 +336,20 @@ async function startKernel() {
   host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json'), enableAI: true } });
   await hostReady; await syncTools();
 }
-async function catalog(signal) {
+async function catalog(signal, id) {
   const config = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
   if (!config.url || !config.publicKey) return { items: [], configured: false, message: '插件目录尚未发布。可以导入本地插件包。' };
-  const loadCatalog = async url => validateCatalog(JSON.parse((await boundedDownload(url, 1024 * 1024, signal)).toString()));
-  const items = downloadSources ? await downloadSources.runWithFallback(config.url, loadCatalog, { signal }) : await loadCatalog(config.url);
+  const load = async (url, limit = 1024 * 1024) => boundedDownload(url, limit, signal);
+  const loadCatalog = async url => JSON.parse((await load(url)).toString());
+  const source = downloadSources ? await downloadSources.runWithFallback(config.url, loadCatalog, { signal }) : await loadCatalog(config.url);
+  const items = await resolveMarketEntries(source, {
+    platform: process.platform + '-' + process.arch,
+    signal,
+    id,
+    load: (url, limit) => downloadSources
+      ? downloadSources.runWithFallback(url, address => load(address, limit), { signal })
+      : load(url, limit),
+  });
   return { items, configured: true };
 }
 async function systemInvoke(service, method, args = {}) {
@@ -719,8 +728,9 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
     }
     pluginFinalizations.delete(id);
   }
-  const entry = (await catalog(signal)).items.find(item => item.id === id);
+  const entry = (await catalog(signal, id)).items[0];
   signal.throwIfAborted();
+  if (entry?.sourceUnavailable) throw new Error('暂时无法获取插件最新版本，请稍后重试。');
   if (entry && !entry.compatible) throw new Error('请先升级轻作，当前插件 API 不兼容。');
   const artifact = entry?.artifacts?.[process.platform + '-' + process.arch];
   if (!artifact) throw new Error('没有适用当前平台的制品。');
@@ -735,7 +745,7 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
   // Cancellation is checked before entering the atomic manager transaction.
   // Once installation begins, shutdown drains it before disposing the kernel.
   await manager.install(bytes, { source: 'market', enabled: restoring ? migration.enabled : undefined,
-    record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, platform: process.platform + '-' + process.arch } });
+    record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, title: entry.title, description: entry.description, category: entry.category, releaseNotes: entry.releaseNotes, icon: entry.icon, platform: process.platform + '-' + process.arch, verification: entry.verification } });
   pluginFinalizations.set(id, { version: entry.version, restoring });
   await finalizePlugin(id, notify);
 }, changed);

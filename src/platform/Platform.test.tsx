@@ -106,7 +106,7 @@ it('keeps backend progress after acknowledgment, restores it across tabs, and co
   await screen.findByText('正在下载新版本… 40%');
   expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByRole('button', { name: '管理' }).hasAttribute('disabled')).toBe(true);
-  emit(job('verifying')); await screen.findByText('正在校验插件签名…');
+  emit(job('verifying')); await screen.findByText('正在校验插件包…');
   emit(job('installing')); await screen.findByText('正在安装新版本…');
   emit(job('syncing')); await screen.findByText('正在刷新工具…');
   await openToolTab('全部');
@@ -179,7 +179,7 @@ it('keeps background recovery progress visible without installed plugins and pre
     fireEvent.click(button);
   }
   expect(invoke.mock.calls.some(([method]) => method === 'market.install' || method === 'migration.dismiss')).toBe(false);
-  emit(job('verifying')); await screen.findByText('正在校验插件签名…');
+  emit(job('verifying')); await screen.findByText('正在校验插件包…');
   expect(screen.getByRole('progressbar', { name: 'LabelEdit 恢复进度' }).hasAttribute('aria-valuenow')).toBe(false);
   emit(job('installing')); await screen.findByText('正在安装插件…');
   emit(job('syncing')); await screen.findByText('正在刷新工具…');
