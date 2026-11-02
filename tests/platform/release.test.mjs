@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {generateKeyPairSync} from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import {load} from 'js-yaml';
 import {desktopSigningMode,packagingOptions,packagingEnvironment} from '../../desktop/distribution.mjs';
+import {nextVersion,bumpVersion} from '../../scripts/auto-version.mjs';
 const script=path.resolve('scripts/release-preflight.mjs');
 const keys=generateKeyPairSync('ed25519');
 const alternate=generateKeyPairSync('ed25519');
@@ -73,7 +74,7 @@ test('manual build workflow defaults to unsigned, preserves plugin signing and c
  assert.equal(workflow.jobs.publish.if,"${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");
  assert.equal(workflow.jobs.publish.needs,'package');
  assert.deepEqual(workflow.jobs.publish.permissions,{contents:'write'});
- for(const name of ['release-commerce.yml','release-sdk.yml','upstream.yml','validate.yml','branch-policy.yml']){
+ for(const name of ['release-commerce.yml','release-sdk.yml','upstream.yml','validate.yml','branch-policy.yml','auto-version.yml']){
   const spec=load(await readFile(path.join('.github/workflows',name),'utf8'));
   for(const job of Object.values(spec.jobs)){
    for(const step of job.steps){
@@ -141,4 +142,40 @@ test('branch model routes development through develop and keeps main as the rele
  const agents=await readFile('AGENTS.md','utf8');
  assert.match(agents,/origin\/develop/);
  assert.match(agents,/### 分支模型/);
+});
+
+test('auto version bumps the patch number and keeps every version source in sync',async()=>{
+ assert.equal(nextVersion('0.6.16'),'0.6.17');
+ assert.equal(nextVersion('0.6.16','1.0.0'),'1.0.0');
+ assert.throws(()=>nextVersion('0.6'),/不是 X\.Y\.Z/);
+ assert.throws(()=>nextVersion('0.6.16','1.0'),/必须是 X\.Y\.Z/);
+ const cwd=await mkdtemp(path.join(os.tmpdir(),'commerce-version-'));
+ try{
+  await mkdir(path.join(cwd,'docs'),{recursive:true});
+  await writeFile(path.join(cwd,'package.json'),JSON.stringify({name:'x',version:'0.6.16'},null,2)+'\n');
+  await writeFile(path.join(cwd,'package-lock.json'),JSON.stringify({name:'x',version:'0.6.16',packages:{'':{version:'0.6.16'}}},null,2)+'\n');
+  await writeFile(path.join(cwd,'docs/release-guide.md'),'# 轻作发布与独立插件\n\n底座版本 0.6.16，插件 API / SDK 1.6.1。\n');
+  assert.deepEqual(await bumpVersion(cwd),{current:'0.6.16',next:'0.6.17'});
+  const pkg=JSON.parse(await readFile(path.join(cwd,'package.json'),'utf8'));
+  const lock=JSON.parse(await readFile(path.join(cwd,'package-lock.json'),'utf8'));
+  const guide=await readFile(path.join(cwd,'docs/release-guide.md'),'utf8');
+  assert.equal(pkg.version,'0.6.17');
+  assert.equal(lock.version,'0.6.17');
+  assert.equal(lock.packages[''].version,'0.6.17');
+  assert.match(guide,/底座版本 0\.6\.17/);
+  assert.doesNotMatch(guide,/底座版本 0\.6\.16/);
+ }finally{await rm(cwd,{recursive:true,force:true});}
+});
+
+test('auto version workflow bumps on develop merges and never overrides a release version',async()=>{
+ const workflow=load(await readFile('.github/workflows/auto-version.yml','utf8'));
+ assert.deepEqual(workflow.on.pull_request.types,['closed']);
+ assert.deepEqual(workflow.on.pull_request.branches,['develop']);
+ assert.match(workflow.jobs.bump.if,/github\.event\.pull_request\.merged == true/);
+ assert.match(workflow.jobs.bump.if,/codex\/release-/);
+ assert.match(workflow.jobs.bump.if,/codex\/auto-version-/);
+ assert.deepEqual(workflow.permissions,{contents:'write','pull-requests':'write'});
+ const steps=workflow.jobs.bump.steps.map((step)=>step.run||'').join('\n');
+ assert.match(steps,/scripts\/auto-version\.mjs/);
+ assert.match(steps,/gh pr create --base develop/);
 });
