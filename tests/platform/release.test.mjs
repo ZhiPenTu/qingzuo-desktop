@@ -73,7 +73,7 @@ test('manual build workflow defaults to unsigned, preserves plugin signing and c
  assert.equal(workflow.jobs.publish.if,"${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");
  assert.equal(workflow.jobs.publish.needs,'package');
  assert.deepEqual(workflow.jobs.publish.permissions,{contents:'write'});
- for(const name of ['release-commerce.yml','release-sdk.yml','upstream.yml','validate.yml']){
+ for(const name of ['release-commerce.yml','release-sdk.yml','upstream.yml','validate.yml','branch-policy.yml']){
   const spec=load(await readFile(path.join('.github/workflows',name),'utf8'));
   for(const job of Object.values(spec.jobs)){
    for(const step of job.steps){
@@ -108,4 +108,29 @@ test('unsigned packaging discards ambient certificates and signed packaging rest
  assert.equal(plain.mac.identity,'-');assert.equal(plain.mac.notarize,false);
  assert.deepEqual(plain.asarUnpack,['node_modules/**/*.node']);assert.deepEqual(plain.mac.asarUnpack,['node_modules/**/*']);
  assert.equal(signed.forceCodeSigning,true);assert.equal(signed.mac.notarize,true);assert.equal(signed.win.verifyUpdateCodeSignature,true);
+});
+
+test('branch model routes development through develop and keeps main as the release branch',async()=>{
+ const policy=load(await readFile('.github/workflows/branch-policy.yml','utf8'));
+ assert.deepEqual(policy.on.pull_request.branches,['develop','main']);
+ assert.deepEqual(Object.keys(policy.jobs),['branch-policy']);
+ assert.equal(policy.jobs['branch-policy'].if,"github.event_name == 'pull_request'");
+ assert.deepEqual(policy.permissions,{contents:'read','pull-requests':'read'});
+ const scripts=policy.jobs['branch-policy'].steps.filter((step)=>step.run).map((step)=>step.run).join('\n');
+ assert.match(scripts,/main 只接受来自 develop 的合并 PR/);
+ assert.match(scripts,/Conventional Commits/);
+ assert.match(scripts,/版本号不一致/);
+ assert.match(scripts,/不允许版本回退/);
+ assert.match(scripts,/合并冲突标记/);
+ const validate=load(await readFile('.github/workflows/validate.yml','utf8'));
+ assert.ok(validate.on.pull_request,'桌面验收工作流必须覆盖所有 PR');
+ assert.equal(validate.on.pull_request.branches,undefined,'桌面验收不得限定分支，否则 develop 的 PR 会被跳过');
+ const pages=load(await readFile('.github/workflows/pages.yml','utf8'));
+ assert.deepEqual(pages.on.push.branches,['main'],'官网只随主干部署');
+ const guide=await readFile('docs/release-guide.md','utf8');
+ assert.match(guide,/## 分支与合入流程/);
+ assert.match(guide,/`develop`/);
+ const agents=await readFile('AGENTS.md','utf8');
+ assert.match(agents,/origin\/develop/);
+ assert.match(agents,/### 分支模型/);
 });
