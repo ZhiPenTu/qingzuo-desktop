@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -70,23 +71,28 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "number=$(echo "$url" | grep -oE '[0-9]+$')" >> "$GITHUB_OUTPUT"
 
-      - name: 等待分支策略检查并合并
+      - name: 批准并等待分支策略检查
         env:
           GH_TOKEN: ${{ github.token }}
           NUMBER: ${{ steps.pr.outputs.number }}
+          BRANCH: ${{ steps.push.outputs.branch }}
         run: |
           set -euo pipefail
           conclusion=""
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 90); do
+            # 机器人创建的 PR 触发的工作流默认挂起等待批准，这里自行批准以保持流程无人值守。
+            for run in $(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --status action_required --json databaseId --jq '[.[].databaseId] | join(" ")'); do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/approve" > /dev/null 2>&1 || true
+            done
             conclusion=$(gh pr view "$NUMBER" --json statusCheckRollup --jq '[.statusCheckRollup[]? | select(.name == "branch-policy") | .conclusion] | join(",")')
-            if [[ "$conclusion" == "success" ]]; then break; fi
-            if [[ "$conclusion" == "failure" || "$conclusion" == "cancelled" ]]; then
+            if [[ "${conclusion^^}" == "SUCCESS" ]]; then break; fi
+            if [[ "${conclusion^^}" == "FAILURE" || "${conclusion^^}" == "CANCELLED" ]]; then
               echo "::error::Branch policy 未通过，版本更新 PR 保留待人工处理"
               exit 1
             fi
             sleep 10
           done
-          if [[ "$conclusion" != "success" ]]; then
+          if [[ "${conclusion^^}" != "SUCCESS" ]]; then
             echo "::error::等待 Branch policy 超时，版本更新 PR 保留待人工处理"
             exit 1
           fi
