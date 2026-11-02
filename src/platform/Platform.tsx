@@ -36,12 +36,14 @@ interface ComponentUpdateState {
   compatibility?: string;
   error?: string | null;
 }
-interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; downloadSource?: DownloadSourceState; debugLog?: DebugLogState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
+interface UpdatePreferencesState { autoUpdate: boolean }
+interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; updatePreferences?: UpdatePreferencesState; downloadSource?: DownloadSourceState; debugLog?: DebugLogState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
 const baseNavigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'settings', title: '设置', icon: Settings }] as const;
 const shellPageIds = ['home', 'chat', 'ai', 'settings', 'logs'] as const;
 const isShellPage = (id: string): id is Page => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const defaultDebugLog: DebugLogState = { enabled: false, directory: '', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
+const defaultUpdatePreferences: UpdatePreferencesState = { autoUpdate: true };
 const BROWSER_PANE_MIN_WIDTH = 360;
 // Tools keep the space they need to lay out; the browser pane gives way first.
 const TOOL_PANE_MIN_WIDTH = 620;
@@ -74,7 +76,7 @@ const persistBrowserPaneRatio = (ratio: number) => {
   try { window.localStorage.setItem(BROWSER_PANE_RATIO_KEY, String(ratio)); } catch { /* storage is optional */ }
 };
 const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], candidates: [], downloads: [] };
-const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, debugLog: defaultDebugLog, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
+const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, debugLog: defaultDebugLog, updatePreferences: defaultUpdatePreferences, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
 const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
@@ -187,6 +189,16 @@ export default function Platform() {
         setPage('settings');
         setLastShellPage('settings');
       }
+    } catch {
+      // run() already surfaced the error.
+    }
+  };
+  const updatePreferences = status?.updatePreferences ?? defaultUpdatePreferences;
+  const toggleAutoUpdate = async () => {
+    if (!desktop || busy) return;
+    try {
+      const next = await run('updates.configure', { autoUpdate: !updatePreferences.autoUpdate }) as UpdatePreferencesState;
+      setStatus(current => current ? { ...current, updatePreferences: next } : current);
     } catch {
       // run() already surfaced the error.
     }
@@ -558,7 +570,7 @@ export default function Platform() {
                   role="switch"
                   aria-label={debugLogState.enabled ? '关闭日志调试' : '开启日志调试'}
                   aria-checked={debugLogState.enabled}
-                  className={cn('debug-log-switch', debugLogState.enabled && 'is-on')}
+                  className={cn('settings-switch', debugLogState.enabled && 'is-on')}
                   disabled={!desktop || busy}
                   onClick={() => void toggleDebugLog()}
                 >
@@ -591,6 +603,25 @@ export default function Platform() {
                 <Button type="button" variant="outline" className="download-source-add-btn" disabled={busy || customMirrorBusy} onClick={() => { setCustomMirrorError(null); setCustomMirrorDialogOpen(true); }}>添加自定义源</Button>
               </div>
             </div>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle role="heading" aria-level={2}>自动更新</CardTitle>
+              <CardDescription>自动检查并下载新版本；准备好后由你选择何时重新启动。</CardDescription>
+              <CardAction className="self-center">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label={updatePreferences.autoUpdate ? '关闭自动更新' : '开启自动更新'}
+                  aria-checked={updatePreferences.autoUpdate}
+                  className={cn('settings-switch', updatePreferences.autoUpdate && 'is-on')}
+                  disabled={!desktop || busy}
+                  onClick={() => void toggleAutoUpdate()}
+                >
+                  <span />
+                </button>
+              </CardAction>
+            </CardHeader>
           </Card>
           <Card>
             <CardHeader>

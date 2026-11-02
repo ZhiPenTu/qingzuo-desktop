@@ -16,8 +16,10 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
   let pluginInstalls = initialJob ? [initialJob] : [];
   let debugLog = { enabled: false, directory: '/tmp/qingzuo-logs', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
+  let updatePreferences = { autoUpdate: true };
+  let update = { status: 'idle', version: null as string | null, notes: '', error: null as string | null, progress: 0, transferred: 0, total: 0, downloaded: false };
   const invoke = vi.fn(async (method: string, args?: unknown) => {
-    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, debugLog, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, ...(browser ? { browser } : {}), update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } });
+    if (method === 'status') return structuredClone({ version: '0.3.1', kernel: { ready: true, error: null, version: '0.2.1-alpha.1', systems: [] }, plugins, pluginInstalls, downloadSource, debugLog, updatePreferences, migration: migration ? { id: entry.id, title: entry.title, enabled: false } : null, tabs: initialTabs, ...(browser ? { browser } : {}), update });
     if (method === 'downloadSource.set') {
       const next = (args as { source: string }).source;
       downloadSource = { ...downloadSource, source: next, notice: null };
@@ -54,10 +56,15 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
       return { canceled: false, debugLog: structuredClone(debugLog) };
     }
     if (method === 'debugLog.openDirectory') return true;
+    if (method === 'updates.configure') {
+      updatePreferences = { autoUpdate: (args as { autoUpdate: boolean }).autoUpdate };
+      listener();
+      return structuredClone(updatePreferences);
+    }
     return {};
   });
   window.commerceDesktop = { invoke, onChanged: callback => { listener = callback; return () => { listener = () => {}; }; }, onDebugLog: callback => { debugListener = callback; return () => { debugListener = () => {}; }; } } as NonNullable<Window['commerceDesktop']>;
-  return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }), emitDebug: (entries: import('./commerce').DebugLogEntry[]) => act(() => debugListener(entries)) };
+  return { invoke, emit: (install: PluginInstallState, nextPlugins = plugins) => act(() => { pluginInstalls = [install]; plugins = nextPlugins; listener(); }), emitUpdate: (next: Partial<typeof update>) => act(() => { update = { ...update, ...next }; listener(); }), emitDebug: (entries: import('./commerce').DebugLogEntry[]) => act(() => debugListener(entries)) };
 }
 async function navigate(name: string) { fireEvent.click(screen.getByRole('button', { name })); }
 async function openToolTab(name: '已安装' | '全部') { fireEvent.click(await screen.findByRole('tab', { name })); }
@@ -226,6 +233,32 @@ it('shows the app version and routes every runtime check to app updates', async 
   await screen.findByText('已添加的自定义源');
   fireEvent.click(screen.getByRole('button', { name: '删除自定义源' }));
   await waitFor(() => expect(sourceSelect.value).toBe('github'));
+});
+
+it('persists the automatic update switch and waits for user confirmation before installing', async () => {
+  const { invoke, emitUpdate } = fixture();
+  render(<Platform />);
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+  await navigate('设置');
+
+  const autoUpdate = await screen.findByRole('switch', { name: '关闭自动更新' });
+  expect(autoUpdate.getAttribute('aria-checked')).toBe('true');
+  fireEvent.click(autoUpdate);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('updates.configure', { autoUpdate: false }));
+  await screen.findByRole('switch', { name: '开启自动更新' });
+
+  emitUpdate({ status: 'available', version: '0.6.17' });
+  await screen.findByText('新版本 v0.6.17');
+  await screen.findByText('下载完成后由你选择何时重新启动；正在编辑的文件不会受影响。');
+  fireEvent.click(screen.getByRole('button', { name: '下载更新' }));
+  await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.download')).toHaveLength(1));
+
+  emitUpdate({ status: 'ready', version: '0.6.17', progress: 100, downloaded: true });
+  await screen.findByText('更新已下载，等待重启');
+  expect(screen.getByRole('button', { name: '检查更新' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '清理更新缓存' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '重新启动并更新' }));
+  await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.install')).toHaveLength(1));
 });
 
 it('reveals the debug log page from settings and streams logs from every scope', async () => {

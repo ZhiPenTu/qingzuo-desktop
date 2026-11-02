@@ -1,6 +1,6 @@
 import { latestReleaseNotes } from './updates.mjs';
 
-const stateFields = ['status', 'version', 'notes', 'error', 'progress', 'transferred', 'total', 'mode', 'fallbackReason', 'reusedBytes'];
+const stateFields = ['status', 'version', 'notes', 'error', 'progress', 'transferred', 'total', 'mode', 'fallbackReason', 'reusedBytes', 'downloaded'];
 const updateModes = new Set(['full', 'resume', 'delta', 'cached', 'components']);
 
 function finiteNonNegative(value, fallback = 0) {
@@ -15,6 +15,7 @@ function normaliseState(partial) {
     const value = partial[field];
     if (field === 'progress') next[field] = value === null ? null : Math.min(100, Math.max(0, finiteNonNegative(value)));
     else if (field === 'transferred' || field === 'total' || field === 'reusedBytes') next[field] = finiteNonNegative(value);
+    else if (field === 'downloaded') next[field] = value === true;
     else if (field === 'mode') next[field] = value === null || updateModes.has(value) ? value : null;
     else if (field === 'version' || field === 'notes' || field === 'error' || field === 'fallbackReason') next[field] = value === null || typeof value === 'string' ? value : String(value);
     else if (field === 'status' && typeof value === 'string') next[field] = value;
@@ -32,9 +33,10 @@ function checkedRelease(release) {
 // Operations outlive renderer navigation and the Harness RPC timeout.
 // Public state never contains local paths or download URLs.
 export class UpdateService {
-  state = { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0, mode: null, fallbackReason: null, reusedBytes: 0 };
+  state = { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0, mode: null, fallbackReason: null, reusedBytes: 0, downloaded: false };
   pending = null;
   release = null;
+  prepared = null;
   constructor(adapter, changed) { this.adapter = adapter; this.changed = changed; }
   set(value) { Object.assign(this.state, normaliseState(value)); this.changed(); }
   fail(error) {
@@ -47,9 +49,10 @@ export class UpdateService {
     this.pending = Promise.resolve().then(task).catch(error => this.fail(error)).finally(() => { this.pending = null; });
   }
   check() {
-    if (this.pending || this.state.status === 'installing') return;
+    if (this.pending || this.state.status === 'installing' || this.state.downloaded) return;
     this.release = null;
-    this.set({ status: 'checking', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0, mode: null, fallbackReason: null, reusedBytes: 0 });
+    this.prepared = null;
+    this.set({ status: 'checking', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0, mode: null, fallbackReason: null, reusedBytes: 0, downloaded: false });
     this.start(async () => {
       this.release = checkedRelease(await this.adapter.check());
       const { status, version, notes } = this.release;
@@ -59,15 +62,23 @@ export class UpdateService {
   download() {
     if (this.pending || this.state.status === 'installing') return;
     if (this.release?.status !== 'available' || !['available', 'error'].includes(this.state.status)) throw new Error('请先检查可用更新。');
-    this.set({ status: 'downloading', error: null, progress: 0, mode: null, fallbackReason: null, reusedBytes: 0, transferred: 0, total: this.release.artifact?.size || 0 });
+    this.prepared = null;
+    this.set({ status: 'downloading', error: null, progress: 0, mode: null, fallbackReason: null, reusedBytes: 0, transferred: 0, total: this.release.artifact?.size || 0, downloaded: false });
     this.start(async () => {
-      const prepared = await this.adapter.download(this.release, value => this.set(value));
-      this.set({ status: 'installing', progress: 100 });
-      await this.adapter.install(prepared);
+      this.prepared = await this.adapter.download(this.release, value => this.set(value));
+      this.set({ status: 'ready', error: null, progress: 100, downloaded: true });
+    });
+  }
+  install() {
+    if (this.pending || this.state.status === 'installing') return;
+    if (!this.state.downloaded) throw new Error('请先下载更新。');
+    this.set({ status: 'installing', error: null, progress: 100 });
+    this.start(async () => {
+      await this.adapter.install(this.prepared);
     });
   }
   async cleanCache() {
-    if (this.pending || this.state.status === 'installing' || this.state.status === 'downloading') {
+    if (this.pending || this.state.status === 'installing' || this.state.status === 'downloading' || this.state.downloaded) {
       throw new Error('更新进行中，无法清理缓存。');
     }
     if (typeof this.adapter.cleanCache === 'function') {

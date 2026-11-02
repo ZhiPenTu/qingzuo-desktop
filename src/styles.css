@@ -352,12 +352,12 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-settings [data-slot="card-title"] { font-size: 14px; font-weight: 600; }
 .commerce-settings [data-slot="card-description"] { font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
 .commerce-settings [data-slot="card-header"]:has([data-slot="card-action"]) { align-items: center; }
-.debug-log-switch { position: relative; width: 42px; height: 24px; padding: 0; border: 1px solid var(--input); border-radius: 999px; background: var(--muted); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
-.debug-log-switch span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 18%, transparent); transition: transform .16s ease; }
-.debug-log-switch.is-on { border-color: var(--primary); background: var(--primary); }
-.debug-log-switch.is-on span { transform: translateX(18px); }
-.debug-log-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.debug-log-switch:disabled { opacity: .5; cursor: default; }
+.settings-switch { position: relative; width: 42px; height: 24px; padding: 0; border: 1px solid var(--input); border-radius: 999px; background: var(--muted); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.settings-switch span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 18%, transparent); transition: transform .16s ease; }
+.settings-switch.is-on { border-color: var(--primary); background: var(--primary); }
+.settings-switch.is-on span { transform: translateX(18px); }
+.settings-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.settings-switch:disabled { opacity: .5; cursor: default; }
 .debug-log-setting-detail { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: color-mix(in srgb, var(--secondary) 45%, var(--card)); }
 .debug-log-setting-detail > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .debug-log-setting-detail span { color: var(--muted-foreground); font-size: 11px; }
