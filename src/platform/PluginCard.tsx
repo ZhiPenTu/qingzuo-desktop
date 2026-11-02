@@ -11,12 +11,24 @@ import gte from 'semver/functions/gte';
 const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'));
 
 export interface ToolEntry {
-  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; sourceUnavailable?: boolean; stats?: { downloads?: number };
+  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; official?: boolean; sourceUnavailable?: boolean; stats?: { downloads?: number };
 }
 export interface Plugin extends ToolEntry {
-  enabled: boolean; source: string; local: boolean; missing: string[]; settings?: { title: string }; error?: string;
+  enabled: boolean; source: string; local: boolean; bundled?: boolean; missing: string[]; settings?: { title: string }; error?: string;
 }
+export type PluginGroup = 'builtin' | 'community';
+export type PluginPublisher = 'official' | 'unofficial';
 export function toolCategory(tool: ToolEntry) { return tool.category || '其他工具'; }
+export function pluginGroup(_tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'bundled'>): PluginGroup {
+  return installed?.bundled || installed?.source === 'bundled' ? 'builtin' : 'community';
+}
+export function pluginPublisher(tool: ToolEntry): PluginPublisher {
+  return (tool.official ?? tool.id.startsWith('official.')) ? 'official' : 'unofficial';
+}
+export function pluginOriginLabel(tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'bundled'>) {
+  if (pluginGroup(tool, installed) === 'builtin') return '内置插件';
+  return pluginPublisher(tool) === 'official' ? '社区插件 · 官方插件' : '社区插件 · 非官方插件';
+}
 export function pluginInstallActive(install?: PluginInstallState) {
   return Boolean(install && ['checking', 'downloading', 'verifying', 'installing', 'syncing'].includes(install.status));
 }
@@ -76,6 +88,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {mode === 'catalog' ? <>
         {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : isCredentials ? <p className="plugin-capabilities">统一管理各工具的 AppID 与密钥</p> : null}
         <span className="plugin-market-meta">
+          <span className="plugin-origin">{pluginOriginLabel(entry, installed)}</span>
           <span className="plugin-version">v{entry.version}</span>
           {downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}
         </span>
@@ -84,7 +97,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
         {updateAvailable ? <li className="plugin-state-chip is-update">可更新到 v{entry.version}</li> : null}
         <li className={cn('plugin-state-chip', installed?.enabled ? 'is-enabled' : 'is-disabled')}>{installed?.enabled ? '已启用' : '已停用'}</li>
         {installed?.missing.length ? <li className="plugin-state-chip is-warning">缺少所需组件</li> : null}
-        <li className="plugin-state-chip">{sourceLabel(installed?.source)}</li>
+        <li className="plugin-state-chip">{sourceLabel(installed?.bundled ? 'bundled' : installed?.source)}</li>
       </ul>}
       {mode === 'installed' && manageOpen ? <div id={manageId} className="plugin-manage-panel" role="group" aria-label={`${entry.title} 管理`}>
         <Button variant="outline" size="sm" disabled={unavailable} onClick={() => manage('plugins.enable', { id: entry.id, enabled: !installed?.enabled })}>{installed?.enabled ? '停用' : '启用'}</Button>

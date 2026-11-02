@@ -351,7 +351,7 @@ import {
     'win32-x64': 'Windows',
   };
 
-  var marketState = { plugins: [], category: '全部', query: '' };
+  var marketState = { plugins: [], group: 'all', publisher: 'all', category: '全部', query: '' };
   var exactNumber = new Intl.NumberFormat('zh-CN');
   var compactNumber = new Intl.NumberFormat('en-US', {
     notation: 'compact',
@@ -419,6 +419,23 @@ import {
     return icon.indexOf('data:image/png;base64,') === 0 ? icon : null;
   }
 
+  function pluginGroup(plugin) {
+    return plugin && plugin.builtin === true ? 'builtin' : 'community';
+  }
+
+  function pluginPublisher(plugin) {
+    return plugin && (plugin.official === true || String(plugin.id || '').indexOf('official.') === 0)
+      ? 'official'
+      : 'unofficial';
+  }
+
+  function pluginOriginLabel(plugin) {
+    if (pluginGroup(plugin) === 'builtin') return '内置插件';
+    return pluginPublisher(plugin) === 'official'
+      ? '社区插件 · 官方插件'
+      : '社区插件 · 非官方插件';
+  }
+
   // 标题是中文时（如「AI 批图」「AI 抠图」）改用插件 id 的词首字母，
   // 否则多个插件会拿到同一个标记。
   function pluginMark(plugin) {
@@ -474,6 +491,7 @@ import {
     if (plugin.version) title.appendChild(el('span', 'plugin-version', 'v' + plugin.version));
     headings.appendChild(title);
     headings.appendChild(el('span', 'plugin-category', plugin.category || '未分类'));
+    headings.appendChild(el('span', 'plugin-origin', pluginOriginLabel(plugin)));
     top.appendChild(headings);
     card.appendChild(top);
 
@@ -501,10 +519,18 @@ import {
   }
 
   function matchesFilter(plugin) {
+    if (marketState.group !== 'all' && pluginGroup(plugin) !== marketState.group) return false;
+    if (
+      marketState.group === 'community' &&
+      marketState.publisher !== 'all' &&
+      pluginPublisher(plugin) !== marketState.publisher
+    ) {
+      return false;
+    }
     if (marketState.category !== '全部' && plugin.category !== marketState.category) return false;
     var query = marketState.query.trim().toLowerCase();
     if (!query) return true;
-    return [plugin.title, plugin.description, plugin.category, plugin.id]
+    return [plugin.title, plugin.description, plugin.category, pluginOriginLabel(plugin), plugin.id]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -528,24 +554,89 @@ import {
   function renderFilters() {
     var box = document.querySelector('[data-market-filters]');
     if (!box) return;
+    box.textContent = '';
+
+    function groupCount(group) {
+      return marketState.plugins.filter(function (plugin) {
+        return pluginGroup(plugin) === group;
+      }).length;
+    }
+
+    function publisherCount(publisher) {
+      return marketState.plugins.filter(function (plugin) {
+        return pluginGroup(plugin) === 'community' && pluginPublisher(plugin) === publisher;
+      }).length;
+    }
+
+    function appendGroup(key, label, current, options) {
+      var group = el('div', 'market-filter-group');
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', '按' + label + '筛选');
+      group.appendChild(el('span', 'market-filter-label', label));
+      options.forEach(function (option) {
+        var chip = el('button', 'chip', option[1]);
+        chip.type = 'button';
+        chip.setAttribute('aria-pressed', current === option[0] ? 'true' : 'false');
+        if (typeof option[2] === 'number') {
+          var count = el('span', 'chip-count', String(option[2]));
+          count.setAttribute('aria-hidden', 'true');
+          chip.appendChild(count);
+        }
+        chip.addEventListener('click', function () {
+          if (key === 'group') {
+            marketState.group = option[0];
+            marketState.publisher = 'all';
+            marketState.category = '全部';
+          } else if (key === 'publisher') {
+            marketState.publisher = option[0];
+            marketState.category = '全部';
+          } else {
+            marketState.category = option[0];
+          }
+          renderFilters();
+          renderMarket();
+        });
+        group.appendChild(chip);
+      });
+      box.appendChild(group);
+    }
+
+    var groupOptions = [['all', '全部插件', marketState.plugins.length]];
+    if (groupCount('builtin')) groupOptions.push(['builtin', '内置插件', groupCount('builtin')]);
+    groupOptions.push(['community', '社区插件', groupCount('community')]);
+    appendGroup('group', '来源', marketState.group, groupOptions);
+    if (marketState.group === 'community') {
+      appendGroup('publisher', '发布者', marketState.publisher, [
+        ['all', '全部', groupCount('community')],
+        ['official', '官方插件', publisherCount('official')],
+        ['unofficial', '非官方插件', publisherCount('unofficial')],
+      ]);
+    }
+
     var categories = ['全部'];
-    marketState.plugins.forEach(function (plugin) {
+    marketState.plugins.filter(function (plugin) {
+      if (marketState.group !== 'all' && pluginGroup(plugin) !== marketState.group) return false;
+      if (
+        marketState.group === 'community' &&
+        marketState.publisher !== 'all' &&
+        pluginPublisher(plugin) !== marketState.publisher
+      ) {
+        return false;
+      }
+      return true;
+    }).forEach(function (plugin) {
       if (plugin.category && categories.indexOf(plugin.category) === -1) {
         categories.push(plugin.category);
       }
     });
-    box.textContent = '';
-    categories.forEach(function (category) {
-      var chip = el('button', 'chip', category);
-      chip.type = 'button';
-      chip.setAttribute('aria-pressed', category === marketState.category ? 'true' : 'false');
-      chip.addEventListener('click', function () {
-        marketState.category = category;
-        renderFilters();
-        renderMarket();
-      });
-      box.appendChild(chip);
-    });
+    appendGroup(
+      'category',
+      '类型',
+      marketState.category,
+      categories.map(function (category) {
+        return [category, category === '全部' ? '全部' : category];
+      })
+    );
   }
 
   function renderStats() {

@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { PluginCard, pluginInstallActive, toolCategory, type Plugin, type ToolEntry } from './PluginCard';
+import { PluginCard, pluginGroup, pluginInstallActive, pluginPublisher, toolCategory, type Plugin, type PluginGroup, type PluginPublisher, type ToolEntry } from './PluginCard';
 import gt from 'semver/functions/gt';
 import type { DebugLogState, DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
@@ -105,6 +105,8 @@ export default function Platform() {
   const [browserPaneResizing, setBrowserPaneResizing] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
+  const [groupFilter, setGroupFilter] = useState<'all' | PluginGroup>('all');
+  const [publisherFilter, setPublisherFilter] = useState<'all' | PluginPublisher>('all');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [startingPluginId, setStartingPluginId] = useState<string | null>(null);
@@ -167,7 +169,7 @@ export default function Platform() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   useEffect(() => window.commerceDesktop?.onBrowserPane?.(() => setBrowserPaneOpen(true)), []);
-  const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); }, []);
+  const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); setGroupFilter('all'); setPublisherFilter('all'); }, []);
   useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {
     const installId = method === 'market.install' && args && typeof args === 'object' && 'id' in args && typeof args.id === 'string' ? args.id : null;
@@ -303,7 +305,7 @@ export default function Platform() {
         // surface has to report its size again after the native view returns.
         setSurfaceRevision(value => value + 1);
       }
-      setPage(next); setQuery(''); setCategory('all');
+      setPage(next); setQuery(''); setCategory('all'); setGroupFilter('all'); setPublisherFilter('all');
     } catch (e) { setError(formatError(e)); }
   }
   const openBrowserPane = async () => {
@@ -430,13 +432,34 @@ export default function Platform() {
     const candidate = marketById.get(plugin.id);
     try { return Boolean(candidate && !candidate.sourceUnavailable && gt(candidate.version, plugin.version)); } catch { return false; }
   }), [plugins, marketById]);
+  const installedById = useMemo(() => new Map(plugins.map(plugin => [plugin.id, plugin])), [plugins]);
   const installedEntries = useMemo(() => plugins.map(plugin => {
     const candidate = marketById.get(plugin.id);
-    return candidate ? { ...candidate, enabled: plugin.enabled, source: plugin.source, local: plugin.local, missing: plugin.missing, settings: plugin.settings, error: plugin.error } as Plugin : plugin;
+    return candidate ? { ...candidate, enabled: plugin.enabled, source: plugin.source, local: plugin.local, bundled: plugin.bundled, missing: plugin.missing, settings: plugin.settings, error: plugin.error } as Plugin : plugin;
   }), [plugins, marketById]);
-  const entries = toolTab === 'all' ? market : installedEntries;
-  const categories = useMemo(() => [...new Set(entries.map(toolCategory))], [entries]);
-  const results = useMemo(() => entries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [entries, category, query]);
+  const bundledCatalogEntries = useMemo(() => plugins.filter(plugin => plugin.source === 'bundled' && !marketById.has(plugin.id)), [plugins, marketById]);
+  const catalogEntries = useMemo(() => [...market, ...bundledCatalogEntries], [market, bundledCatalogEntries]);
+  const entries = toolTab === 'all' ? catalogEntries : installedEntries;
+  const groupCounts = useMemo(() => {
+    const counts = { all: entries.length, builtin: 0, community: 0 };
+    for (const entry of entries) counts[pluginGroup(entry, installedById.get(entry.id))] += 1;
+    return counts;
+  }, [entries, installedById]);
+  const communityEntries = useMemo(() => entries.filter(entry => pluginGroup(entry, installedById.get(entry.id)) === 'community'), [entries, installedById]);
+  const publisherCounts = useMemo(() => {
+    const counts = { official: 0, unofficial: 0 };
+    for (const entry of communityEntries) counts[pluginPublisher(entry)] += 1;
+    return counts;
+  }, [communityEntries]);
+  const scopedEntries = useMemo(() => entries.filter(entry => {
+    const group = pluginGroup(entry, installedById.get(entry.id));
+    if (groupFilter !== 'all' && group !== groupFilter) return false;
+    if (groupFilter === 'community' && publisherFilter !== 'all' && pluginPublisher(entry) !== publisherFilter) return false;
+    return true;
+  }), [entries, installedById, groupFilter, publisherFilter]);
+  const categories = useMemo(() => [...new Set(scopedEntries.map(toolCategory))], [scopedEntries]);
+  const results = useMemo(() => scopedEntries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [scopedEntries, category, query]);
+  const filtersActive = Boolean(query.trim()) || category !== 'all' || groupFilter !== 'all' || publisherFilter !== 'all';
   const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
   const shellPage = isShellPage(page);
   const shellTabPage: Page = shellPage ? (page as Page) : lastShellPage;
@@ -449,6 +472,23 @@ export default function Platform() {
     setToolTab(next);
     setQuery('');
     setCategory('all');
+    setGroupFilter('all');
+    setPublisherFilter('all');
+  };
+  const selectGroupFilter = (next: 'all' | PluginGroup) => {
+    setGroupFilter(next);
+    setPublisherFilter('all');
+    setCategory('all');
+  };
+  const selectPublisherFilter = (next: 'all' | PluginPublisher) => {
+    setPublisherFilter(next);
+    setCategory('all');
+  };
+  const clearToolFilters = () => {
+    setQuery('');
+    setCategory('all');
+    setGroupFilter('all');
+    setPublisherFilter('all');
   };
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
@@ -509,7 +549,7 @@ export default function Platform() {
           <div className="tool-center-bar">
             <div className="tool-tabs" role="tablist" aria-label="工具视图">
               <button type="button" role="tab" id="tool-tab-installed" aria-selected={toolTab === 'installed'} aria-controls="tool-panel-installed" className={cn('tool-tab', toolTab === 'installed' && 'is-active')} onClick={() => selectToolTab('installed')}>已安装<span className="tool-tab-count" aria-hidden="true">{plugins.length}</span></button>
-              <button type="button" role="tab" id="tool-tab-all" aria-selected={toolTab === 'all'} aria-controls="tool-panel-all" className={cn('tool-tab', toolTab === 'all' && 'is-active')} onClick={() => selectToolTab('all')}>全部{marketState === 'ready' ? <span className="tool-tab-count" aria-hidden="true">{market.length}</span> : null}</button>
+              <button type="button" role="tab" id="tool-tab-all" aria-selected={toolTab === 'all'} aria-controls="tool-panel-all" className={cn('tool-tab', toolTab === 'all' && 'is-active')} onClick={() => selectToolTab('all')}>全部{marketState === 'ready' ? <span className="tool-tab-count" aria-hidden="true">{catalogEntries.length}</span> : null}</button>
             </div>
             {toolTab === 'installed' ? <div className="tool-center-status">
               <span className="tool-status-text" role="status">
@@ -526,10 +566,23 @@ export default function Platform() {
             <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`installed:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="installed" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
             {!results.length ? <Empty><EmptyHeader><Boxes /><EmptyTitle>{query ? '没有找到工具' : '还没有安装工具'}</EmptyTitle><EmptyDescription>{query ? '换个关键词试试。' : '从全部工具中挑选，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query ? <Button variant="outline" onClick={() => setQuery('')}>清除筛选</Button> : <Button variant="outline" onClick={() => selectToolTab('all')}>浏览全部工具<ArrowRight data-icon="inline-end" /></Button>}</Empty> : null}
           </div> : <div id="tool-panel-all" role="tabpanel" aria-labelledby="tool-tab-all" className="tool-tab-panel">
-            {categories.length ? <div className="market-filters" role="group" aria-label="工具分类">{['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部分类' : item}</Button>)}</div> : null}
+            <div className="market-filters" role="group" aria-label="工具筛选">
+              <div className="market-filter-row" role="group" aria-label="按来源筛选">
+                <span className="market-filter-label">来源</span>
+                {([['all', '全部插件'], ['builtin', '内置插件'], ['community', '社区插件']] as const).map(([value, label]) => <Button key={value} variant={groupFilter === value ? 'default' : 'outline'} aria-pressed={groupFilter === value} onClick={() => selectGroupFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{groupCounts[value]}</span></Button>)}
+              </div>
+              {groupFilter === 'community' ? <div className="market-filter-row" role="group" aria-label="按发布者筛选">
+                <span className="market-filter-label">发布者</span>
+                {([['all', '全部'], ['official', '官方插件'], ['unofficial', '非官方插件']] as const).map(([value, label]) => <Button key={value} variant={publisherFilter === value ? 'default' : 'outline'} aria-pressed={publisherFilter === value} onClick={() => selectPublisherFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{value === 'all' ? communityEntries.length : publisherCounts[value]}</span></Button>)}
+              </div> : null}
+              {categories.length ? <div className="market-filter-row" role="group" aria-label="按功能分类筛选">
+                <span className="market-filter-label">类型</span>
+                {['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部' : item}</Button>)}
+              </div> : null}
+            </div>
             {marketState === 'loading' ? <div className="market-loading" role="status"><LoaderCircle className="animate-spin" />正在加载插件目录…</div> : marketState === 'error' || marketState === 'unavailable' ? <Empty className="market-empty"><EmptyHeader><Store /><EmptyTitle>{marketState === 'error' ? '暂时无法加载插件市场' : desktop ? '插件目录尚未就绪' : '在桌面应用中发现更多工具'}</EmptyTitle><EmptyDescription>{marketMessage}</EmptyDescription></EmptyHeader>{desktop ? <Button variant="outline" onClick={() => setMarketRevision(value => value + 1)}><RefreshCw data-icon="inline-start" />重新加载</Button> : null}</Empty> : <>
               <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`all:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="catalog" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
-              {!results.length ? <Empty><EmptyHeader><Search /><EmptyTitle>{query || category !== 'all' ? '没有找到工具' : '这里还没有工具'}</EmptyTitle><EmptyDescription>{query || category !== 'all' ? '换个关键词或分类，试试其他工具。' : '稍后再来看看，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query || category !== 'all' ? <Button variant="outline" onClick={() => { setQuery(''); setCategory('all'); }}>清除筛选</Button> : null}</Empty> : null}
+              {!results.length ? <Empty><EmptyHeader><Search /><EmptyTitle>{filtersActive ? '没有找到工具' : '这里还没有工具'}</EmptyTitle><EmptyDescription>{filtersActive ? '换个关键词、来源或分类，试试其他工具。' : '稍后再来看看，或导入本地插件。'}</EmptyDescription></EmptyHeader>{filtersActive ? <Button variant="outline" onClick={clearToolFilters}>清除筛选</Button> : null}</Empty> : null}
             </>}
           </div>}
         </> : null}

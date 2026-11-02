@@ -24,6 +24,8 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 
 目录中的可选 `stats.downloads` 会显示为插件的累计下载量。该数据来自 GitHub Release 制品下载计数，包含重复下载，不等同于唯一用户或安装量。
 
+插件市场按来源分为「内置插件」与「社区插件」，社区插件再分为「官方插件」与「非官方插件」。官网目录展示的是社区插件：`id` 以 `official.` 开头或显式声明 `official: true` 的条目归为官方插件，其余归为非官方插件。内置插件来自桌面应用自身，不会出现在官网目录中。
+
 目录字段到页面元素的映射：
 
 | `catalog.json` 字段 | 页面显示 |
@@ -31,7 +33,8 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 | `icon` | 卡片品牌图标；缺失或格式无效时回退到文字标记 |
 | `title` | 卡片标题与文字标记（中文标题改用 `id` 词首字母，避免多个插件标记相同） |
 | `version` | 标题右侧版本徽标 |
-| `category` | 副标题，同时用于顶部分类筛选按钮 |
+| `category` | 副标题，同时用于类型筛选按钮 |
+| `official` | 来源标签：`official.` 前缀或 `official: true` 为社区官方插件，其余为非官方插件 |
 | `description` | 卡片正文 |
 | `artifacts` 的键 | 平台徽标（`darwin-arm64` → macOS，`win32-x64` → Windows） |
 | `artifacts[*].url` | 反推出插件仓库地址，作为卡片链接 |

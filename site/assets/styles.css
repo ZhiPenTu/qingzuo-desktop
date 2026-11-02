@@ -530,11 +530,28 @@ h1 {
 
 .market-filters {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 8px 16px;
   flex-wrap: wrap;
 }
 
+.market-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.market-filter-label {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 .chip {
+  display: inline-flex;
+  align-items: center;
   height: 32px;
   padding: 0 14px;
   border: 1px solid var(--border);
@@ -544,6 +561,19 @@ h1 {
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+.chip-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .chip:hover {
@@ -662,6 +692,17 @@ h1 {
 .plugin-category {
   color: var(--muted-foreground);
   font-size: 10px;
+}
+
+.plugin-origin {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--secondary) 78%, transparent);
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .plugin-desc {

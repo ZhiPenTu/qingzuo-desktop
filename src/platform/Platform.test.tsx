@@ -6,13 +6,15 @@ import type { BrowserStatus, PluginInstallState } from './commerce';
 
 vi.mock('../theme/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
 const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', category: '标签与文档', version: '0.2.0' };
+const communityEntry: ToolEntry = { id: 'community.tool', title: '社区工具', description: '社区开发的效率工具', category: '效率工具', version: '1.0.0' };
+const bundled: Plugin = { id: 'builtin.tool', title: '内置工具', description: '随应用提供的基础工具', category: '效率工具', version: '1.0.0', enabled: true, source: 'bundled', local: false, missing: [] };
 const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
-function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus) {
+function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus, options: { marketItems?: ToolEntry[]; plugins?: Plugin[] } = {}) {
   let listener = () => {};
   let debugListener = (_entries: import('./commerce').DebugLogEntry[]) => {};
-  let plugins = hasPlugin ? [installed] : [];
+  let plugins = options.plugins ?? (hasPlugin ? [installed] : []);
   let pluginInstalls = initialJob ? [initialJob] : [];
   let debugLog = { enabled: false, directory: '/tmp/qingzuo-logs', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
   let downloadSource = { source: 'github', customMirrors: [] as string[], gitcodeAvailable: true, notice: null as string | null };
@@ -41,7 +43,7 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
       listener();
       return downloadSource;
     }
-    if (method === 'market.list') return { items: [entry] };
+    if (method === 'market.list') return { items: options.marketItems ?? [entry] };
     if (method === 'market.install') { pluginInstalls = [job('downloading', { progress: 40, transferred: 4 * 1024 ** 2, total: 10 * 1024 ** 2 })]; listener(); return { accepted: true }; }
     if (method === 'debugLog.recent') return [];
     if (method === 'debugLog.configure') {
@@ -96,6 +98,31 @@ it('merges installed tools and the catalog into one page with two tabs', async (
   await openToolTab('已安装');
   expect(screen.getByRole('tab', { name: '已安装' }).getAttribute('aria-selected')).toBe('true');
   expect(screen.getByRole('button', { name: '管理' })).toBeTruthy();
+});
+
+it('filters the catalog by built-in, community, official and unofficial origins', async () => {
+  fixture(undefined, false, false, [], undefined, { marketItems: [entry, communityEntry], plugins: [bundled] });
+  render(<Platform />);
+  await screen.findByRole('heading', { name: '内置工具' });
+  await openToolTab('全部');
+
+  expect(await screen.findByRole('group', { name: '按来源筛选' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '内置插件' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '社区插件' })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '内置插件' }));
+  await screen.findByRole('heading', { name: '内置工具' });
+  expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '社区插件' }));
+  expect(await screen.findByRole('group', { name: '按发布者筛选' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '非官方插件' }));
+  await screen.findByRole('heading', { name: '社区工具' });
+  expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '官方插件' }));
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+  expect(screen.queryByRole('heading', { name: '社区工具' })).toBeNull();
 });
 
 it('keeps backend progress after acknowledgment, restores it across tabs, and completes on the installed state', async () => {
