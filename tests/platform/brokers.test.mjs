@@ -233,3 +233,26 @@ test('declared custom headers reach the request while undeclared ones are refuse
   await assert.rejects(jsonCall.call(jsonBroker, { url: 'https://openapi.sheincorp.com/x', method: 'POST', headers: { 'Content-Type': 'application/json' }, multipart: { fields: { a: '1' } } }), /内容无效/);
   await assert.rejects(broker.call({ ...scoped, permissions: { ...scoped.permissions, networkHeaders: ['authorization'] } }, { url: 'https://openapi.sheincorp.com/x', headers: { Authorization: 'Bearer x' } }), /请求头无效/);
 });
+
+test('shared credential references need use permission and an explicit grant', async () => {
+  const id = 'rec-abcdef123456';
+  const secret = 'fixture-shared-secret';
+  const vault = {
+    accessOf: recordId => { if (recordId !== id) throw new Error('凭证已删除，请重新选择。'); return { id }; },
+    isGranted: (pluginId, recordId) => pluginId === 'local.consumer' && recordId === id,
+    secret: async recordId => { assert.equal(recordId, id); return secret; },
+  };
+  const consumer = { id: 'local.consumer', permissions: { credentialVault: 'use', network: ['https://tools.example.com'] } };
+  let captured = null;
+  const broker = new NetworkBroker(null, {}, async (_url, request) => { captured = request; return new Response('{"ok":true}'); }, vault);
+  const signed = await broker.sign(consumer, { credential: { record: id }, algorithm: 'hmac-sha256', message: 'abc' });
+  assert.equal(signed.digest, createHmac('sha256', secret).update('abc').digest('base64'));
+  await broker.call(consumer, { url: 'https://tools.example.com/x', credential: { record: id } });
+  assert.equal(captured.headers.Authorization, 'Bearer ' + secret);
+  await assert.rejects(broker.sign({ ...consumer, permissions: { network: ['https://tools.example.com'] } }, { credential: { record: id }, algorithm: 'hmac-sha256', message: 'abc' }), /凭据未授权/);
+  await assert.rejects(broker.sign(consumer, { credential: { record: 'rec-000000000000' }, algorithm: 'hmac-sha256', message: 'abc' }), /已删除/);
+  await assert.rejects(broker.sign(consumer, { credential: { record: 'bad' }, algorithm: 'hmac-sha256', message: 'abc' }), /引用无效/);
+  await assert.rejects(broker.sign(consumer, { credential: { record: id, extra: true }, algorithm: 'hmac-sha256', message: 'abc' }), /引用无效/);
+  const deleted = { ...vault, accessOf: () => { throw new Error('凭证已删除，请重新选择。'); }, secret: async () => { throw new Error('凭证已删除，请重新选择。'); } };
+  await assert.rejects(new NetworkBroker(null, {}, async () => { throw new Error('must not fetch'); }, deleted).sign(consumer, { credential: { record: id }, algorithm: 'hmac-sha256', message: 'abc' }), /已删除/);
+});

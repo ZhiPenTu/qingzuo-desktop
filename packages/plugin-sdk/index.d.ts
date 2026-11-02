@@ -10,11 +10,31 @@ export type BrowserAction = { tabId?: string } & ({ action: 'click' | 'hover'; r
 export interface BrowserActionResult { tabId: string; url: string; action: 'click' | 'type' | 'select' | 'scroll' | 'hover'; ok: true; value?: string; scrollY?: number }
 export interface BrowserWaitOptions { tabId?: string; selector?: string; text?: string; absent?: boolean; timeoutMs?: number }
 export interface StorageFile { token: string; name: string; size: number; mime: string }
+export type CredentialEnvironment = 'production' | 'sandbox';
+/** `appId` 是可公开的标识；`secretKey` 永远不会返回给插件。 */
+export interface CredentialRecord { id: string; label: string; appId: string; environment: CredentialEnvironment; createdAt: number; updatedAt: number; hasSecret: boolean; grants?: number }
+export interface CredentialCandidate { id: string; label: string; environment: CredentialEnvironment; appIdMasked: string; granted: boolean }
+export interface CredentialAccess { id: string; label: string; appId: string; environment: CredentialEnvironment }
+export interface CredentialGrant { pluginId: string; title: string; confirmedAt: number }
+export interface CredentialInput { label: string; appId: string; secretKey: string; environment?: CredentialEnvironment }
+export interface CredentialPatch { label?: string; appId?: string; secretKey?: string; environment?: CredentialEnvironment }
+export type DownloadPermission = 'use' | 'manage';
+export type DownloadStatus = 'queued' | 'probing' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
+export type DownloadMode = 'segmented' | 'single';
+export interface DownloadProbe { hostname: string; filename: string; size: number | null; mime: string; supportsRange: boolean; resumable: boolean; mode: DownloadMode }
+export interface DownloadPreferences { directoryName: string; directoryAvailable: boolean; concurrency: number }
+export interface DownloadTask {
+  id: string; ownerId: string; ownerTitle: string; filename: string | null; hostname: string;
+  directoryName: string; status: DownloadStatus; mode: DownloadMode; progress: number;
+  transferred: number; total: number; speed: number; error: string | null;
+  createdAt: number; updatedAt: number; completedAt: number | null;
+  canPause: boolean; canResume: boolean; canCancel: boolean; canRemove: boolean; canReveal: boolean;
+}
 export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void; onBrowser?(callback: (event: BrowserEvent) => void): () => void }
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
   ui: string; category?: string; releaseNotes?: string; icon?: string;
-  permissions: { files?: boolean; storage?: boolean; credentials?: string[]; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('assistant' | 'image-edit')[]; browser?: ('detect' | 'download' | 'automate')[] };
+  permissions: { files?: boolean; storage?: boolean; credentials?: string[]; credentialVault?: 'use' | 'manage'; downloads?: DownloadPermission; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('assistant' | 'image-edit' | 'text')[]; browser?: ('detect' | 'download' | 'automate')[] };
   services?: { provides?: string[]; requires?: string[] };
   assistant?: { tools: { name: string; title: string; description: string; service: string; method: string; parameters: AssistantToolSchema }[] };
   backend?: { type: 'node' | 'executable'; entry: Record<string, string> };
@@ -24,8 +44,36 @@ export interface AssistantToolSchema { type: 'object' | 'array' | 'string' | 'in
 export function createPluginClient(bridge?: PluginBridge): {
   invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
   files: { pick(options?: { extensions?: string[] }): Promise<FileToken | null>; pickMany(options?: { extensions?: string[] }): Promise<FileToken[]>; pickDirectory(): Promise<DirectoryGrant | null>; read(token: string): Promise<{ data: string; mime: string }>; create(options: { data: string; filename: string; mime: string }): Promise<FileToken>; url(token: string): Promise<string>; release(token: string): Promise<void>; save(token: string, filename: string): Promise<boolean> };
-  credentials: { set(name: string, value: string): Promise<void>; status(name: string): Promise<boolean>; clear(name: string): Promise<void> };
-  network: { request(options: { url: 'https://api.remove.bg/v1.0/removebg'; fileToken: string; credential: string; taskId?: string }): Promise<FileToken>; request(options: NetworkRequest & { responseType: 'file' }): Promise<{ status: number; mime: string; file: FileToken }>; request(options: NetworkRequest & { responseType?: 'data' }): Promise<{ status: number; mime: string; data: string }>; sign(options: { credential: string; algorithm: 'hmac-sha256' | 'sha256'; message: string; keySuffix?: string }): Promise<{ algorithm: 'hmac-sha256' | 'sha256'; encoding: 'base64'; digest: string }> };
+  credentials: { set(name: string, value: string): Promise<void>; status(name: string): Promise<boolean>; clear(name: string): Promise<void>;
+    records: {
+      /** `manage` 返回全部凭证；`use` 只返回已授权的凭证。 */
+      list(): Promise<CredentialRecord[]>;
+      /** 返回全部凭证的掩码信息，用于让用户选择。 */
+      browse(): Promise<CredentialCandidate[]>;
+      /** 首次使用会触发主进程确认，授权长期有效；返回可直接用于 network 的 AppID。 */
+      request(id: string): Promise<CredentialAccess>;
+      revoke(id: string): Promise<void>;
+      create(input: CredentialInput): Promise<CredentialRecord>;
+      update(id: string, patch: CredentialPatch): Promise<CredentialRecord>;
+      remove(id: string): Promise<void>;
+      grants(id: string): Promise<CredentialGrant[]>;
+      revokeGrant(id: string, pluginId: string): Promise<void>;
+    } };
+  downloads: {
+    probe(options: { url: string }): Promise<DownloadProbe>;
+    pickDirectory(): Promise<DirectoryGrant | null>;
+    preferences(): Promise<DownloadPreferences>;
+    configure(options: { directoryToken?: string; concurrency?: number }): Promise<DownloadPreferences>;
+    start(options: { url: string; filename?: string; directoryToken?: string; concurrency?: number }): Promise<DownloadTask>;
+    list(options?: { all?: boolean }): Promise<DownloadTask[]>;
+    get(id: string): Promise<DownloadTask>;
+    pause(id: string): Promise<DownloadTask>;
+    resume(id: string, options?: { directoryToken?: string }): Promise<DownloadTask>;
+    cancel(id: string): Promise<DownloadTask>;
+    remove(id: string): Promise<void>;
+    reveal(id: string): Promise<boolean>;
+  };
+  network: { request(options: { url: 'https://api.remove.bg/v1.0/removebg'; fileToken: string; credential: string | { record: string }; taskId?: string }): Promise<FileToken>; request(options: NetworkRequest & { responseType: 'file' }): Promise<{ status: number; mime: string; file: FileToken }>; request(options: NetworkRequest & { responseType?: 'data' }): Promise<{ status: number; mime: string; data: string }>; sign(options: { credential: string | { record: string }; algorithm: 'hmac-sha256' | 'sha256'; message: string; keySuffix?: string }): Promise<{ algorithm: 'hmac-sha256' | 'sha256'; encoding: 'base64'; digest: string }> };
   browser: { status(): Promise<BrowserStatus>; rescan(tabId?: string): Promise<BrowserStatus>; download(options: { candidateIds: string[]; mode?: 'single' | 'batch' }): Promise<BrowserStatus>; cancel(id: string): Promise<BrowserStatus>; open(url: string): Promise<{ tabId: string; url: string; title: string }>; snapshot(options?: { tabId?: string }): Promise<BrowserSnapshot>; act(options: BrowserAction): Promise<BrowserActionResult>; waitFor(options: BrowserWaitOptions): Promise<{ tabId: string; url: string; ok: boolean; elapsed: number }>; saveResource(options: { url: string; tabId?: string }): Promise<FileToken & { tabId: string }>; onEvent(callback: (event: BrowserEvent) => void): () => void };
   storage: { get<T = unknown>(key: string): Promise<T | null>; set(key: string, value: unknown): Promise<boolean>; keys(): Promise<string[]>; remove(key: string): Promise<boolean>; saveFile(options: { data: string; filename: string; mime: string }): Promise<StorageFile>; readFile(token: string): Promise<{ data: string; mime: string }>; removeFile(token: string): Promise<boolean> };
   services: { call<T = unknown>(service: string, method: string, args?: unknown): Promise<T> };
@@ -38,7 +86,7 @@ export interface NetworkRequest {
   url: string; method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; json?: unknown;
   multipart?: { fields?: Record<string, string>; files?: { field: string; token: string }[] };
   headers?: Record<string, string>;
-  credential?: string; credentialHeader?: 'Authorization' | 'X-Api-Key'; taskId?: string;
+  credential?: string | { record: string }; credentialHeader?: 'Authorization' | 'X-Api-Key'; taskId?: string;
   responseType?: 'data' | 'file'; filename?: string;
 }
 export interface DirectoryGrant { token: string; name: string }

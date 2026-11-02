@@ -13,16 +13,22 @@ export function routedAddress(address,hostname) {
   // still verifies the declared host; literal IP/local names never get this exception.
   return publicAddress(address) || /^198\.(18|19)\./.test(address) && !isIP(hostname) && hostname.includes('.') && !/\.(local|localhost|internal)$/.test(hostname);
 }
-export async function secureRequest(address,options) {
+export async function secureRequest(address, options = {}) {
+ const {allowRedirectResponses=false,...requestOptions}=options;
  const url=new URL(address);if(url.protocol!=='https:'||url.username||url.password)throw new Error('网络请求地址无效。');
  const resolved=await lookup(url.hostname,{all:true});if(!resolved.length||resolved.some(row=>!routedAddress(row.address,url.hostname)))throw new Error('插件网络代理禁止访问本机和私有网络。');
- options.signal?.throwIfAborted();const selected=resolved[0],request=new Request(address,options),body=request.body?Buffer.from(await request.arrayBuffer()):null;
+ options.signal?.throwIfAborted();const selected=resolved[0],request=new Request(address,requestOptions),body=request.body?Buffer.from(await request.arrayBuffer()):null;
  return new Promise((resolve,reject)=>{
   const headers=Object.fromEntries(request.headers);if(body)headers['content-length']=String(body.length);
   const req=https.request(url,{method:request.method,headers,signal:options.signal,lookup:(_host,settings,callback)=>{if(settings.all)callback(null,[selected]);else callback(null,selected.address,selected.family);}},response=>{
    const values=new Headers();for(const [key,value] of Object.entries(response.headers)) if(value!==undefined)values.set(key,Array.isArray(value)?value.join(', '):value);
    // Redirects remain errors; credentials are never forwarded to another origin.
-   if(response.statusCode>=300&&response.statusCode<400){response.destroy();reject(new Error('服务重定向被拒绝。'));return;}
+   if(response.statusCode>=300&&response.statusCode<400){
+    if(!allowRedirectResponses){response.destroy();reject(new Error('服务重定向被拒绝。'));return;}
+    resolve(new Response(null,{status:response.statusCode,headers:values}));
+    response.resume();
+    return;
+   }
    resolve(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(response),{status:response.statusCode,headers:values}));
   });req.once('error',reject);req.end(body);
  });

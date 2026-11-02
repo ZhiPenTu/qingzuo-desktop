@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.6.19，插件 API / SDK 1.6.1（运行时 API 仍为 1.6.0）。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.6.21，插件 API / SDK 1.8.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -32,7 +32,13 @@ macOS 新组件仅有 core、electron、dependencies，保留旧组件清单读�
 
 sdk-v1.1.0 首次发布后，测试辅助入口的可见视图修正以 sdk-v1.1.1 发布，不覆盖原制品；运行时 API 仍为 1.1.0。两个版本设置 latest=false，不干扰桌面升级。独立插件用固定 sdk-v1.1.1 Release URL 和 lockfile integrity 安装 SDK。
 
-sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次和助手接口；sdk-v1.2.1 补齐浏览器权限校验与浏览器桥接接口，同样设置 latest=false。AI 批图仓库固定其 Release 字节，发布流水线核对 SHA-256，并核对 v0.3.0 底座发布运行的提交与正式标签后使用安装制品验收。sdk-v1.3.0 增加页面自动化、页面来源白名单、资源转存、签名与自定义请求头、插件持久化存储；sdk-v1.4.0 增加插件文本 AI 模型目录与补全接口；sdk-v1.5.0 允许文本补全携带图片片段（https 或 png/jpeg/webp 的 base64 data URL，单条最多 4 张）；sdk-v1.6.0 增加只有提示词、不带原图的文生图批次，均设置 latest=false。sdk-v1.6.1 修正测试辅助入口查找的工具中心按钮名，运行时 API 仍为 1.6.0，同样设置 latest=false。市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
+sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次和助手接口；sdk-v1.2.1 补齐浏览器权限校验与浏览器桥接接口，同样设置 latest=false。AI 批图仓库固定其 Release 字节，发布流水线核对 SHA-256，并核对 v0.3.0 底座发布运行的提交与正式标签后使用安装制品验收。sdk-v1.3.0 增加页面自动化、页面来源白名单、资源转存、签名与自定义请求头、插件持久化存储；sdk-v1.4.0 增加插件文本 AI 模型目录与补全接口；sdk-v1.5.0 允许文本补全携带图片片段（https 或 png/jpeg/webp 的 base64 data URL，单条最多 4 张）；sdk-v1.6.0 增加只有提示词、不带原图的文生图批次，均设置 latest=false。sdk-v1.6.1 修正测试辅助入口查找的工具中心按钮名，运行时 API 仍为 1.6.0，同样设置 latest=false。
+
+sdk-v1.7.0 增加 profile 级共享凭证库：清单权限 `credentialVault: 'use' | 'manage'`，`credentials.records.*` 记录与授权接口，以及 `network.request/sign` 的 `{ record }` 引用。`manage` 只对市场或内置来源生效，密钥永不返回插件。底座凭据存储统一使用 `safeStorage` 的 `enc:v1:` 信封；旧明文凭据升级后视为未配置，发布说明必须提醒用户重新填写 AI、抠图、Seedance、希音等密钥。SDK 同样设置 latest=false。
+
+sdk-v1.8.0 增加宿主托管的文件下载能力：清单权限 `downloads: 'use' | 'manage'`、HTTPS Range 探测、最多 4 路分片、自动普通下载回退、目录授权、任务隔离与跨重启续传。`manage` 只对市场或内置来源生效；任务快照不返回完整下载地址、查询参数或本地路径。SDK 同样设置 latest=false。
+
+市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
 
 插件源码、Python/模型/字体、业务测试和打包在各自仓库完成。插件 CI 必须提供成功的底座验收运行 ID，从该运行下载对应平台安装制品并在真实沙箱中验收，不能借用底座源码依赖。
 
