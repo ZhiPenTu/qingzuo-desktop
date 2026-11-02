@@ -4,15 +4,20 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { Credentials } from '../../desktop/credentials.mjs';
+import { createSafeStorageCodec } from '../../desktop/credential-codec.mjs';
 import { launchSandbox } from '../../desktop/sandbox.mjs';
 
 const launcher = path.resolve('native/sandbox/target/release/commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
+const codec = {
+  encode: value => 'enc:v1:' + Buffer.from(value, 'utf8').toString('base64'),
+  decode: value => value.startsWith('enc:v1:') ? Buffer.from(value.slice('enc:v1:'.length), 'base64').toString('utf8') : null,
+};
 
 test('local credential store scopes entries per plugin and clears them', async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'commerce-credentials-')));
   const storePath = path.join(root, 'credentials-vault.json');
   const namespace = 'profile.test:';
-  const store = new Credentials(launcher, namespace, storePath);
+  const store = new Credentials(launcher, namespace, storePath, codec);
   const id = 'local.test-' + process.pid;
   const value = 'fixture-not-a-real-key';
   try {
@@ -22,7 +27,9 @@ test('local credential store scopes entries per plugin and clears them', async (
     assert.equal(await store.get(id, 'fixture'), value);
     if (process.platform === 'darwin') {
       assert.equal((await stat(storePath)).mode & 0o777, 0o600);
-      assert.equal(JSON.parse(await readFile(storePath, 'utf8'))[namespace + id + ':fixture'], value);
+      const stored = JSON.parse(await readFile(storePath, 'utf8'))[namespace + id + ':fixture'];
+      assert.equal(stored, codec.encode(value));
+      assert.equal(stored.includes(value), false);
     }
     await store.clear(id, 'fixture');
     assert.equal(await store.status(id, 'fixture'), false);
@@ -35,7 +42,7 @@ test('local credential store scopes entries per plugin and clears them', async (
 test('an actual sandboxed process cannot read the host credential file', async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'commerce-vault-')));
   const storePath = path.join(root, 'credentials-vault.json');
-  const store = new Credentials(launcher, 'profile.sandbox:', storePath);
+  const store = new Credentials(launcher, 'profile.sandbox:', storePath, codec);
   const id = 'local.sandbox-vault-' + process.pid;
   const value = 'fixture-vault-boundary-' + process.pid;
   const job = await realpath(await mkdtemp(path.join(os.tmpdir(), 'commerce-vault-job-')));
@@ -80,5 +87,40 @@ test('an actual sandboxed process cannot read the host credential file', async (
     await store.clear(id, 'fixture');
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     await rm(job, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('legacy plaintext entries are treated as unset and can be purged', async () => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'commerce-legacy-')));
+  const storePath = path.join(root, 'credentials-vault.json');
+  const store = new Credentials(launcher, 'profile.legacy:', storePath, codec);
+  const id = 'local.legacy-' + process.pid;
+  try {
+    await store.call('set', id, 'fixture', 'legacy-plaintext');
+    assert.equal(await store.get(id, 'fixture'), null);
+    await store.purgeLegacy(id, ['fixture']);
+    assert.equal(await store.readRaw(id, 'fixture'), null);
+  } finally {
+    await store.clear(id, 'fixture');
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unreadable encrypted entries fail with an actionable message', async () => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'commerce-broken-')));
+  const storePath = path.join(root, 'credentials-vault.json');
+  const codecWithBrokenKey = createSafeStorageCodec({
+    isEncryptionAvailable: () => true,
+    encryptString: () => Buffer.from('ciphertext'),
+    decryptString: () => { throw new Error('decrypt failed'); },
+  });
+  const store = new Credentials(launcher, 'profile.broken:', storePath, codecWithBrokenKey);
+  const id = 'local.broken-' + process.pid;
+  try {
+    await store.call('set', id, 'fixture', 'enc:v1:not-valid-base64');
+    await assert.rejects(() => store.get(id, 'fixture'), /无法读取已保存的密钥/);
+  } finally {
+    await store.clear(id, 'fixture');
+    await rm(root, { recursive: true, force: true });
   }
 });

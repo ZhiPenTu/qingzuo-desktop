@@ -1,6 +1,6 @@
 # 插件开发
 
-底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。v0.2.7 的插件 API 为 1.1.0、SDK 为 1.1.1，兼容声明 ^1.0.0 的旧插件，插件版本和底座版本独立。
+底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.8.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
 
 ## 快速创建
 
@@ -19,7 +19,7 @@ npm run plugin -- pack my-tool my-tool.ecplugin
 
 原生构建工具生成的库和框架别名需在打包前转成普通文件及目录。LabelEdit 构建脚本只复制 PyInstaller 输出目录内部的资源，逐层校验目录别名；外部链接、循环链接及无效链接会使构建失败。安装器继续拒绝所有 ZIP 符号链接。
 
-SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络请求、服务调用、工具/设置贡献、取消和清理。凭据读取仅存在于可信代理，插件页面无法读取已保存密钥。界面通过 `createPluginClient()` 获得 API；类型见 `packages/plugin-sdk/index.d.ts`。普通网络请求支持 HTTPS 的 GET/POST/PUT/PATCH/DELETE、JSON 内容及按引用注入 Bearer/X-Api-Key，响应为状态、MIME 和 Base64 数据。remove.bg 另提供受控文件上传适配器，返回可保存文件令牌。代理锁定已解析目标，禁止私网、重定向及未声明来源；公共域名兼容系统 TUN 的 198.18/15 映射，并始终验证该域名的 TLS 证书。任务取消会停止调用方本地进程并终止在线请求；失败请求不会自动重发。
+SDK 提供文件选择/读取/保存、插件私密凭据设置/状态/清除、共享凭证记录、受控网络请求、服务调用、工具/设置贡献、取消和清理。凭据读取仅存在于可信代理，插件页面无法读取已保存密钥。界面通过 `createPluginClient()` 获得 API；类型见 `packages/plugin-sdk/index.d.ts`。普通网络请求支持 HTTPS 的 GET/POST/PUT/PATCH/DELETE、JSON 内容及按引用注入 Bearer/X-Api-Key，响应为状态、MIME 和 Base64 数据。remove.bg 另提供受控文件上传适配器，返回可保存文件令牌。代理锁定已解析目标，禁止私网、重定向及未声明来源；公共域名兼容系统 TUN 的 198.18/15 映射，并始终验证该域名的 TLS 证书。任务取消会停止调用本地进程并终止在线请求；失败请求不会自动重发。
 
 浏览器联动需要在清单中显式声明 `permissions.browser`，可申请 `detect`、`download` 和 `automate`。宿主只向插件发送脱敏的候选 ID、标题、类型、来源页和状态；媒体地址、Cookie、签名参数和浏览器会话始终留在主进程。插件通过 `createPluginClient().browser` 读取候选、请求重新扫描、创建下载任务和接收状态事件，不能直接访问浏览器 DOM 或会话；`automate` 只能通过 API 1.3 的结构化快照和受限操作触达清单白名单内的页面。
 
@@ -135,6 +135,64 @@ SDK 提供文件选择/读取/保存、凭据设置/状态/清除、受控网络
 
 ## 市场发布与升级
 
+### API 1.8 文件下载
+
+SDK 1.8.0 新增宿主托管的文件下载能力。下载任务、Range 探测、分片、目录授权和跨重启恢复都在可信主进程执行，插件页面只收到脱敏后的任务快照。调用方通过 `client.downloads` 使用该能力，不经过 `services.call`。
+
+清单权限：
+
+```json
+{
+  "api": "^1.8.0",
+  "permissions": {
+    "downloads": "use"
+  }
+}
+```
+
+- `use`：创建并管理自己发起的任务，可为单次任务选择目录。
+- `manage`：仅对市场或内置来源生效；可修改全局默认目录与并发，并查看、暂停、继续、取消和清理所有插件的任务。
+- 首版只接受公开 HTTPS 直链，不支持 Cookie、浏览器登录态、Authorization 或任意鉴权请求头。
+
+```js
+const probe = await client.downloads.probe({ url });
+const task = await client.downloads.start({
+  url,
+  filename: probe.filename,
+  concurrency: probe.mode === 'segmented' ? 4 : 1,
+});
+
+const all = await client.downloads.list();
+const current = await client.downloads.get(task.id);
+```
+
+可用接口：
+
+```ts
+client.downloads.probe({ url }): Promise<DownloadProbe>
+client.downloads.pickDirectory(): Promise<{ token, name } | null>
+client.downloads.preferences(): Promise<{ directoryName, directoryAvailable, concurrency }>
+client.downloads.configure({ directoryToken?, concurrency? }): Promise<DownloadPreferences>
+client.downloads.start({ url, filename?, directoryToken?, concurrency? }): Promise<DownloadTask>
+client.downloads.list({ all? }): Promise<DownloadTask[]>
+client.downloads.get(id): Promise<DownloadTask>
+client.downloads.pause(id): Promise<DownloadTask>
+client.downloads.resume(id, { directoryToken? }): Promise<DownloadTask>
+client.downloads.cancel(id): Promise<DownloadTask>
+client.downloads.remove(id): Promise<void>
+client.downloads.reveal(id): Promise<boolean>
+```
+
+服务器先通过 `HEAD` 和 `Range: bytes=0-0` 检测；返回 `206` 且范围完整时使用最多 4 路分片，返回 `200`、`416` 或中途失去 Range 能力时自动回退为单连接。文件不需要分片、未知长度或空文件也走普通下载。单文件上限 20 GB；单个任务的分段连接数只能设为 1–4，默认 4。
+
+任务状态为 `queued / probing / downloading / paused / completed / failed / canceled`，模式为 `segmented / single`。快照只包含任务 ID、所属插件、域名、文件名、目录名称、大小、进度、速度、错误和可用操作，不返回完整 URL、查询参数或本地路径。
+
+任务不依赖插件页面存活：关闭页面不会取消下载；停用调用插件会暂停其活动任务；卸载会删除任务记录和未完成分片，但保留已完成文件。删除已完成任务记录同样不会删除文件。应用重启后，活动任务会自动恢复；若目录身份改变、文件已不可写，或远程 `ETag / Last-Modified / 大小` 改变，任务会暂停并要求重新选择目录或重新创建任务。续传中的分片在 Range 失效时会被丢弃并从普通下载重新开始。
+
+`manage` 插件应先用 `pickDirectory()` 取得不透明目录令牌，再调用 `configure({ directoryToken })` 更新全局默认目录；普通 `use` 插件也可以把同一令牌传给 `start({ directoryToken })` 覆盖单次任务的保存位置。目录令牌只属于取得它的插件，关闭工具视图或停用插件后失效。
+
+插件只应在用户明确发起下载时调用该接口。不要根据不可信网页内容自动批量下载，也不要把带签名的下载地址写入日志、存储或界面；宿主不会向插件返回地址。
+
 ### API 1.3 本地预览
 
 SDK 1.3.0 为「在指定网站上采集结构化数据」补齐五组主进程能力。新增能力全部要求显式清单权限，旧插件不受影响。
@@ -247,6 +305,28 @@ SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回�
 清单声明 `permissions.ai: ['assistant', 'image-edit']`，批次还需文件权限。官方图像编辑需声明服务 network origin 和插件隔离凭据 `google-image` / `openai-image`。`ai.models({ source: 'proxy' })` 读取共享代理图片目录，`ai.batch.create({ source: 'proxy', ... })` 固定图片来源、型号与参数；无 source 的旧调用仍使用官方 API。代理图片支持 GPT Image 的 `/v1/images/edits`、Gemini 的 `/v1beta/models/{id}:generateContent` 和目录中 `type: openai-image` 的兼容别名。未知能力不展示推测参数，目录缺失型号不会回退；外部代理兼容模型需配置 `image: true`。切换代理地址后旧批次禁止改投新来源，但已生成结果仍可重新保存。凭据不会返回插件；上传和大响应由可信适配器处理，不放宽通用网络接口限制。模型发现只是读取目录，不验证账户图像权限，也不发送付费生成请求。外部代理的上游重试策略由其管理端配置，轻作本身不重发图片请求。
 
 `batch.create` 固定输入副本和有效提示词，创建草稿而非提交请求。`revise` 使用 revision 检查；`start` 必须携带用户选定的 directoryToken 和当前 revision。重复 start 不重复生成；恢复不重发 unknown 项。`retryFailed: true` 仅显式重试 failed 项，对 save-failed 项只重新保存。关闭工具视图不取消批次，停用和卸载才取消所属任务。
+
+### API 1.7 共享凭证
+
+SDK 1.7.0 增加 profile 级共享凭证库，用于多组 `AppID + APP_SecretKey` 的集中保存和按引用使用。完整记录结构、字段分类、授权生命周期、日志与失败处理见 [共享凭证库](credential-vault.md)。
+
+- **清单权限**：`permissions.credentialVault: 'use' | 'manage'`。`manage` 只对 `market` 和 `bundled` 来源生效；本地未签名插件可以安装，但无法调用管理接口。`use` 不限制来源。
+- **记录接口**：`credentials.records.list / browse / request / revoke`。`manage` 另有 `create / update / remove / grants / revokeGrant`。`list()` 对 `use` 只返回已授权记录；`browse()` 对所有插件只返回掩码 AppID。
+- **授权确认**：`request(id)` 由当前可见插件发起，主进程弹框显示插件标题、记录别名、完整 AppID 和环境。确认后长期有效；卸载插件、删除记录或用户撤销会移除授权。
+- **网络引用**：`network.request` 与 `network.sign` 的 `credential` 新增 `{ record: id }`。它必须同时满足 `credentialVault` 权限、记录存在和显式授权；原字符串私密凭据形式继续兼容。
+- **密钥边界**：`secretKey` 永不返回插件。记录元数据与授权位于 `userData/credential-records.json`，密钥位于现有凭据存储并由 `safeStorage` 加密为 `enc:v1:` 信封。
+- **旧数据**：不带 `enc:v1:` 信封的旧明文被视为未配置，宿主启动时会清理已知旧键。升级后用户需要重新填写 AI、抠图、Seedance、希音等已保存密钥。
+- **兼容性**：现有 `credentials.set/status/clear` 与字符串 `credential` 调用保持可用；需要共享凭证时声明 `api: '^1.7.0'`。
+
+```js
+const candidates = await client.credentials.records.browse();
+const access = await client.credentials.records.request(candidates[0].id);
+const signed = await client.network.sign({
+  credential: { record: access.id },
+  algorithm: 'hmac-sha256',
+  message,
+});
+```
 
 本地预览固定 SDK 压缩包和底座制品测试，不使用未发布的公共版本；暂不签名上架。旧底座通过 `api: '^1.2.0'` 拒绝安装并提示升级。
 
