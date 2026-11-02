@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import { validateToolSchema } from './tool-schema-core.mjs';
-export const API_VERSION = '1.7.0';
+export const API_VERSION = '1.8.0';
 export const TARGET = process.platform + '-' + process.arch;
 export const RESERVED_HEADERS = ['authorization', 'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-connection', 'te', 'trailer'];
 export function validatePluginIcon(value) {
@@ -29,8 +29,9 @@ export function validateManifest(pkg, target = TARGET) {
   safeRelative(m.ui);
   if (m.settings) { if (typeof m.settings.title !== 'string') throw new Error('插件设置无效。'); safeRelative(m.settings.entry); }
   const permissions = m.permissions ?? {};
-  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'credentialVault', 'ai', 'browser', 'browserOrigins', 'networkHeaders', 'storage'].includes(k))) throw new Error('插件申请了不支持的权限。');
+  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'credentialVault', 'downloads', 'ai', 'browser', 'browserOrigins', 'networkHeaders', 'storage'].includes(k))) throw new Error('插件申请了不支持的权限。');
   if (permissions.credentialVault !== undefined && !['use', 'manage'].includes(permissions.credentialVault)) throw new Error('共享凭证权限无效。');
+  if (permissions.downloads !== undefined && !['use', 'manage'].includes(permissions.downloads)) throw new Error('下载权限无效。');
   if (permissions.ai !== undefined && (!Array.isArray(permissions.ai) || new Set(permissions.ai).size !== permissions.ai.length || permissions.ai.some(value => !['assistant', 'image-edit', 'text'].includes(value)))) throw new Error('AI 权限无效。');
   if (permissions.files !== undefined && typeof permissions.files !== 'boolean') throw new Error('文件权限无效。');
   if (permissions.storage !== undefined && typeof permissions.storage !== 'boolean') throw new Error('存储权限无效。');

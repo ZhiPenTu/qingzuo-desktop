@@ -1,6 +1,6 @@
 # 插件开发
 
-底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API 与 SDK 均为 1.7.0，兼容声明旧 API 范围的插件，插件版本和底座版本独立。
+底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.8.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
 
 ## 快速创建
 
@@ -134,6 +134,64 @@ SDK 提供文件选择/读取/保存、插件私密凭据设置/状态/清除、
 - 禁止直接在隔离页面依赖宿主 `--primary`、`.dark` 或主题状态。
 
 ## 市场发布与升级
+
+### API 1.8 文件下载
+
+SDK 1.8.0 新增宿主托管的文件下载能力。下载任务、Range 探测、分片、目录授权和跨重启恢复都在可信主进程执行，插件页面只收到脱敏后的任务快照。调用方通过 `client.downloads` 使用该能力，不经过 `services.call`。
+
+清单权限：
+
+```json
+{
+  "api": "^1.8.0",
+  "permissions": {
+    "downloads": "use"
+  }
+}
+```
+
+- `use`：创建并管理自己发起的任务，可为单次任务选择目录。
+- `manage`：仅对市场或内置来源生效；可修改全局默认目录与并发，并查看、暂停、继续、取消和清理所有插件的任务。
+- 首版只接受公开 HTTPS 直链，不支持 Cookie、浏览器登录态、Authorization 或任意鉴权请求头。
+
+```js
+const probe = await client.downloads.probe({ url });
+const task = await client.downloads.start({
+  url,
+  filename: probe.filename,
+  concurrency: probe.mode === 'segmented' ? 4 : 1,
+});
+
+const all = await client.downloads.list();
+const current = await client.downloads.get(task.id);
+```
+
+可用接口：
+
+```ts
+client.downloads.probe({ url }): Promise<DownloadProbe>
+client.downloads.pickDirectory(): Promise<{ token, name } | null>
+client.downloads.preferences(): Promise<{ directoryName, directoryAvailable, concurrency }>
+client.downloads.configure({ directoryToken?, concurrency? }): Promise<DownloadPreferences>
+client.downloads.start({ url, filename?, directoryToken?, concurrency? }): Promise<DownloadTask>
+client.downloads.list({ all? }): Promise<DownloadTask[]>
+client.downloads.get(id): Promise<DownloadTask>
+client.downloads.pause(id): Promise<DownloadTask>
+client.downloads.resume(id, { directoryToken? }): Promise<DownloadTask>
+client.downloads.cancel(id): Promise<DownloadTask>
+client.downloads.remove(id): Promise<void>
+client.downloads.reveal(id): Promise<boolean>
+```
+
+服务器先通过 `HEAD` 和 `Range: bytes=0-0` 检测；返回 `206` 且范围完整时使用最多 4 路分片，返回 `200`、`416` 或中途失去 Range 能力时自动回退为单连接。文件不需要分片、未知长度或空文件也走普通下载。单文件上限 20 GB；单个任务的分段连接数只能设为 1–4，默认 4。
+
+任务状态为 `queued / probing / downloading / paused / completed / failed / canceled`，模式为 `segmented / single`。快照只包含任务 ID、所属插件、域名、文件名、目录名称、大小、进度、速度、错误和可用操作，不返回完整 URL、查询参数或本地路径。
+
+任务不依赖插件页面存活：关闭页面不会取消下载；停用调用插件会暂停其活动任务；卸载会删除任务记录和未完成分片，但保留已完成文件。删除已完成任务记录同样不会删除文件。应用重启后，活动任务会自动恢复；若目录身份改变、文件已不可写，或远程 `ETag / Last-Modified / 大小` 改变，任务会暂停并要求重新选择目录或重新创建任务。续传中的分片在 Range 失效时会被丢弃并从普通下载重新开始。
+
+`manage` 插件应先用 `pickDirectory()` 取得不透明目录令牌，再调用 `configure({ directoryToken })` 更新全局默认目录；普通 `use` 插件也可以把同一令牌传给 `start({ directoryToken })` 覆盖单次任务的保存位置。目录令牌只属于取得它的插件，关闭工具视图或停用插件后失效。
+
+插件只应在用户明确发起下载时调用该接口。不要根据不可信网页内容自动批量下载，也不要把带签名的下载地址写入日志、存储或界面；宿主不会向插件返回地址。
 
 ### API 1.3 本地预览
 
