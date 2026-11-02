@@ -6,7 +6,7 @@ import { UpdateService, nativeUpdateAdapter } from '../../desktop/update-service
 const available = { status: 'available', version: '0.2.4', notes: 'latest' };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
-test('download returns immediately, prevents overlapping operations, and automatically installs after preparation', async () => {
+test('download returns immediately, prevents overlapping operations, and waits for an explicit install', async () => {
   const gate = deferred(), states = [], calls = [];
   const service = new UpdateService({
     check: async () => { calls.push('check'); return available; },
@@ -17,14 +17,19 @@ test('download returns immediately, prevents overlapping operations, and automat
   service.check(); await service.pending;
   assert.equal(service.download(), undefined);
   await Promise.resolve();
-  service.check(); service.download();
+  service.check();
+  assert.equal(service.download(), undefined);
   assert.equal(service.state.progress, 25);
   assert.deepEqual(calls, ['check', 'download']);
   gate.resolve(); await service.pending;
+  assert.deepEqual(calls, ['check', 'download']);
+  assert.equal(service.state.status, 'ready');
+  assert.equal(service.state.downloaded, true);
+  assert.ok(states.some(state => state.status === 'extracting'));
+  service.install(); await service.pending;
   assert.deepEqual(calls, ['check', 'download', 'prepared']);
   assert.equal(service.state.status, 'installing');
-  assert.ok(states.some(state => state.status === 'extracting'));
-  service.check(); service.download();
+  service.install(); service.download();
   assert.deepEqual(calls, ['check', 'download', 'prepared']);
 });
 
@@ -55,8 +60,33 @@ test('failed downloads never install, retain the checked version for retry and r
   assert.equal(service.state.total, 0);
   assert.equal(service.state.reusedBytes, 0);
   assert.equal(service.state.fallbackReason, null);
+  assert.equal(service.state.downloaded, false);
+  assert.throws(() => service.install(), /先下载/);
   service.download(); await service.pending;
-  assert.equal(installs, 1); assert.equal(service.state.error, null);
+  assert.equal(installs, 0); assert.equal(service.state.error, null); assert.equal(service.state.status, 'ready');
+  service.install(); await service.pending;
+  assert.equal(installs, 1);
+});
+
+test('failed restarts stay downloaded so the user can retry without another transfer', async () => {
+  let installs = 0;
+  const service = new UpdateService({
+    check: async () => available,
+    download: async () => 'prepared',
+    install: async prepared => {
+      installs++;
+      if (prepared !== 'prepared') throw new Error('安装包无效');
+      if (installs === 1) throw new Error('重启失败');
+    },
+  }, () => {});
+  service.check(); await service.pending;
+  service.download(); await service.pending;
+  service.install(); await service.pending;
+  assert.equal(service.state.status, 'error');
+  assert.equal(service.state.downloaded, true);
+  service.install(); await service.pending;
+  assert.equal(installs, 2);
+  assert.equal(service.state.error, null);
 });
 
 test('native updates verify/download before silent install with forced relaunch, and remove progress subscriptions', async () => {
@@ -91,6 +121,9 @@ test('cleanCache delegates to adapter cleanCache and rejects while download is i
   assert.equal(result.freedBytes, 1024);
 
   service.state.status = 'downloading';
+  await assert.rejects(service.cleanCache(), /更新进行中/);
+  service.state.status = 'ready';
+  service.state.downloaded = true;
   await assert.rejects(service.cleanCache(), /更新进行中/);
 });
 

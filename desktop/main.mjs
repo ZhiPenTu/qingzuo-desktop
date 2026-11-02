@@ -15,6 +15,7 @@ import updater from 'electron-updater';
 const { autoUpdater } = updater;
 import {resolveMarketEntries} from './catalog.mjs';
 import { UpdateService, nativeUpdateAdapter } from './update-service.mjs';
+import { UpdatePreferences } from './update-preferences.mjs';
 import { PluginInstallService } from './plugin-install-service.mjs';
 import { macUpdateAdapter, previousUpdateError } from './mac-update.mjs';
 import {desktopSigningMode} from './distribution.mjs';
@@ -44,7 +45,8 @@ const views = new Map(), owners = new Map(), kernelRequests = new Map(); let ker
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
 let browserResizeState = null;
-let updateService, pluginInstallService;
+let updateService, pluginInstallService, updatePreferences;
+let automaticUpdateTimer = null, automaticUpdateInterval = null, automaticUpdateRunning = false;
 let localPreview = false;
 let migration;
 let batches, proxy, imageEditor, textRuntime, approvals, downloadSources;
@@ -53,6 +55,39 @@ let debugLogEventTimer = null;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
+function stopAutomaticUpdates() {
+  if (automaticUpdateTimer) clearTimeout(automaticUpdateTimer);
+  if (automaticUpdateInterval) clearInterval(automaticUpdateInterval);
+  automaticUpdateTimer = null;
+  automaticUpdateInterval = null;
+}
+async function runAutomaticUpdate() {
+  if (!updatePreferences?.snapshot().autoUpdate || !app.isPackaged || localPreview) return;
+  if (!updateService || automaticUpdateRunning || updateService.pending || updateService.state.downloaded) return;
+  if (['checking', 'downloading', 'extracting', 'installing'].includes(updateService.state.status)) return;
+  automaticUpdateRunning = true;
+  try {
+    updateService.check();
+    await updateService.pending;
+    if (updateService.state.status === 'available' && updatePreferences.snapshot().autoUpdate) {
+      updateService.download();
+      await updateService.pending;
+    }
+  } finally {
+    automaticUpdateRunning = false;
+  }
+}
+function startAutomaticUpdates(delay = 15000) {
+  stopAutomaticUpdates();
+  if (!updatePreferences?.snapshot().autoUpdate || !app.isPackaged || localPreview) return;
+  automaticUpdateTimer = setTimeout(() => {
+    automaticUpdateTimer = null;
+    void runAutomaticUpdate();
+  }, delay);
+  automaticUpdateTimer.unref?.();
+  automaticUpdateInterval = setInterval(() => { void runAutomaticUpdate(); }, 6 * 60 * 60 * 1000);
+  automaticUpdateInterval.unref?.();
+}
 function queueDebugLog(entry) {
   if (!window || window.isDestroyed()) return;
   pendingDebugLogs.push(entry);
@@ -405,15 +440,23 @@ async function performPlatform(method, args) {
   if (method === 'market.install') {
     return pluginInstallService.start(args.id);
   }
-  if (method === 'updates.check' || method === 'updates.download') {
+  if (method === 'updates.check' || method === 'updates.download' || method === 'updates.install') {
     if (localPreview) throw new Error('本地预览版本不连接正式更新，请使用后续经过验收的安装包。');
     if (!app.isPackaged) throw new Error('开发环境不检查安装包更新。');
     if (method === 'updates.check') updateService.check();
-    else updateService.download();
+    else if (method === 'updates.download') updateService.download();
+    else updateService.install();
     return;
   }
   if (method === 'updates.cleanCache') {
     return await updateService.cleanCache();
+  }
+  if (method === 'updates.configure') {
+    const preferences = await updatePreferences.configure({ autoUpdate: args.autoUpdate });
+    changed();
+    if (preferences.autoUpdate) startAutomaticUpdates(0);
+    else stopAutomaticUpdates();
+    return preferences;
   }
   throw new Error('平台操作不受支持。');
 }
@@ -482,7 +525,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (method === 'browser.resize.stop') { stopBrowserResize(); return; }
   if (method === 'browser.hide') { stopBrowserResize(); browserRuntime.hide(); return; }
   if (method === 'browser.bounds') { browserRuntime.bounds(args); return; }
-  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, downloadSource: downloadSources?.snapshot(), debugLog: debugLog.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
+  if (method === 'status') return { version: app.getVersion(), system: { platform: process.platform, arch: process.arch, osRelease: os.release(), electron: process.versions.electron }, kernel: { ready: systems.length === 7, error: kernelError, version: HARNESS_VERSION, systems }, plugins: systems.length === 7 ? await kernelRequest({type:'call',kind:'system',service:'home',method:'list',args:{}}) : (await manager.list()).map(sanitizePlugin), pluginInstalls: pluginInstallService.snapshot(), update: updateService.state, updatePreferences: updatePreferences.snapshot(), downloadSource: downloadSources?.snapshot(), debugLog: debugLog.snapshot(), componentUpdates: { harness: { status: 'bundled', currentVersion: HARNESS_VERSION, candidateVersion: null, progress: 0, transferred: 0, total: 0, error: null, compatibility: 'bundled-with-qingzuo' } }, tabs: [...views.keys()], browser: browserRuntime.status(), migration: await migration.status(manager) };
   if (method === 'migration.dismiss') { await migration.dismiss(); changed(); return; }
   if (method === 'kernel.retry') { await startKernel(); return true; }
   if (method === 'view.open') return openView(args.id, args.settings);
@@ -636,6 +679,8 @@ async function main() {
 await app.whenReady();
 migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
+updatePreferences = new UpdatePreferences({ root: app.getPath('userData') });
+await updatePreferences.initialize();
 debugLog = new DebugLogService({
   root: app.getPath('userData'),
   onEntry: queueDebugLog,
@@ -767,11 +812,13 @@ window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(
 window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('commerce://shell/') && !(process.env.COMMERCE_DEV_URL && url.startsWith(process.env.COMMERCE_DEV_URL + '/'))) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); } });
 protocol.handle('commerce', async request => { try { const url = new URL(request.url); if (url.hostname !== 'shell') return new Response('Forbidden', { status: 403 }); return resourceResponse(await confinedPath(path.join(root, 'dist'), decodeURIComponent(url.pathname.slice(1)))); } catch { return new Response('Not found', { status: 404 }); } });
 await window.loadURL(process.env.COMMERCE_DEV_URL || 'commerce://shell/index.html');
+startAutomaticUpdates();
 void startKernel().catch(error => { kernelError = error.message; changed(); });
 app.on('before-quit', event => {
   if (quitReady) return;
   event.preventDefault();
   if (quitting) return;
+  stopAutomaticUpdates();
   quitting = true;
   const cancelDownload = ['downloading', 'extracting'].includes(updateService.state.status) && updateService.adapter.cancel;
   if (cancelDownload) updateService.adapter.cancel();

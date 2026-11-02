@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.6.16，插件 API / SDK 1.6.1（运行时 API 仍为 1.6.0）。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.6.18，插件 API / SDK 1.6.1（运行时 API 仍为 1.6.0）。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -9,6 +9,12 @@
 功能分支基于 `origin/develop` 创建，命名为 `codex/<type>-<name>`，PR 合入 `develop`。发版时在 `codex/release-vX.Y.Z` 上更新版本号与发布日志并合入 `develop`，随后由 `develop` 合入 `main`，再在 `main` 上打版本标签触发自动发版。紧急修复从 `main` 切出 `codex/hotfix-*` 分支，合入 `main` 后必须同步回合入 `develop`。
 
 官网 `site/` 随 `main` 部署，`develop` 上的站点改动不会单独上线。
+
+## 自动版本更新
+
+合并入 `develop` 会触发 `Auto version` 工作流，把底座补丁号 +1，并同步 `package.json`、`package-lock.json` 与本文件首行的底座版本；更新以 `codex/auto-version-vX.Y.Z` 分支自动提交并合回 `develop`。主干部版本由 `develop` 合入 `main` 时一并带入，主干版本号因此始终与主干内容一致，发布时按主干当前版本打标签即可。
+
+发版 PR（`codex/release-*`）自行指定正式版本号与 `docs/releases/vX.Y.Z.md`，自动递增不会覆盖它。版本号必须是 X.Y.Z 正式版本，递增逻辑见 `scripts/auto-version.mjs`。
 
 ## 底座
 

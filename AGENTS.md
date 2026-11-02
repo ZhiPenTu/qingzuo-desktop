@@ -98,7 +98,7 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 
 底座的正式发布遵循统一闭环机制：
 
-1. **发布准备 PR**：在基于 `origin/develop` 的 `codex/release-vX.Y.Z` 分支上同步更新 `package.json`、`package-lock.json` 与 `docs/release-guide.md` 中的版本号，并在 `docs/releases/vX.Y.Z.md` 中编写发布日志。完成本地验证后提交发布 PR，合入 `develop`。
+1. **发布准备 PR**：在基于 `origin/develop` 的 `codex/release-vX.Y.Z` 分支上指定正式版本号，同步更新 `package.json`、`package-lock.json` 与 `docs/release-guide.md`，并在 `docs/releases/vX.Y.Z.md` 中编写发布日志。发版 PR 的版本号不会被自动递增覆盖。完成本地验证后提交发布 PR，合入 `develop`。
 2. **流水线验收**：PR 触发 `Validate commerce desktop` 工作流，验证双平台契约与打包能力。
 3. **主干合并**：发布 PR 合入 `develop` 且验收通过后，从 `develop` 创建 PR 合入 `main`。`Branch policy` 会校验版本号一致且不允许回退。
 4. **推送版本 Tag**：在最新的 `main` 提交上创建带注释的 Git 标签并推送到 GitHub：
@@ -122,6 +122,12 @@ codex/hotfix-* ─────PR──> main ──PR(回合)──> develop
 ```
 
 `main` 与 `develop` 均启用 GitHub 分支保护：禁止直接推送与强制推送，必须经 PR 合并，且 `Branch policy` 检查为必需项。校验逻辑见 `.github/workflows/branch-policy.yml`。
+
+### 自动版本更新
+
+合并入 `develop` 会触发 `Auto version` 工作流：补丁号 +1，同步 `package.json`、`package-lock.json` 与 `docs/release-guide.md` 的底座版本，再以 `codex/auto-version-vX.Y.Z` 分支自动提交并合回 `develop`。主干部版本由 `develop` → `main` 的 PR 一并带入，因此主干版本号始终与其内容一致，打标签发布时不再需要手工补版本号。版本递增逻辑见 `scripts/auto-version.mjs`。
+
+发版 PR（`codex/release-*`）不参与自动递增：它自行指定正式版本号并编写 `docs/releases/vX.Y.Z.md`，自动流程既不覆盖也不回退该版本号。
 
 ## 用户可见文案
 
