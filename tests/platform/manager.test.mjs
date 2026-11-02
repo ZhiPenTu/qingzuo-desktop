@@ -163,6 +163,22 @@ test('corrupt installed state does not prevent bundled tools from starting',asyn
  try {const manager=new PluginManager(path.join(root,'plugins'),path.join(root,'bundled'));await manager.initialize();assert.deepEqual(await manager.list(),[]);await manager.install(archive());assert.equal((await manager.list()).length,1);}finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('bundled identity survives a later installation', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-bundled-'));
+  const bundled = path.join(root, 'bundled'), folder = path.join(bundled, 'local.fixture');
+  await mkdir(folder, { recursive: true });
+  await writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: 'fixture', version: '0.1.0', commerce: { manifestVersion: 1, id: 'local.fixture', title: 'Fixture', description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {} } }));
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  try {
+    await manager.initialize();
+    assert.equal((await manager.list())[0].bundled, true);
+    await manager.install(archive('0.2.0'));
+    const installed = await manager.get('local.fixture');
+    assert.equal(installed.source, 'local');
+    assert.equal(installed.bundled, true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('uninstalling and reinstalling a plugin with services restores its descriptor without requiring app restart', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-reinstall-')); await mkdir(path.join(root, 'bundled'));
   const manager = new PluginManager(path.join(root, 'plugins'), path.join(root, 'bundled'));

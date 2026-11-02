@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginCard, formatDownloadCount, type Plugin } from './PluginCard';
+import { PluginCard, formatDownloadCount, pluginGroup, pluginOriginLabel, pluginPublisher, type Plugin } from './PluginCard';
 import type { PluginInstallState } from './commerce';
 
 const entry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', version: '0.2.0', category: '标签与文档' };
@@ -9,6 +9,18 @@ const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallS
 
 describe('PluginCard installation state', () => {
   afterEach(cleanup);
+
+  it('classifies bundled tools separately from official and unofficial community plugins', () => {
+    expect(pluginGroup(entry)).toBe('community');
+    expect(pluginGroup(entry, { source: 'bundled' })).toBe('builtin');
+    expect(pluginGroup(entry, { source: 'market', bundled: true })).toBe('builtin');
+    expect(pluginPublisher(entry)).toBe('official');
+    expect(pluginPublisher({ ...entry, id: 'community.tool' })).toBe('unofficial');
+    expect(pluginPublisher({ ...entry, id: 'community.verified', official: true })).toBe('official');
+    expect(pluginOriginLabel(entry)).toBe('社区插件 · 官方插件');
+    expect(pluginOriginLabel({ ...entry, id: 'community.tool' })).toBe('社区插件 · 非官方插件');
+    expect(pluginOriginLabel(entry, { source: 'bundled' })).toBe('内置插件');
+  });
 
   it('offers upgrades and prevents catalog downgrades', () => {
     const props = { entry, installed, mode: 'catalog' as const, disabled: false, ready: true, onOpen: vi.fn(), onAction: vi.fn() };
@@ -86,6 +98,11 @@ describe('PluginCard installation state', () => {
     expect(screen.getByLabelText('累计下载 31,000 次').textContent).toContain('31K');
     rerender(<PluginCard entry={{ ...entry, stats: { downloads: 0 } }} mode="catalog" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
     expect(screen.queryByLabelText(/累计下载/)).toBeNull();
+  });
+
+  it('shows the market origin on catalog cards', () => {
+    render(<PluginCard entry={{ ...entry, id: 'community.tool' }} mode="catalog" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(screen.getByText('社区插件 · 非官方插件')).toBeTruthy();
   });
 
   it('disables install and update actions when the release source is unavailable', () => {
