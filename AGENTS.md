@@ -70,6 +70,18 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 - 保持用户数据目录、应用标识、插件 ID、更新组件格式和兼容版本契约；需要改变这些内容时，先阅读 `docs/release-guide.md`、`docs/plugin-development.md` 和相关迁移测试。
 - SDK 或插件 API 的改动要同步 `packages/plugin-sdk/index.d.ts`、运行时实现、manifest 校验、测试和文档。插件市场发布仍在独立仓库完成。
 
+## 项目子代理
+
+仓库在 `.codex/agents/` 提供项目级 Codex 子代理，在 `.agents/skills/` 提供对应技能。代理默认只读或验证，不自动修改产品代码、不推送、不发版。
+
+- `repo-architect`：规划、架构定位、信任边界和跨进程数据流调查。
+- `electron-verifier`：Vite、Electron、Harness、沙箱和平台测试验证。
+- `plugin-sdk-reviewer`：Plugin SDK、manifest、权限、Broker 和插件兼容性审查。
+- `release-manager`：分支流向、版本、发布日志、CI 和发布边界检查。
+- `ui-reviewer`：按设计规范审查主界面和插件 UI，并收集界面证据。
+
+任务可以独立并行时，优先把只读调查、测试和审查交给对应代理；同一批文件的写操作由父代理统一协调。子代理继承父会话的模型、权限、provider 和 MCP 服务器，不在代理文件中单独配置 MCP。需要公开代码或文档研究时使用共享技能 `$mcp-evidence`（`magpie`）；`magpie` 不可达时记录降级并回退到本地文档、`rg` 或 `gh`。界面截图、控制台和浏览器证据使用项目内 Playwright，不依赖 MCP。完整职责、技能映射和调用示例见 `docs/project-agents.md`。
+
 ## PR 提交与代码审查规范
 
 所有变更均需通过 GitHub Pull Request 提交合并，确保主干可追溯且通过自动化验证：
