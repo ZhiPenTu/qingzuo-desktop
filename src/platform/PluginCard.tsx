@@ -34,6 +34,7 @@ interface PluginCardProps {
 export function PluginCard({ entry, installed, mode, disabled, ready, install, onOpen, onAction }: PluginCardProps) {
   const isLabel = entry.id === 'official.labeledit';
   const isCutout = entry.id === 'official.removebg';
+  const isCredentials = entry.id === 'official.credentials';
   const Icon = isLabel ? FileText : isCutout ? Image : Puzzle;
   const iconSrc = resolvePluginIcon(entry.id, entry.icon ?? installed?.icon);
   // A stale catalog must not offer a downgrade of a newer bundled/local tool.
@@ -73,7 +74,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {entry.sourceUnavailable ? <p role="status">暂时无法获取最新版本，请稍后重试。</p> : null}
       {notesOpen && entry.releaseNotes ? <div className="plugin-notes-panel" id={notesId}><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></div> : null}
       {mode === 'catalog' ? <>
-        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : null}
+        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : isCredentials ? <p className="plugin-capabilities">统一管理各工具的 AppID 与密钥</p> : null}
         <span className="plugin-market-meta">
           <span className="plugin-version">v{entry.version}</span>
           {downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}

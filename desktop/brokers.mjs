@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {secureRequest} from './network-transport.mjs';
 import { allowedHeaderName, allowedNetwork } from './security.mjs';
+import { CREDENTIAL_GRANT_ERROR, canUseCredentialVault } from './credential-policy.mjs';
+import { RECORD_ID } from './credential-vault.mjs';
 
 export function resolveSaveExtension(name, mime) {
   const mimeMap = {
@@ -168,11 +170,32 @@ export class FileBroker {
   async revoke(id) { this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1); const pending = []; for (const [key, value] of this.tokens) if (value.owner === id) { this.tokens.delete(key); pending.push(rm(value.filename, { force: true })); } await Promise.all(pending); }
 }
 export class NetworkBroker {
-  constructor(files, credentials, request = secureRequest) { this.files = files; this.credentials = credentials; this.request = request; this.tasks = new Map(); }
+  constructor(files, credentials, request = secureRequest, vault = null) { this.files = files; this.credentials = credentials; this.request = request; this.vault = vault; this.tasks = new Map(); }
+  async assertCredential(plugin, credential) {
+    if (typeof credential === 'string') {
+      if (!(plugin.permissions.credentials ?? []).includes(credential)) throw new Error('凭据未授权。');
+      return;
+    }
+    if (!credential || typeof credential !== 'object' || Array.isArray(credential)
+      || Object.keys(credential).length !== 1 || typeof credential.record !== 'string' || !RECORD_ID.test(credential.record)) {
+      throw new Error('凭据引用无效。');
+    }
+    if (!canUseCredentialVault(plugin) || !this.vault) throw new Error('凭据未授权。');
+    await this.vault.accessOf(credential.record);
+    if (!this.vault.isGranted(plugin.id, credential.record)) throw new Error(CREDENTIAL_GRANT_ERROR);
+  }
+  async secretFor(plugin, credential) {
+    if (typeof credential === 'string') {
+      const secret = await this.credentials.get(plugin.id, credential);
+      if (!secret) throw new Error('请先配置服务凭据。');
+      return secret;
+    }
+    return this.vault.secret(credential.record);
+  }
   async sign(plugin, options = {}) {
     const algorithm = options.algorithm;
     if (!['hmac-sha256', 'sha256'].includes(algorithm)) throw new Error('签名算法不受支持。');
-    if (typeof options.credential !== 'string' || !(plugin.permissions.credentials ?? []).includes(options.credential)) throw new Error('凭据未授权。');
+    await this.assertCredential(plugin, options.credential);
     if (typeof options.message !== 'string' || !options.message || options.message.length > 64 * 1024) throw new Error('签名内容无效。');
     const digest = value => ({ algorithm, encoding: 'base64', digest: value });
     if (algorithm === 'sha256') { if (options.keySuffix !== undefined) throw new Error('签名内容无效。'); return digest(createHash('sha256').update(options.message, 'utf8').digest('base64')); }
@@ -180,18 +203,18 @@ export class NetworkBroker {
     // travels in the request, so the suffix is appended inside the host.
     const suffix = options.keySuffix ?? '';
     if (typeof suffix !== 'string' || suffix.length > 32 || /[^\x21-\x7e]/.test(suffix)) throw new Error('签名附加内容无效。');
-    const secret = await this.credentials.get(plugin.id, options.credential);
-    if (!secret) throw new Error('请先配置服务凭据。');
+    const secret = await this.secretFor(plugin, options.credential);
     return digest(createHmac('sha256', secret + suffix).update(options.message, 'utf8').digest('base64'));
   }
   async call(plugin, options) {
     const url = allowedNetwork(plugin, options.url);
     if (url.href !== 'https://api.remove.bg/v1.0/removebg' || !options.fileToken) return this.generic(plugin, options, url);
     // v1's online capability is deliberately bounded to the documented upload API.
-    if (url.href !== 'https://api.remove.bg/v1.0/removebg' || !(plugin.permissions.credentials ?? []).includes(options.credential)) throw new Error('服务或凭据未授权。');
+    if (url.href !== 'https://api.remove.bg/v1.0/removebg') throw new Error('服务或凭据未授权。');
+    await this.assertCredential(plugin, options.credential);
     const item = await this.files.get(plugin, options.fileToken);
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(item.mime) || item.size > 22 * 1024 * 1024) throw new Error('请选择小于 22 MB 的 JPG、PNG 或 WebP 图片。');
-    const secret = await this.credentials.get(plugin.id, options.credential); if (!secret) throw new Error('请先配置 remove.bg API 密钥。');
+    const secret = await this.secretFor(plugin, options.credential); if (!secret) throw new Error('请先配置 remove.bg API 密钥。');
     const key = plugin.id + ':' + (options.taskId || randomUUID()); if (this.tasks.has(key)) throw new Error('任务已在运行。');
     const controller = new AbortController(); this.tasks.set(key, controller); const timer = setTimeout(() => controller.abort(), 120000);
     try {
@@ -243,8 +266,8 @@ export class NetworkBroker {
     }
     if(options.json!==undefined) {body=JSON.stringify(options.json);if(body.length>4*1024*1024||method==='GET')throw new Error('请求内容无效或过大。');if(!Object.keys(headers).some(name=>name.toLowerCase()==='content-type'))headers['Content-Type']='application/json';}
     if(options.credential) {
-      if(!(plugin.permissions.credentials ?? []).includes(options.credential))throw new Error('凭据未授权。');
-      const secret=await this.credentials.get(plugin.id,options.credential);if(!secret)throw new Error('请先配置服务凭据。');
+      await this.assertCredential(plugin, options.credential);
+      const secret=await this.secretFor(plugin,options.credential);
       if(options.credentialHeader==='X-Api-Key')headers['X-Api-Key']=secret;else headers.Authorization='Bearer '+secret;
     }
     const key=plugin.id+':'+(options.taskId||randomUUID());if(this.tasks.has(key))throw new Error('任务已在运行。');

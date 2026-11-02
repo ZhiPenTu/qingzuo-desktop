@@ -142,8 +142,14 @@ test('path traversal and symlink package entries are rejected before extraction'
   } finally {await rm(root,{recursive:true,force:true});}
 });
 test('incompatible APIs, reserved identifiers and unsupported platforms are rejected', () => {
-  for (const commerce of [{ api: '^2' }, { id: 'system.market' }, { ui: '../index.html' }, { icon: 'https://example.com/icon.png' }, { icon: 'data:image/png;base64,AAAA' }, { permissions: { network: ['http://localhost'] } }, { backend: { type: 'executable', entry: {} } }]) {
+  for (const commerce of [{ api: '^2' }, { id: 'system.market' }, { ui: '../index.html' }, { icon: 'https://example.com/icon.png' }, { icon: 'data:image/png;base64,AAAA' }, { permissions: { network: ['http://localhost'] } }, { permissions: { credentialVault: 'admin' } }, { backend: { type: 'executable', entry: {} } }]) {
     const zip = new AdmZip(archive('0.1.0', commerce)); assert.throws(() => validateManifest(JSON.parse(zip.readAsText('package.json'))));
+  }
+});
+test('shared credential permissions accept only use or manage', () => {
+  for (const value of ['use', 'manage']) {
+    const zip = new AdmZip(archive('0.1.0', { permissions: { credentialVault: value } }));
+    assert.equal(validateManifest(JSON.parse(zip.readAsText('package.json'))).permissions.credentialVault, value);
   }
 });
 test('missing service dependencies prevent activation and preserve installed tools', async () => {

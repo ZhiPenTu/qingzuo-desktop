@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, session, utilityProcess, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, dialog, ipcMain, protocol, safeStorage, session, utilityProcess, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -10,6 +10,9 @@ import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
 import { Credentials } from './credentials.mjs';
+import { createSafeStorageCodec } from './credential-codec.mjs';
+import { CredentialVault } from './credential-vault.mjs';
+import { CREDENTIAL_MANAGE_SOURCE_ERROR, CREDENTIAL_VISIBLE_ERROR, canManageCredentialVault, canRequestCredentialGrant, canUseCredentialVault, credentialVaultPermission } from './credential-policy.mjs';
 import { PluginStorage } from './plugin-storage.mjs';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
@@ -40,7 +43,7 @@ app.setPath('userData', previewDistribution?.preview && !app.commandLine.hasSwit
 const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let window, manager, workers, files, credentials, network, host, browserRuntime, storage, debugLog, quitting = false, quitReady = false, shutdownPromise, hostReady;
+let window, manager, workers, files, credentials, credentialVault, network, host, browserRuntime, storage, debugLog, quitting = false, quitReady = false, shutdownPromise, hostReady;
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, surfaceEpoch = 0, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -387,6 +390,80 @@ async function catalog(signal, id) {
   });
   return { items, configured: true };
 }
+let credentialDialog = Promise.resolve();
+function confirmVaultGrant(plugin, record) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  const run = () => dialog.showMessageBox(window, {
+    type: 'question',
+    buttons: ['不允许', '允许'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '使用共享凭证',
+    message: '「' + plugin.title + '」请求使用凭证「' + record.label + '」',
+    detail: 'AppID：' + record.appId + '\n环境：' + (record.environment === 'sandbox' ? '沙箱' : '生产')
+      + '\n\n允许后，这个工具可以在你撤销前使用该凭证的密钥；密钥不会显示给工具。',
+  });
+  credentialDialog = credentialDialog.catch(() => {}).then(run);
+  return credentialDialog.then(result => result.response === 1);
+}
+async function credentialRecords(action, plugin, args) {
+  await credentialVault.ready;
+  const requireManage = () => {
+    if (credentialVaultPermission(plugin) !== 'manage') throw new Error('凭据库未授权。');
+    if (!canManageCredentialVault(plugin)) throw new Error(CREDENTIAL_MANAGE_SOURCE_ERROR);
+  };
+  if (['create', 'update', 'remove', 'grants', 'revokeGrant'].includes(action)) requireManage();
+  if (action === 'list') return canManageCredentialVault(plugin) ? credentialVault.list() : credentialVault.listGranted(plugin.id);
+  if (action === 'browse') return credentialVault.browse(plugin.id);
+  if (action === 'request') {
+    if (!canRequestCredentialGrant(plugin, visible)) throw new Error(CREDENTIAL_VISIBLE_ERROR);
+    const record = await credentialVault.get(args.id);
+    if (credentialVault.isGranted(plugin.id, record.id)) return credentialVault.accessOf(record.id);
+    if (!(await confirmVaultGrant(plugin, record))) throw new Error('已取消凭证授权。');
+    const access = await credentialVault.grant(plugin.id, record.id);
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已授权共享凭证 ' + record.id });
+    return access;
+  }
+  if (action === 'revoke') {
+    await credentialVault.revoke(plugin.id, args.id);
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已撤销共享凭证 ' + String(args.id) });
+    return;
+  }
+  if (action === 'create') {
+    const record = await credentialVault.create({ label: args.label, appId: args.appId, secretKey: args.secretKey, environment: args.environment });
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已新建共享凭证 ' + record.id });
+    return record;
+  }
+  if (action === 'update') {
+    const record = await credentialVault.update(args.id, { label: args.label, appId: args.appId, secretKey: args.secretKey, environment: args.environment });
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已更新共享凭证 ' + record.id });
+    return record;
+  }
+  if (action === 'remove') {
+    await credentialVault.remove(args.id);
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已删除共享凭证 ' + String(args.id) });
+    return;
+  }
+  if (action === 'grants') {
+    const grants = await credentialVault.grants(args.id);
+    const titles = new Map((await manager.list()).map(item => [item.id, item.title]));
+    return grants.map(grant => ({ ...grant, title: titles.get(grant.pluginId) ?? grant.pluginId }));
+  }
+  if (action === 'revokeGrant') {
+    await credentialVault.revokeGrant(args.id, args.pluginId);
+    debugLog?.record({ scope: 'credential', source: plugin.id, level: 'info', message: '已撤销共享凭证授权 ' + String(args.id) });
+    return;
+  }
+  throw new Error('凭据库接口无效。');
+}
+async function purgeLegacyCredentials() {
+  try {
+    await credentials.purgeLegacy('system.ai', ['external', 'google-image', 'openai-image']);
+    for (const plugin of await manager.list()) await credentials.purgeLegacy(plugin.id, plugin.permissions?.credentials ?? []);
+  } catch {
+    debugLog?.record({ scope: 'credential', source: 'vault', level: 'warn', message: '旧版明文凭据清理未完成。' });
+  }
+}
 async function systemInvoke(service, method, args = {}) {
   if (service === 'ai') {
     if (method === 'models') return proxy.models();
@@ -412,6 +489,11 @@ async function systemInvoke(service, method, args = {}) {
     if (!caller.enabled || caller.missing.length || !provider.enabled || provider.missing.length || !(provider.services?.provides ?? []).includes(args.service) || ![...(caller.services?.provides ?? []), ...(caller.services?.requires ?? [])].includes(args.service)) throw new Error('服务调用未授权。');
     return (await workers.start(provider, caller.id)).call(args.method, args.args);
   }
+  if (service === 'credentials' && method.startsWith('records.')) {
+    const plugin = await manager.get(args.owner);
+    if (!plugin?.enabled || plugin.missing?.length || !canUseCredentialVault(plugin)) throw new Error('凭据库未授权。');
+    return credentialRecords(method.slice('records.'.length), plugin, args);
+  }
   if (service === 'credentials' && ['set','status','clear'].includes(method)) {
     const plugin = await manager.get(args.id); if (!plugin.enabled || !(plugin.permissions.credentials ?? []).includes(args.name)) throw new Error('凭据未授权。');
     return credentials[method](args.id,args.name,args.value);
@@ -428,7 +510,7 @@ async function performPlatform(method, args) {
     if ((manifest.permissions.browser ?? []).includes('detect')) browserAccess.push('识别页面中的媒体');
     if ((manifest.permissions.browser ?? []).includes('download')) browserAccess.push('下载媒体');
     if ((manifest.permissions.browser ?? []).includes('automate')) browserAccess.push('读取并操作指定网站页面');
-    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\n共享凭证：' + (manifest.permissions.credentialVault === 'manage' ? '管理（仅市场插件可用）' : manifest.permissions.credentialVault === 'use' ? '引用' : '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
     pluginInstallService.assertAvailable(manifest.id);
     await manager.install(bytes); return;
   }
@@ -631,6 +713,10 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
     }
     throw new Error('插件存储接口无效。');
   }
+  if (method.startsWith('credentials.records.')) {
+    if (!canUseCredentialVault(plugin)) throw new Error('凭据库未授权。');
+    return kernelRequest({type:'call',kind:'system',service:'credentials',method:method.slice(12),args:{...args,owner:id}});
+  }
   if (method.startsWith('credentials.')) {
     if (!(plugin.permissions.credentials ?? []).includes(args.name)) throw new Error('凭据未授权。');
     return kernelRequest({type:'call',kind:'system',service:'credentials',method:method.slice(12),args:{...args,id}});
@@ -689,13 +775,19 @@ debugLog = new DebugLogService({
 await debugLog.initialize();
 downloadSources = new DownloadSourceService({ root: app.getPath('userData'), changed });
 await downloadSources.initialize();
-credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':', path.join(app.getPath('userData'), 'credentials-vault.json'));
+credentials = new Credentials(launcher, 'profile.' + createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0,16) + ':', path.join(app.getPath('userData'), 'credentials-vault.json'), createSafeStorageCodec(safeStorage));
+credentialVault = new CredentialVault({
+  root: app.getPath('userData'),
+  credentials,
+  log: message => debugLog?.record({ scope: 'credential', source: 'vault', level: 'warn', message }),
+});
+await credentialVault.initialize();
 storage = new PluginStorage(path.join(app.getPath('userData'), 'plugin-storage'));
 await storage.initialize();
 files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog, { persistent: storage });
 // Plugin end-to-end tests point fixed platform hosts at a local fixture server.
 // Packaged builds always use the pinned public-address transport.
-network = new NetworkBroker(files, credentials, testRoutedRequest({ packaged: app.isPackaged, value: process.env.COMMERCE_TEST_NETWORK_ROUTES }));
+network = new NetworkBroker(files, credentials, testRoutedRequest({ packaged: app.isPackaged, value: process.env.COMMERCE_TEST_NETWORK_ROUTES }), credentialVault);
 await files.initialize();
 const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
 proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initialize();
@@ -745,11 +837,13 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
   probe: async plugin => { if (plugin.backend) { await workers.start(plugin); await workers.stop(plugin.id); } },
   forget: async plugin => {
     for (const name of plugin.permissions.credentials ?? []) await credentials.clear(plugin.id, name);
+    await credentialVault.revokePlugin(plugin.id).catch(error => console.error('凭证授权清理失败：', error.message));
     await storage?.clear(plugin.id).catch(error => console.error('插件存储清理失败：', error.message));
     await session.fromPartition('persist:commerce-' + plugin.id).clearStorageData();
   },
 });
 await manager.initialize();
+await purgeLegacyCredentials();
 const pluginFinalizations = new Map();
 async function finalizePlugin(id, notify) {
   const { version, restoring } = pluginFinalizations.get(id);
