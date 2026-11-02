@@ -174,8 +174,10 @@ test('auto version workflow bumps on develop merges and never overrides a releas
  assert.match(workflow.jobs.bump.if,/github\.event\.pull_request\.merged == true/);
  assert.match(workflow.jobs.bump.if,/codex\/release-/);
  assert.match(workflow.jobs.bump.if,/codex\/auto-version-/);
- assert.deepEqual(workflow.permissions,{contents:'write','pull-requests':'write'});
+ assert.deepEqual(workflow.permissions,{'actions':'write',contents:'write','pull-requests':'write'});
  const steps=workflow.jobs.bump.steps.map((step)=>step.run||'').join('\n');
  assert.match(steps,/scripts\/auto-version\.mjs/);
  assert.match(steps,/gh pr create --base develop/);
+ assert.match(steps,/actions\/runs\/\$run\/approve/);
+ assert.match(steps,/\$\{conclusion\^\^\}.*== "SUCCESS"/);
 });
