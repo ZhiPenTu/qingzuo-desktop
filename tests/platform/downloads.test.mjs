@@ -352,8 +352,13 @@ test('tasks recover after an application restart and preserve downloaded offsets
   const directory = path.join(root, 'output');
   await mkdir(directory);
   const server = fixtureServer(bytes, { minimumSegmentBytes: 1, delayMs: 2, chunkSize: 1024 });
-  context.after(async () => { await rm(root, { recursive: true, force: true }); });
-  let first = new Downloads(path.join(root, 'state'), {
+  let first = null, second = null;
+  context.after(async () => {
+    await second?.shutdown().catch(() => {});
+    await first?.shutdown().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
+  first = new Downloads(path.join(root, 'state'), {
     defaultDirectory: directory,
     dialog: { showOpenDialog: async () => ({ canceled: true }) },
     request: server.request,
@@ -376,7 +381,7 @@ test('tasks recover after an application restart and preserve downloaded offsets
   await first.shutdown();
   const persisted = JSON.parse(await readFile(path.join(root, 'state/state.json'), 'utf8')).tasks[0];
   assert.equal(persisted.status, 'queued');
-  const second = new Downloads(path.join(root, 'state'), {
+  second = new Downloads(path.join(root, 'state'), {
     defaultDirectory: directory,
     dialog: { showOpenDialog: async () => ({ canceled: true }) },
     request: server.request,
@@ -384,12 +389,63 @@ test('tasks recover after an application restart and preserve downloaded offsets
     progressPersistMs: 0,
     freeSpace: async () => 1024 ** 3,
   });
-  context.after(async () => { await second.shutdown().catch(() => {}); });
   await second.initialize();
   await second.resumePending();
   const completed = await waitFor(second, owner, started.id, ['completed', 'paused', 'failed'], 15000);
   assert.equal(completed.status, 'completed');
   assert.deepEqual(await readFile(path.join(directory, completed.filename)), bytes);
+});
+
+test('restart restores tasks whose Windows directory identity exceeds safe integers', async context => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-downloads-identity-'));
+  const directory = path.join(root, 'output');
+  const stateRoot = path.join(root, 'state');
+  await mkdir(directory);
+  await mkdir(stateRoot);
+  const id = '11111111-1111-4111-8111-111111111111';
+  await writeFile(path.join(stateRoot, 'state.json'), JSON.stringify({
+    schemaVersion: 1,
+    preferences: { directoryPath: directory, directoryName: 'output', concurrency: 4 },
+    tasks: [{
+      id,
+      ownerId: 'local.caller',
+      ownerTitle: '调用工具',
+      url: 'https://downloads.example/identity.bin',
+      directoryPath: directory,
+      directoryDev: '281474976710656',
+      directoryIno: '18446744073709551615',
+      status: 'paused',
+      mode: 'single',
+      concurrency: 4,
+      hostname: 'downloads.example',
+      filename: 'identity.bin',
+      requestedFilename: 'identity.bin',
+      mime: 'application/octet-stream',
+      total: 10,
+      transferred: 0,
+      segments: [],
+      supportsRange: false,
+      remoteKnown: true,
+      resetRequired: false,
+      etag: null,
+      lastModified: null,
+      error: null,
+      createdAt: 1,
+      updatedAt: 1,
+      completedAt: null,
+    }],
+  }));
+  const downloads = new Downloads(stateRoot, {
+    defaultDirectory: directory,
+    dialog: { showOpenDialog: async () => ({ canceled: true }) },
+    request: async () => new Response(null, { status: 500 }),
+  });
+  await downloads.initialize();
+  context.after(async () => {
+    await downloads.shutdown().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
+  assert.equal((await downloads.get(plugin(), { id })).filename, 'identity.bin');
 });
 
 test('changed ETag pauses recovery instead of mixing two remote files', async context => {
@@ -398,8 +454,13 @@ test('changed ETag pauses recovery instead of mixing two remote files', async co
   const directory = path.join(root, 'output');
   await mkdir(directory);
   const server = fixtureServer(bytes, { delayMs: 1, chunkSize: 1024 });
-  context.after(async () => { await rm(root, { recursive: true, force: true }); });
-  const first = new Downloads(path.join(root, 'state'), {
+  let first = null, second = null;
+  context.after(async () => {
+    await second?.shutdown().catch(() => {});
+    await first?.shutdown().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
+  first = new Downloads(path.join(root, 'state'), {
     defaultDirectory: directory,
     dialog: { showOpenDialog: async () => ({ canceled: true }) },
     request: server.request,
@@ -413,7 +474,7 @@ test('changed ETag pauses recovery instead of mixing two remote files', async co
   await delay(20);
   await first.shutdown();
   server.setEtag('"fixture-v2"');
-  const second = new Downloads(path.join(root, 'state'), {
+  second = new Downloads(path.join(root, 'state'), {
     defaultDirectory: directory,
     dialog: { showOpenDialog: async () => ({ canceled: true }) },
     request: server.request,
@@ -421,7 +482,6 @@ test('changed ETag pauses recovery instead of mixing two remote files', async co
     progressPersistMs: 0,
     freeSpace: async () => 1024 ** 3,
   });
-  context.after(async () => { await second.shutdown().catch(() => {}); });
   await second.initialize();
   await second.resumePending();
   const paused = await waitFor(second, owner, started.id, ['paused', 'failed']);

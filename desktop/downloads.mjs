@@ -58,6 +58,11 @@ function integer(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function fileIdentity(value) {
+  if (typeof value === 'string' && /^\d+$/.test(value)) return value;
+  return integer(value) ? String(value) : null;
+}
+
 function parseLength(value) {
   if (value === null || value === undefined || value === '') return null;
   if (!/^\d+$/.test(value)) return null;
@@ -245,7 +250,7 @@ export class Downloads {
   #restoreTask(value) {
     if (!value || typeof value !== 'object' || !validTaskId(value.id) || typeof value.ownerId !== 'string' || !value.ownerId
       || typeof value.url !== 'string' || typeof value.directoryPath !== 'string' || !path.isAbsolute(value.directoryPath)
-      || !integer(value.directoryDev) || !integer(value.directoryIno)
+      || fileIdentity(value.directoryDev) === null || fileIdentity(value.directoryIno) === null
       || !validStatus(value.status) || !DOWNLOAD_MODES.includes(value.mode)
       || typeof value.filename !== 'string' && value.filename !== null
       || typeof value.requestedFilename !== 'string' && value.requestedFilename !== null
@@ -277,8 +282,8 @@ export class Downloads {
       url: url.href,
       directoryPath: value.directoryPath,
       directoryName: directoryDisplayName(value.directoryPath),
-      directoryDev: value.directoryDev,
-      directoryIno: value.directoryIno,
+      directoryDev: fileIdentity(value.directoryDev),
+      directoryIno: fileIdentity(value.directoryIno),
       status: value.status,
       mode: value.mode,
       concurrency: Number.isInteger(value.concurrency) && value.concurrency >= 1 && value.concurrency <= 4
@@ -329,10 +334,11 @@ export class Downloads {
 
   async #directory(directoryPath, expected = null) {
     try {
-      const info = await lstat(directoryPath);
+      const info = await lstat(directoryPath, { bigint: true });
       if (info.isSymbolicLink() || !info.isDirectory()) return { ok: false };
-      if (expected && (info.dev !== expected.dev || info.ino !== expected.ino)) return { ok: false };
-      return { ok: true, dev: info.dev, ino: info.ino, name: directoryDisplayName(directoryPath) };
+      const dev = String(info.dev), ino = String(info.ino);
+      if (expected && (dev !== fileIdentity(expected.dev) || ino !== fileIdentity(expected.ino))) return { ok: false };
+      return { ok: true, dev, ino, name: directoryDisplayName(directoryPath) };
     } catch {
       return { ok: false };
     }
@@ -363,11 +369,11 @@ export class Downloads {
     let directoryPath;
     try { directoryPath = await realpath(result.filePaths[0]); }
     catch { throw new DownloadError('下载文件夹不可用，请重新选择。'); }
-    const info = await lstat(directoryPath).catch(() => null);
+    const info = await lstat(directoryPath, { bigint: true }).catch(() => null);
     if (!info?.isDirectory() || info.isSymbolicLink()) throw new DownloadError('下载文件夹不可用，请重新选择。');
     const token = randomUUID();
     const name = directoryDisplayName(directoryPath);
-    this.directories.set(token, { owner: plugin.id, directoryPath, dev: info.dev, ino: info.ino, name });
+    this.directories.set(token, { owner: plugin.id, directoryPath, dev: String(info.dev), ino: String(info.ino), name });
     return { token, name };
   }
 
