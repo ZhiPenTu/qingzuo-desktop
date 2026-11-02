@@ -91,6 +91,14 @@ test('manual build workflow defaults to unsigned, preserves plugin signing and c
  }
 });
 
+test('local Node runtimes resolve to the pinned Node 24 toolchain',async()=>{
+ const packageJSON=JSON.parse(await readFile('package.json','utf8'));
+ const lockfile=JSON.parse(await readFile('package-lock.json','utf8'));
+ assert.equal((await readFile('.node-version','utf8')).trim(),'24');
+ assert.equal(packageJSON.engines?.node,'24.x');
+ assert.equal(lockfile.packages?.['']?.engines?.node,'24.x');
+});
+
 test('unsigned packaging discards ambient certificates and signed packaging restores native verification',async()=>{
  const source={CSC_LINK:'existing-certificate',CSC_KEY_PASSWORD:'password',APPLE_ID:'account',CSC_WIN_LINK:'windows-certificate',CSC_IDENTITY_AUTO_DISCOVERY:'false',COMMERCE_PLUGIN_SIGNING_KEY:'plugin-key'};
  assert.equal(desktopSigningMode({}),'unsigned');

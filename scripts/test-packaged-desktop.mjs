@@ -1,5 +1,5 @@
 import { _electron, expect } from '@playwright/test';
-import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -16,7 +16,10 @@ try {
   await cp(sourceRoot, installedRoot, { recursive: true, verbatimSymlinks: true });
   const executablePath = path.join(installedRoot, path.relative(sourceRoot, sourceExecutable));
   const env = { ...process.env }; delete env.NODE_PATH; delete env.NODE_OPTIONS;
-  app = await _electron.launch({ executablePath, cwd: temporary, env, args: ['--user-data-dir=' + path.join(temporary, 'data')], timeout: 30000 });
+  const data = path.join(temporary, 'data');
+  await mkdir(data, { recursive: true });
+  await writeFile(path.join(data, 'update-settings.json'), JSON.stringify({ schemaVersion: 1, autoUpdate: false }));
+  app = await _electron.launch({ executablePath, cwd: temporary, env, args: ['--user-data-dir=' + data], timeout: 30000 });
   app.process().stderr.on('data', bytes => process.stderr.write(bytes));
   const page = await app.firstWindow();
   await expect.poll(async () => {
@@ -28,7 +31,7 @@ try {
   const status = await page.evaluate(() => window.commerceDesktop.invoke('status'));
   expect(status.update.status).toBe('idle');
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await expect(page.getByText('下载完成后会自动安装并重启，请先保存正在编辑的文件。', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('下载完成后由你选择何时重新启动；正在编辑的文件不会受影响。', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '工具中心', exact: true }).click();
   await mkdir('output/electron-tests', { recursive: true });
   await page.screenshot({ path: 'output/electron-tests/packaged-home.png' });
