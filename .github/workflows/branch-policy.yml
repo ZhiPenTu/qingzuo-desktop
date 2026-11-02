@@ -1,0 +1,120 @@
+name: Branch policy
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  branch-policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 校验分支流向
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "分支流向: ${HEAD} -> ${BASE}"
+          case "${BASE}" in
+            develop)
+              if [[ "${HEAD}" == "main" || "${HEAD}" == "develop" ]]; then
+                echo "::error::功能分支不得与 main 或 develop 直接互提，请基于 origin/develop 创建 codex/<type>-<name> 分支"
+                exit 1
+              fi
+              ;;
+            main)
+              if [[ "${HEAD}" != "develop" ]] && ! printf '%s' "${HEAD}" | grep -Eq '^codex/hotfix-[a-z0-9._/-]+$'; then
+                echo "::error::main 只接受来自 develop 的合并 PR，或来自 codex/hotfix-* 的紧急修复分支；当前来源分支: ${HEAD}"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::不允许的合并目标分支: ${BASE}"
+              exit 1
+              ;;
+          esac
+
+      - name: 校验 PR 标题
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "${TITLE}" | grep -Eq '^(feat|fix|style|chore|docs|test|refactor|perf|build|ci|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+            echo "::error::PR 标题需遵循 Conventional Commits（例如 feat: 说明）；当前标题: ${TITLE}"
+            exit 1
+          fi
+
+      - name: 校验版本号一致性
+        env:
+          BASE: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').version")
+          lock=$(node -p "require('./package-lock.json').version")
+          lock_root=$(node -p "require('./package-lock.json').packages[''].version")
+          if [[ "${pkg}" != "${lock}" || "${pkg}" != "${lock_root}" ]]; then
+            echo "::error::版本号不一致 package.json=${pkg} package-lock.json=${lock} packages['']=${lock_root}"
+            exit 1
+          fi
+          if [[ "${BASE}" == "main" ]]; then
+            base_version=$(git show "${BASE_SHA}:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+            if ! node -e '
+              const [head, base] = process.argv.slice(1).map((value) => value.split(".").map(Number));
+              for (let index = 0; index < 3; index += 1) {
+                const left = head[index] || 0;
+                const right = base[index] || 0;
+                if (left !== right) {
+                  process.exit(left < right ? 1 : 0);
+                }
+              }
+              process.exit(0);
+            ' "${pkg}" "${base_version}"; then
+              echo "::error::合并到 main 不允许版本回退：base=${base_version} head=${pkg}"
+              exit 1
+            fi
+          fi
+          echo "版本号一致: ${pkg}"
+
+      - name: 检查合并冲突标记
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --quiet origin "${BASE_SHA}" || true
+          git fetch --no-tags --quiet origin "pull/${PR_NUMBER}/head" || true
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "无法获取 PR 头提交 ${HEAD_SHA}，跳过冲突标记检查"
+            exit 0
+          fi
+          failed=0
+          while IFS= read -r file; do
+            [[ -n "${file}" ]] || continue
+            case "${file}" in
+              *.png|*.jpg|*.jpeg|*.gif|*.ico|*.webp|*.pdf|*.zip|*.gz|*.exe|*.dmg|*.msi|*.woff|*.woff2|*.ttf|*.otf|*.wasm|*.node) continue ;;
+            esac
+            if git show "${HEAD_SHA}:${file}" 2>/dev/null | grep -nE '^(<<<<<<<|>>>>>>>)( |$)' > /dev/null; then
+              echo "::error::文件 ${file} 仍包含合并冲突标记"
+              failed=1
+            fi
+          done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          exit "${failed}"

@@ -2,6 +2,14 @@
 
 底座版本 0.6.16，插件 API / SDK 1.6.1（运行时 API 仍为 1.6.0）。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
+## 分支与合入流程
+
+底座使用 `main` 与 `develop` 双分支。`develop` 是集成分支，功能、修复和发版准备都先合入这里；`main` 是生产主干，只接受来自 `develop` 的合并 PR。两条分支都启用了 GitHub 分支保护，禁止直接推送，必须经 PR 合并并通过 `Branch policy` 检查。
+
+功能分支基于 `origin/develop` 创建，命名为 `codex/<type>-<name>`，PR 合入 `develop`。发版时在 `codex/release-vX.Y.Z` 上更新版本号与发布日志并合入 `develop`，随后由 `develop` 合入 `main`，再在 `main` 上打版本标签触发自动发版。紧急修复从 `main` 切出 `codex/hotfix-*` 分支，合入 `main` 后必须同步回合入 `develop`。
+
+官网 `site/` 随 `main` 部署，`develop` 上的站点改动不会单独上线。
+
 ## 底座
 
 Node 24 和 Rust 构建工作台、Harness 适配和系统沙箱。npm run platform:prepare 会清理旧生成目录，禁止携带编辑器、OCR 模型或业务 Python 后端。
