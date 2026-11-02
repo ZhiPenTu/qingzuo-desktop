@@ -11,7 +11,7 @@ const moduleURL = new URL('../../desktop/main.mjs', import.meta.url).href;
 
 const payloads = {
   '/segmented.bin': Buffer.from(Array.from({ length: 2 * 1024 * 1024 }, (_, index) => (index * 37) % 251)),
-  '/restart.bin': Buffer.from(Array.from({ length: 1024 * 1024 }, (_, index) => (index * 53 + 11) % 253)),
+  '/restart.bin': Buffer.from(Array.from({ length: 8 * 1024 * 1024 }, (_, index) => (index * 53 + 11) % 253)),
 };
 
 function delay(milliseconds) {
@@ -49,13 +49,14 @@ function stream(bytes, signal, onActiveChange) {
 }
 
 async function rangeServer() {
-  const stats = { active: 0, maxActive: 0, gets: 0 };
+  const stats = { active: 0, maxActive: 0, gets: 0, ranges: [] };
   const change = amount => {
     stats.active = Math.max(0, stats.active + amount);
     stats.maxActive = Math.max(stats.maxActive, stats.active);
   };
   const server = createServer((request, response) => {
-    const bytes = payloads[new URL(request.url, 'http://127.0.0.1').pathname];
+    const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+    const bytes = payloads[pathname];
     if (!bytes) { response.writeHead(404); response.end(); return; }
     const etag = '"' + createHash('sha256').update(bytes).digest('hex').slice(0, 16) + '"';
     const headers = {
@@ -84,6 +85,7 @@ async function rangeServer() {
       response.end();
       return;
     }
+    stats.ranges.push({ path: pathname, start });
     const selected = bytes.subarray(start, end + 1);
     response.writeHead(206, {
       ...headers,
@@ -265,15 +267,19 @@ test('downloads use real plugin IPC, four-way Range transfer, pause/resume, rest
     expect(beforeRestart.mode).toBe('segmented');
 
     await application.close();
+    fixture.stats.ranges.length = 0;
     launched = await launch(profile);
     application = launched.application;
     await installFixtures(application, { artifact, downloadDirectory, origin: fixture.origin });
     plugin = await openTool(application, launched.shell);
-    await expect.poll(async () => (await invoke(plugin, 'downloads.get', { id: restartId }))?.status, { timeout: 30000 }).toMatch(/^(paused|failed)$/);
-    const recovered = await invoke(plugin, 'downloads.get', { id: restartId });
-    expect(recovered.transferred).toBeGreaterThan(0);
-    await invoke(plugin, 'downloads.resume', { id: restartId });
-    const restarted = await waitTask(plugin, restartId, ['completed'], 60000);
+    await expect.poll(async () => (await invoke(plugin, 'downloads.get', { id: restartId }))?.status, { timeout: 60000 }).toMatch(/^(paused|failed|completed)$/);
+    let restarted = await invoke(plugin, 'downloads.get', { id: restartId });
+    if (restarted.status !== 'completed') {
+      expect(restarted.transferred).toBeGreaterThan(0);
+      await invoke(plugin, 'downloads.resume', { id: restartId });
+      restarted = await waitTask(plugin, restartId, ['completed'], 60000);
+    }
+    expect(fixture.stats.ranges.some(value => value.path === '/restart.bin' && value.start > 0)).toBe(true);
     expect(createHash('sha256').update(await readFile(path.join(downloadDirectory, restarted.filename))).digest('hex'))
       .toBe(createHash('sha256').update(payloads['/restart.bin']).digest('hex'));
   } finally {
