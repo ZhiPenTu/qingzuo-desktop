@@ -3,14 +3,14 @@ import { afterEach, expect, it, vi } from 'vitest';
 import AIChat from './AIChat';
 import type { ChatEvent, ChatSession } from './harness-client';
 
-function fixture(verified = true, overrides: { model?: string; ready?: boolean; legacy?: boolean; sessionModel?: string; models?: { id: string; title: string }[] } = {}) {
+function fixture(verified = true, overrides: { model?: string; ready?: boolean; legacy?: boolean; sessionModel?: string; listState?: 'idle' | 'running'; models?: { id: string; title: string }[] } = {}) {
   let session: ChatSession = { id: 'fixture-chat', title: '测试对话', model: overrides.sessionModel ?? 'fixture-model', state: 'idle', history: [] };
   const models = overrides.models ?? [{ id: 'fixture-model', title: 'Fixture Model' }, { id: 'fixture-backup', title: 'Backup Model' }];
   let listener: (event: ChatEvent) => void = () => {};
   const invoke = vi.fn(async (method: string, args?: Record<string, unknown>) => {
     if (method === 'ai.status') return { model: overrides.model ?? 'fixture-model', verified: verified ? [overrides.model ?? 'fixture-model'] : [], ...(overrides.legacy ? {} : { ready: overrides.ready ?? verified }) };
     if (method === 'ai.textModels') return { models, defaultModel: models[0]?.id ?? '' };
-    if (method === 'ai.chat.list') return [{ id: session.id, title: session.title, state: session.state, updated: 1 }];
+    if (method === 'ai.chat.list') return [{ id: session.id, title: session.title, state: overrides.listState ?? session.state, updated: 1 }];
     if (method === 'ai.chat.tools') return [{ id: 'local.fixture', title: '示例插件', description: '', tools: [{ name: 'open', title: '打开插件' }] }];
     if (method === 'ai.chat.status') return structuredClone(session);
     if (method === 'ai.chat.create') { session = { ...session, model: String(args?.model ?? session.model), history: [] }; return structuredClone(session); }
@@ -108,13 +108,30 @@ it('shows history beside the conversation and keeps the draft when switching', a
   await waitFor(() => expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBe('fixture-chat'));
   await screen.findByRole('navigation', { name: '历史对话' });
   const activeChat = screen.getByRole('button', { name: '测试对话' });
-  expect(activeChat.getAttribute('aria-current')).toBe('page');
+  expect(activeChat.getAttribute('aria-current')).toBe('true');
   fireEvent.change(screen.getByLabelText('消息'), { target: { value: '保留草稿' } });
   fireEvent.click(activeChat);
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.status', { id: 'fixture-chat' }));
   expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe('保留草稿');
   fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.create', { model: 'fixture-model' }));
+});
+it('keeps the running state readable and marks the active conversation', async () => {
+  fixture(true, { listState: 'running' });
+  render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  const running = await screen.findByRole('button', { name: '测试对话（处理中）' });
+  expect(running.getAttribute('aria-current')).toBe('true');
+});
+it('deletes the current conversation from the sidebar and keeps focus in the sidebar', async () => {
+  const { invoke } = fixture();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+  await screen.findByRole('navigation', { name: '历史对话' });
+  fireEvent.click(screen.getByRole('button', { name: '删除当前对话' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('ai.chat.delete', { id: 'fixture-chat' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '删除当前对话' })).toBeNull());
+  expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '新建对话' })));
 });
 it('moves history into a drawer when the window is too narrow', async () => {
   const originalWidth = window.innerWidth;
@@ -130,6 +147,42 @@ it('moves history into a drawer when the window is too narrow', async () => {
     fireEvent.keyDown(dialog, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '历史对话' }));
+  } finally {
+    window.innerWidth = originalWidth;
+  }
+});
+it('closes the drawer after deleting and returns focus to the history button', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 700;
+  try {
+    fixture();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+    await waitFor(() => expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBe('fixture-chat'));
+    fireEvent.click(screen.getByRole('button', { name: '历史对话' }));
+    await screen.findByRole('dialog', { name: '历史对话' });
+    fireEvent.click(screen.getByRole('button', { name: '删除当前对话' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '历史对话' })));
+  } finally {
+    window.innerWidth = originalWidth;
+  }
+});
+it('moves the history back into the sidebar when the window becomes wide', async () => {
+  const originalWidth = window.innerWidth;
+  window.innerWidth = 700;
+  try {
+    fixture();
+    render(<AIChat onSettings={vi.fn()} onOpenPlugin={onOpenPlugin} />);
+    await waitFor(() => expect(localStorage.getItem('qingzuo.ai-chat.selected.v1')).toBe('fixture-chat'));
+    fireEvent.click(screen.getByRole('button', { name: '历史对话' }));
+    await screen.findByRole('dialog', { name: '历史对话' });
+    window.innerWidth = 1280;
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '历史对话' })).toBeNull());
+    expect(screen.getByRole('navigation', { name: '历史对话' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '历史对话' })).toBeNull();
   } finally {
     window.innerWidth = originalWidth;
   }

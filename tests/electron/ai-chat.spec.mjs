@@ -115,6 +115,11 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await page.getByRole('button', { name: '关闭面板', exact: true }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByLabel('消息', { exact: true })).toHaveValue('打开 AI 批图，帮我规划白底商品图');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
+    await expect(page.getByRole('navigation', { name: '历史对话', exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '历史对话', exact: true })).toHaveCount(0);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(700, 900));
+    await expect(page.getByRole('button', { name: '历史对话', exact: true })).toBeVisible();
     const geometry = await page.evaluate(() => ({ width: window.innerWidth, documentWidth: document.documentElement.scrollWidth, height: window.innerHeight, composerBottom: document.querySelector('.ai-composer').getBoundingClientRect().bottom }));
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.width); expect(geometry.composerBottom).toBeLessThanOrEqual(geometry.height);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(390, 844));
@@ -134,6 +139,9 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await expect.poll(async () => (await page.evaluate(id => window.commerceDesktop.invoke('ai.chat.status', { id }), chatId)).state).toBe('idle');
     const completed = await page.evaluate(id => window.commerceDesktop.invoke('ai.chat.status', { id }), chatId);
     expect(completed.history.find(entry => entry.tool === 'call_plugin').text).toContain('真实沙箱回声');
+    await expect(page.getByRole('navigation', { name: '历史对话', exact: true })).toBeVisible();
+    await expect(page.locator('.ai-chat-history-item.is-active')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: '删除当前对话', exact: true })).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) await page.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, 'AI对话界面.png') });
     await page.getByRole('button', { name: '新建对话', exact: true }).click(); await expect(page.getByRole('log')).not.toContainText('插件已调用');
     await expect(page.getByRole('button', { name: '请调用回声插件', exact: true })).toBeVisible();
@@ -142,6 +150,13 @@ test('host chat uses public Harness tools, explicit confirmation, sandbox servic
     await app.close(); page = await launch();
     const chats = await page.evaluate(() => window.commerceDesktop.invoke('ai.chat.list')); expect(chats).toHaveLength(2);
     const restored = await page.evaluate(id => window.commerceDesktop.invoke('ai.chat.status', { id }), chatId); expect(restored.history).toEqual(completed.history); expect(restored.approvals).toEqual([]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 720));
+    await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: '历史对话', exact: true })).toBeVisible();
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.getByRole('button', { name: '删除当前对话', exact: true }).click();
+    await expect.poll(async () => (await page.evaluate(() => window.commerceDesktop.invoke('ai.chat.list'))).length).toBe(1);
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.textContent ?? '')).toContain('新建对话');
     await page.evaluate(() => window.commerceDesktop.invoke('plugins.enable', { id: 'local.chat-echo', enabled: false }));
     expect((await page.evaluate(() => window.commerceDesktop.invoke('ai.chat.tools'))).some(plugin => plugin.id === 'local.chat-echo')).toBe(false);
     expect(requests.filter(request => request.stream)).toHaveLength(3);

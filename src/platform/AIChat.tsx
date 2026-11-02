@@ -19,6 +19,7 @@ function ChatHistoryPanel({
   canCreate,
   canDelete,
   showHeading,
+  focusRequest,
   onCreate,
   onSelect,
   onDelete
@@ -29,19 +30,28 @@ function ChatHistoryPanel({
   canCreate: boolean;
   canDelete: boolean;
   showHeading: boolean;
+  focusRequest: number;
   onCreate: () => void;
   onSelect: (id: string) => void;
   onDelete: () => void;
 }) {
-  return <div className="ai-chat-history-panel">
+  const panel = useRef<HTMLDivElement>(null);
+  const createButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    const target = createButton.current;
+    if (target && !target.disabled) target.focus();
+    else panel.current?.focus();
+  }, [focusRequest]);
+  return <div className="ai-chat-history-panel" ref={panel} tabIndex={-1}>
     {showHeading ? <div className="ai-chat-history-heading"><div><History /><span>历史对话</span></div><small>{chats.length}</small></div> : null}
-    <Button className="ai-chat-history-new" variant="outline" disabled={busy || !canCreate} onClick={onCreate}><Plus data-icon="inline-start" />新建对话</Button>
+    <Button ref={createButton} className="ai-chat-history-new" variant="outline" disabled={busy || !canCreate} onClick={onCreate}><Plus data-icon="inline-start" />新建对话</Button>
     <div className="ai-chat-history-label"><span>最近</span></div>
     <nav className="ai-chat-history" aria-label="历史对话">
-      {chats.map(chat => <Button key={chat.id} className={cn('ai-chat-history-item', activeId === chat.id && 'is-active')} variant="ghost" aria-label={chat.title} aria-current={activeId === chat.id ? 'page' : undefined} disabled={busy} onClick={() => onSelect(chat.id)}>
+      {chats.map(chat => <Button key={chat.id} className={cn('ai-chat-history-item', activeId === chat.id && 'is-active')} variant="ghost" aria-label={chat.state === 'running' ? `${chat.title}（处理中）` : chat.title} aria-current={activeId === chat.id ? 'true' : undefined} disabled={busy} onClick={() => onSelect(chat.id)}>
         <MessageCircle data-icon="inline-start" />
         <span className="ai-chat-history-title">{chat.title}</span>
-        {chat.state === 'running' ? <span className="connection-dot connected" aria-label="处理中" /> : null}
+        {chat.state === 'running' ? <span className="connection-dot connected" aria-hidden="true" /> : null}
       </Button>)}
       {!chats.length ? <div className="ai-chat-history-empty"><MessageCircle /><strong>还没有历史对话</strong><p>发送第一条消息后，会在这里保存。</p></div> : null}
     </nav>
@@ -66,6 +76,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const [stream, setStream] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [focusRequest, setFocusRequest] = useState(0);
   const selected = useRef('');
   const operation = useRef(false);
   const transcript = useRef<HTMLDivElement>(null);
@@ -174,6 +185,7 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
       setStream('');
       setHistoryOpen(false);
       await refreshList();
+      setFocusRequest(value => value + 1);
     });
   }
   async function send() {
@@ -189,9 +201,9 @@ export default function AIChat({ onSettings, onOpenPlugin }: { onSettings: () =>
   const running = session?.state === 'running';
   const hasMessages = Boolean(session?.history.length || stream || session?.approvals?.length);
   function suggest(prompt: string) { setText(prompt); input.current?.focus(); }
-  const historyPanel = <ChatHistoryPanel chats={chats} activeId={session?.id} busy={busy} canCreate={Boolean(model)} canDelete={!running} showHeading={!compactHistory} onCreate={() => void action(create)} onSelect={id => void action(async () => { await load(id); setHistoryOpen(false); })} onDelete={deleteCurrent} />;
+  const historyPanel = <ChatHistoryPanel chats={chats} activeId={session?.id} busy={busy} canCreate={Boolean(model)} canDelete={!running} showHeading={!compactHistory} focusRequest={focusRequest} onCreate={() => void action(create)} onSelect={id => void action(async () => { await load(id); setHistoryOpen(false); })} onDelete={deleteCurrent} />;
   return <div className="ai-chat-shell harness-theme">
-    {!compactHistory ? <aside className="ai-chat-history-sidebar"><ChatHistoryPanel chats={chats} activeId={session?.id} busy={busy} canCreate={Boolean(model)} canDelete={!running} showHeading onCreate={() => void action(create)} onSelect={id => void action(async () => { await load(id); })} onDelete={deleteCurrent} /></aside> : null}
+    {!compactHistory ? <aside className="ai-chat-history-sidebar">{historyPanel}</aside> : null}
     <div className="ai-chat-layout">
     <header className="ai-chat-toolbar">
       <div className="ai-chat-heading">
