@@ -1,0 +1,93 @@
+name: Auto version
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '目标版本号（留空则在当前补丁号上 +1）'
+        required: false
+        type: string
+
+concurrency:
+  group: auto-version-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bump:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      !startsWith(github.event.pull_request.head.ref, 'codex/release-') &&
+      !startsWith(github.event.pull_request.head.ref, 'codex/auto-version-'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref || 'develop' }}
+          fetch-depth: 0
+
+      - name: 递增版本号
+        id: version
+        run: |
+          set -euo pipefail
+          result=$(node scripts/auto-version.mjs --target "${{ inputs.target }}")
+          echo "$result"
+          echo "next=$(echo "$result" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).next")" >> "$GITHUB_OUTPUT"
+
+      - name: 提交版本更新
+        id: push
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "codex/auto-version-v${NEXT}"
+          git add package.json package-lock.json docs/release-guide.md
+          git commit -m "chore: 版本更新至 v${NEXT}"
+          git push -u origin "codex/auto-version-v${NEXT}"
+          echo "branch=codex/auto-version-v${NEXT}" >> "$GITHUB_OUTPUT"
+
+      - name: 创建版本更新 PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.version.outputs.next }}
+          BRANCH: ${{ steps.push.outputs.branch }}
+        run: |
+          set -euo pipefail
+          url=$(gh pr create --base develop --head "$BRANCH" --title "chore: 版本更新至 v${NEXT}" --body "合并入 develop 后由自动版本更新流程递增补丁号至 v${NEXT}，同步 package.json、package-lock.json 与 docs/release-guide.md。")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "number=$(echo "$url" | grep -oE '[0-9]+$')" >> "$GITHUB_OUTPUT"
+
+      - name: 等待分支策略检查并合并
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          conclusion=""
+          for attempt in $(seq 1 60); do
+            conclusion=$(gh pr view "$NUMBER" --json statusCheckRollup --jq '[.statusCheckRollup[]? | select(.name == "branch-policy") | .conclusion] | join(",")')
+            if [[ "$conclusion" == "success" ]]; then break; fi
+            if [[ "$conclusion" == "failure" || "$conclusion" == "cancelled" ]]; then
+              echo "::error::Branch policy 未通过，版本更新 PR 保留待人工处理"
+              exit 1
+            fi
+            sleep 10
+          done
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::等待 Branch policy 超时，版本更新 PR 保留待人工处理"
+            exit 1
+          fi
+          gh pr merge "$NUMBER" --merge --delete-branch

@@ -10,6 +10,12 @@
 
 官网 `site/` 随 `main` 部署，`develop` 上的站点改动不会单独上线。
 
+## 自动版本更新
+
+合并入 `develop` 会触发 `Auto version` 工作流，把底座补丁号 +1，并同步 `package.json`、`package-lock.json` 与本文件首行的底座版本；更新以 `codex/auto-version-vX.Y.Z` 分支自动提交并合回 `develop`。主干部版本由 `develop` 合入 `main` 时一并带入，主干版本号因此始终与主干内容一致，发布时按主干当前版本打标签即可。
+
+发版 PR（`codex/release-*`）自行指定正式版本号与 `docs/releases/vX.Y.Z.md`，自动递增不会覆盖它。版本号必须是 X.Y.Z 正式版本，递增逻辑见 `scripts/auto-version.mjs`。
+
 ## 底座
 
 Node 24 和 Rust 构建工作台、Harness 适配和系统沙箱。npm run platform:prepare 会清理旧生成目录，禁止携带编辑器、OCR 模型或业务 Python 后端。
