@@ -83,6 +83,23 @@ test('release fragments cannot change or inject trust identity reviewed in the c
   assert.equal(resolved.official,true);
   assert.deepEqual(resolved.source,sourceEntry.source);
  }
+ for(const injected of [
+  {tier:'platform'},
+  {official:false},
+  {source:{type:'github-release',repository:'other/repository'}},
+  {stats:{downloads:1}},
+  {verification:'github-release'},
+ ]) {
+  const fragment={schemaVersion:1,...injected,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
+  assert.equal(resolved.sourceUnavailable,true);
+  assert.equal(resolved.tier,'official');
+  assert.equal(resolved.official,true);
+  assert.deepEqual(resolved.source,sourceEntry.source);
+ }
+ const artifactFragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64),tier:'platform'}}}]};
+ const [artifactResolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(artifactFragment))});
+ assert.equal(artifactResolved.sourceUnavailable,true);
 });
 test('legacy release fragments keep working while harmless manifest fields are stripped', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
