@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.6.23，插件 API / SDK 1.8.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.6.23，插件 API / SDK 1.9.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -37,6 +37,8 @@ sdk-v1.2.0 增加 AI 权限、共享图片模型、目录授权、后台批次�
 sdk-v1.7.0 增加 profile 级共享凭证库：清单权限 `credentialVault: 'use' | 'manage'`，`credentials.records.*` 记录与授权接口，以及 `network.request/sign` 的 `{ record }` 引用。`manage` 只对市场或内置来源生效，密钥永不返回插件。底座凭据存储统一使用 `safeStorage` 的 `enc:v1:` 信封；旧明文凭据升级后视为未配置，发布说明必须提醒用户重新填写 AI、抠图、Seedance、希音等密钥。SDK 同样设置 latest=false。
 
 sdk-v1.8.0 增加宿主托管的文件下载能力：清单权限 `downloads: 'use' | 'manage'`、HTTPS Range 探测、最多 4 路分片、自动普通下载回退、目录授权、任务隔离与跨重启续传。`manage` 只对市场或内置来源生效；任务快照不返回完整下载地址、查询参数或本地路径。SDK 同样设置 latest=false。
+
+sdk-v1.9.0 增加持久工作区、远程 MCP 与公众号发布：`workspace` 固定四个根目录并绑定真实路径与 inode，支持原子写入、不透明文件 URL 和 `.aws` 预设包预览/导入；`mcp` 只暴露服务器摘要与只读工具，逐工具授权，支持 OAuth 2.1 + PKCE，并限制 SSRF、重定向、超时和响应大小；`wechat` 由宿主保存账号密钥、上传封面与正文图片、创建草稿、确认发布并查询状态，回执未知时不会重复提交。`ai.complete` 同时增加 `maxTokens` 与 `finishReason`，`ai.batch.start` 支持 `workspacePath`。SDK 设置 latest=false。
 
 市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
 

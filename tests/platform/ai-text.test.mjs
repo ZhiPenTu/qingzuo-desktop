@@ -40,6 +40,20 @@ test('complete posts through the configured proxy and returns the answer', async
   assert.deepEqual(await ai.complete({ model: 'gpt-5.6-luna', messages }), { content: '{"title":"ok"}', model: 'gpt-5.6-luna' });
 });
 
+test('complete forwards maxTokens and preserves the provider finish reason', async () => {
+  const requests = [];
+  const ai = runtime({ request: async (_base, _endpoint, options) => {
+    requests.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '半段' }, finish_reason: 'length' }] }));
+  } });
+  assert.deepEqual(await ai.complete({ messages, maxTokens: 1200 }), { content: '半段', model: 'gpt-5.6-terra', finishReason: 'length' });
+  assert.equal(requests[0].max_tokens, 1200);
+  await assert.rejects(ai.complete({ messages, maxTokens: 0 }), /maxTokens/);
+  await assert.rejects(ai.complete({ messages, maxTokens: 65537 }), /maxTokens/);
+  await assert.rejects(ai.complete({ messages, maxTokens: 1.5 }), /maxTokens/);
+  assert.equal(requests.length, 1);
+});
+
 test('complete uses the first available text model when the caller does not choose one', async () => {
   const requests = [];
   const ai = runtime({ catalog: [
@@ -73,7 +87,7 @@ test('complete maps service failures to explicit errors', async () => {
 });
 
 test('plugin manifests declare text AI capability against the current API', () => {
-  assert.equal(API_VERSION, '1.8.0');
+  assert.equal(API_VERSION, '1.9.0');
   // 1.5 只增加可选的图片片段，声明 ^1.4.0 的旧插件仍然兼容。
   const manifest = { commerce: { manifestVersion: 1, id: 'official.shein-full', title: '希音全托管铺货', description: '采集与翻译', ui: 'ui/index.html', api: '^1.4.0', permissions: { ai: ['image-edit', 'text'] } }, version: '0.2.0' };
   const validated = validateManifest(manifest);

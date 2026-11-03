@@ -356,6 +356,41 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .commerce-settings [data-slot="card-title"] { font-size: 14px; font-weight: 600; }
 .commerce-settings [data-slot="card-description"] { font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
 .commerce-settings [data-slot="card-header"]:has([data-slot="card-action"]) { align-items: center; }
+.capability-settings-body { display: grid; gap: 18px; }
+.capability-section { display: grid; gap: 10px; }
+.capability-section + .capability-section { border-top: 1px solid var(--border); padding-top: 18px; }
+.capability-section-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.capability-section-head h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; font-weight: 650; }
+.capability-section-head h3 svg { width: 15px; height: 15px; color: var(--primary); }
+.capability-section-head p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.capability-loading, .capability-empty { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--muted-foreground); font-size: 12px; }
+.capability-notice { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--primary); font-size: 12px; }
+.capability-notice svg { width: 14px; height: 14px; }
+.capability-row { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--muted) 28%, transparent); }
+.capability-row-main { display: grid; gap: 2px; min-width: 0; }
+.capability-row-main strong { font-size: 13px; }
+.capability-row-main span { overflow: hidden; color: var(--muted-foreground); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.capability-row-main small { color: var(--muted-foreground); font-size: 11px; }
+.capability-row-main small.is-ok { color: var(--primary); }
+.capability-row-main small.is-error { color: var(--destructive); }
+.capability-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.capability-subsection { display: grid; gap: 5px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.capability-subsection > strong { font-size: 11px; color: var(--muted-foreground); }
+.capability-subsection ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.capability-subsection li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; }
+.capability-subsection li span { flex: none; font-weight: 550; }
+.capability-subsection li small { overflow: hidden; color: var(--muted-foreground); text-overflow: ellipsis; white-space: nowrap; }
+.capability-subsection li button { margin-left: auto; }
+.capability-form { display: grid; gap: 10px; padding-top: 4px; }
+.capability-form-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.capability-form-head strong { font-size: 12px; }
+.capability-form [data-slot="field-group"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.capability-form [data-slot="field"] { min-width: 0; }
+.capability-select { height: 36px; width: 100%; padding: 0 10px; border: 1px solid var(--input); border-radius: var(--radius); background: var(--background); color: var(--foreground); font-size: 12px; }
+@media (max-width: 640px) {
+  .capability-form [data-slot="field-group"] { grid-template-columns: 1fr; }
+  .capability-section-head { flex-direction: column; }
+}
 .settings-switch { position: relative; width: 42px; height: 24px; padding: 0; border: 1px solid var(--input); border-radius: 999px; background: var(--muted); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
 .settings-switch span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 18%, transparent); transition: transform .16s ease; }
 .settings-switch.is-on { border-color: var(--primary); background: var(--primary); }

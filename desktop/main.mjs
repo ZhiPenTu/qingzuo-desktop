@@ -35,6 +35,10 @@ import { testRoutedRequest } from './network-test-routes.mjs';
 import { DebugLogService } from './debug-logging.mjs';
 import { Downloads } from './downloads.mjs';
 import { secureRequest } from './network-transport.mjs';
+import { publicWorkspaceError, WorkspaceRuntime } from './workspace.mjs';
+import { WechatAccountStore, WechatRuntime } from './wechat.mjs';
+import { McpRuntime } from './mcp.mjs';
+import { AwsImporter } from './aws-importer.mjs';
 // Resolve the established profile before changing the display name. This also
 // preserves an explicit --user-data-dir supplied by integration tests/users.
 app.setName('Commerce Tools');
@@ -54,7 +58,7 @@ let updateService, pluginInstallService, updatePreferences;
 let automaticUpdateTimer = null, automaticUpdateInterval = null, automaticUpdateRunning = false;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, textRuntime, approvals, downloadSources;
+let batches, proxy, imageEditor, textRuntime, approvals, downloadSources, workspace, wechatStore, wechatRuntime, mcpRuntime, awsImporter;
 const pendingDebugLogs = [];
 let debugLogEventTimer = null;
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
@@ -195,7 +199,7 @@ function invalidateSurface() { surfaceEpoch += 1; hidePluginViews(); }
 async function closeView(id) {
   viewEpochs.set(id,(viewEpochs.get(id) ?? 0)+1);
   const view = views.get(id); if (view) { views.delete(id); if (!view.webContents.isDestroyed()) { view.webContents.send('commerce:dispose'); owners.delete(view.webContents.id); if (window && !window.isDestroyed()) window.contentView.removeChildView(view); view.webContents.close(); } }
-  if (visible === id) visible = null; network?.stop(id); await files?.revoke(id); await workers?.stop(id);
+  if (visible === id) visible = null; network?.stop(id); await files?.revoke(id); workspace?.releaseUrls(id); await workers?.stop(id);
   downloads?.releaseOwnerTokens(id);
 }
 async function resourceResponse(filename) {
@@ -211,6 +215,11 @@ async function servePlugin(request, id) {
     if (token) {
       const item = await files.get(plugin, token[1]);
       return new Response(await readFile(item.filename), { headers: { 'Content-Type': item.mime, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox" } });
+    }
+    const workspaceToken = url.pathname.match(/^\/__workspace\/([a-f0-9-]{36})$/);
+    if (workspaceToken) {
+      const item = await workspace.urlFile(plugin, workspaceToken[1]);
+      return new Response(await readFile(item.filename), { headers: { 'Content-Type': item.mime, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox" } });
     }
     const image = url.pathname.match(/^\/api\/documents\/([a-f0-9]{32})\/pages\/(\d{1,2})\/image$/);
     if (image && plugin.id === 'official.labeledit') { const value = await (await workers.start(plugin)).call('image', { id: image[1], page: Number(image[2]) }); return new Response(Buffer.from(value.data, 'base64'), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } }); }
@@ -395,6 +404,73 @@ async function catalog(signal, id) {
   return { items, configured: true };
 }
 let credentialDialog = Promise.resolve();
+function confirmWorkspaceBatch(plugin, batch, workspacePath) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  return dialog.showMessageBox(window, {
+    type: 'question',
+    buttons: ['取消', '开始生成'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '确认生成图片',
+    message: '「' + plugin.title + '」准备生成 ' + batch.items.length + ' 张图片',
+    detail: '模型：' + batch.modelId + '\n来源：' + (batch.source === 'proxy' ? '已配置的图像代理' : '共享图像服务')
+      + '\n保存到：' + workspacePath + '\n\n生成可能产生费用或消耗账户额度。失败或结果未知的项目不会自动重发。',
+  }).then(result => result.response === 1);
+}
+function confirmWechatPublish({ accountName, appIdMasked, title, mode }) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  return dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['取消', '确认发布'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '确认发布到公众号',
+    message: '即将向公众号「' + accountName + '」提交发布',
+    detail: '文章：' + title + '\nAppID：' + appIdMasked + '\n方式：' + (mode === 'publish' ? '直接发布' : '创建草稿')
+      + '\n\n发布后内容可能立即对读者可见，请确认标题、封面和正文无误。',
+  }).then(result => result.response === 1);
+}
+function confirmBundleDownload(plugin, address) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  let host = address;
+  try { host = new URL(address).host; } catch {}
+  return dialog.showMessageBox(window, {
+    type: 'question',
+    buttons: ['取消', '继续导入'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '确认下载预设包',
+    message: '「' + plugin.title + '」准备从远程地址下载预设包',
+    detail: '来源：' + host + '\n\n只会下载公开 HTTPS 地址，不会访问本机、私网或跟随重定向。',
+  }).then(result => result.response === 1);
+}
+function confirmAwsImport(plugin, preview) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  const accounts = preview.accounts.filter(item => item.action === 'add' || item.action === 'update');
+  return dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['取消', '导入并保存账号'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '确认导入公众号账号',
+    message: '「' + plugin.title + '」准备导入 ' + accounts.length + ' 个公众号账号',
+    detail: accounts.map(item => item.name + ' · ' + item.appIdMasked + ' · ' + (item.action === 'update' ? '更新' : '新增')).join('\n')
+      + '\n\nAppSecret 将写入本机系统凭据库，不会显示给插件或写入配置文件。',
+  }).then(result => result.response === 1);
+}
+function confirmMcpGrant(plugin, server, toolNames) {
+  if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
+  return dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['不允许', '允许'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '确认 MCP 工具授权',
+    message: '「' + plugin.title + '」请求使用 ' + toolNames.length + ' 个只读工具',
+    detail: '服务器：' + server.name + '\n地址：' + server.url + '\n\n' + toolNames.join('\n')
+      + '\n\n只允许本次列出的只读工具；你可以随时在能力连接中撤销。',
+  }).then(result => result.response === 1);
+}
 function confirmVaultGrant(plugin, record) {
   if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
   const run = () => dialog.showMessageBox(window, {
@@ -514,7 +590,7 @@ async function performPlatform(method, args) {
     if ((manifest.permissions.browser ?? []).includes('detect')) browserAccess.push('识别页面中的媒体');
     if ((manifest.permissions.browser ?? []).includes('download')) browserAccess.push('下载媒体');
     if ((manifest.permissions.browser ?? []).includes('automate')) browserAccess.push('读取并操作指定网站页面');
-    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n下载能力：' + (manifest.permissions.downloads === 'manage' ? '申请管理（仅市场签名插件生效）' : manifest.permissions.downloads === 'use' ? '创建并管理自己的下载任务' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\n共享凭证：' + (manifest.permissions.credentialVault === 'manage' ? '管理（仅市场插件可用）' : manifest.permissions.credentialVault === 'use' ? '引用' : '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n工作区：' + (manifest.permissions.workspace ? '申请授权一个文件夹，仅访问 .aws-article、drafts、posts、series' : '未申请') + '\n远程 MCP：' + ((manifest.permissions.mcp ?? []).join('、') || '无') + '\n公众号能力：' + ((manifest.permissions.wechat ?? []).join('、') || '无') + '\n下载能力：' + (manifest.permissions.downloads === 'manage' ? '申请管理（仅市场签名插件生效）' : manifest.permissions.downloads === 'use' ? '创建并管理自己的下载任务' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\n共享凭证：' + (manifest.permissions.credentialVault === 'manage' ? '管理（仅市场插件可用）' : manifest.permissions.credentialVault === 'use' ? '引用' : '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
     pluginInstallService.assertAvailable(manifest.id);
     await manager.install(bytes); return;
   }
@@ -588,6 +664,28 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     if (error) throw new Error('无法打开日志目录：' + error);
     return true;
   }
+  if (method.startsWith('capabilities.mcp.')) {
+    const action = method.slice('capabilities.mcp.'.length);
+    if (action === 'list') return mcpRuntime.adminList();
+    if (action === 'create') return mcpRuntime.create(args);
+    if (action === 'update') return mcpRuntime.update(args.id, args);
+    if (action === 'remove') return mcpRuntime.remove(args.id);
+    if (action === 'test') return mcpRuntime.test(args.id);
+    if (action === 'authorize') return mcpRuntime.authorize(args.id);
+    if (action === 'tools') return mcpRuntime.adminTools(args.id);
+    if (action === 'grants') return mcpRuntime.adminGrants(args.serverId);
+    if (action === 'revokeGrant') return mcpRuntime.adminRevokeGrant(args.pluginId, args.serverId);
+    throw new Error('MCP 设置接口无效。');
+  }
+  if (method.startsWith('capabilities.wechat.')) {
+    const action = method.slice('capabilities.wechat.'.length);
+    if (action === 'list') return wechatStore.adminList();
+    if (action === 'create') return wechatStore.create(args);
+    if (action === 'update') return wechatStore.update(args.id, args);
+    if (action === 'remove') return wechatStore.remove(args.id);
+    if (action === 'verify') return wechatRuntime.verifyAccount(args.id);
+    throw new Error('公众号设置接口无效。');
+  }
   if (method === 'openExternal' || method === 'shell.openExternal') {
     if (typeof args.url !== 'string' || !/^https?:\/\//i.test(args.url)) throw new Error('链接无效。');
     await shell.openExternal(args.url);
@@ -647,7 +745,43 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 });
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
-  if (!plugin.enabled || plugin.missing.length || systems.length !== 7) throw new Error('插件或工具服务不可用。');
+  if (!plugin.enabled || plugin.missing.length) throw new Error('插件不可用。');
+  if (method.startsWith('workspace.')) {
+    if (!plugin.permissions.workspace) throw new Error('工作区未授权。');
+    const action = method.slice('workspace.'.length);
+    if (!['pick', 'status', 'revoke', 'list', 'readText', 'readFile', 'writeText', 'writeFile', 'writeBase64', 'mkdir', 'rename', 'remove', 'url', 'importBundle'].includes(action)) throw new Error('工作区接口无效。');
+    if (action === 'importBundle' && args.url !== undefined) {
+      if (typeof args.url !== 'string') throw new Error('预设包地址无效。');
+      if (!await confirmBundleDownload(plugin, args.url)) throw new Error('预设包下载已取消。');
+    }
+    try {
+      return await workspace[action](plugin, args);
+    } catch (error) {
+      throw publicWorkspaceError(error);
+    }
+  }
+  if (method.startsWith('mcp.')) {
+    if (!(plugin.permissions.mcp ?? []).includes('read')) throw new Error('MCP 能力未授权。');
+    const action = method.slice('mcp.'.length);
+    if (action === 'servers') return mcpRuntime.pluginServers(plugin);
+    if (action === 'tools') return mcpRuntime.pluginTools(plugin, args);
+    if (action === 'grant') return mcpRuntime.grant(plugin, args);
+    if (action === 'revoke') return mcpRuntime.revoke(plugin, args);
+    if (action === 'call') return mcpRuntime.call(plugin, args);
+    throw new Error('MCP 接口无效。');
+  }
+  if (method.startsWith('wechat.')) {
+    const permissions = plugin.permissions.wechat ?? [];
+    if (!permissions.length) throw new Error('微信公众号能力未授权。');
+    const action = method.slice('wechat.'.length);
+    if (action === 'accounts') return wechatStore.pluginList();
+    if (action === 'verify') return wechatRuntime.verify(plugin, args);
+    if (action === 'createDraft') return wechatRuntime.createDraft(plugin, args);
+    if (action === 'publish') return wechatRuntime.publish(plugin, args);
+    if (action === 'publishStatus') return wechatRuntime.publishStatus(plugin, args);
+    if (action === 'list') return wechatRuntime.list(plugin, args);
+    throw new Error('微信公众号接口无效。');
+  }
   if (method === 'browser.status' || method === 'browser.rescan') {
     const browserPermissions = plugin.permissions.browser ?? [];
     // 自动化插件只需要确认自己打开的标签页是否还在，不需要看到用户其它标签页。
@@ -749,6 +883,7 @@ async function shutdownRuntime() {
     await pluginInstallService?.shutdown();
     approvals?.dispose();
     await batches?.shutdown();
+    await mcpRuntime?.shutdown();
     await downloads?.shutdown();
     await proxy?.stop();
     await browserRuntime?.shutdown();
@@ -795,6 +930,42 @@ files = new FileBroker(path.join(app.getPath('userData'), 'files'), dialog, { pe
 // Packaged builds always use the pinned public-address transport.
 network = new NetworkBroker(files, credentials, testRoutedRequest({ packaged: app.isPackaged, value: process.env.COMMERCE_TEST_NETWORK_ROUTES }), credentialVault);
 await files.initialize();
+workspace = new WorkspaceRuntime({
+  root: path.join(app.getPath('userData'), 'workspace'),
+  dialog,
+  files,
+  log: message => debugLog?.record({ scope: 'workspace', source: 'workspace', level: 'warn', message }),
+});
+await workspace.initialize();
+wechatStore = new WechatAccountStore({ root: path.join(app.getPath('userData'), 'wechat'), credentials });
+await wechatStore.initialize();
+wechatRuntime = new WechatRuntime({
+  store: wechatStore,
+  workspace,
+  files,
+  confirm: confirmWechatPublish,
+  request: secureRequest,
+  root: path.join(app.getPath('userData'), 'wechat'),
+  log: message => debugLog?.record({ scope: 'wechat', source: 'wechat', level: 'info', message }),
+});
+await wechatRuntime.initialize();
+mcpRuntime = new McpRuntime({
+  root: path.join(app.getPath('userData'), 'mcp'),
+  credentials,
+  shell,
+  confirmGrant: confirmMcpGrant,
+  request: secureRequest,
+  log: message => debugLog?.record({ scope: 'mcp', source: 'mcp', level: 'info', message }),
+});
+await mcpRuntime.initialize();
+awsImporter = new AwsImporter({
+  workspace,
+  files,
+  accounts: wechatStore,
+  confirmImport: confirmAwsImport,
+  log: message => debugLog?.record({ scope: 'workspace', source: 'bundle', level: 'info', message }),
+});
+workspace.setImporter(awsImporter);
 downloads = new Downloads(path.join(app.getPath('userData'), 'downloads'), {
   defaultDirectory: app.getPath('downloads'),
   dialog,
@@ -807,7 +978,7 @@ const proxyRoot = path.join(app.getPath('userData'), 'ai-proxy');
 proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initialize();
 imageEditor = new ImageEditor(credentials, undefined, proxy);
 textRuntime = new TextRuntime({ proxy });
-batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged); await batches.initialize();
+batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged, workspace, confirmWorkspaceBatch); await batches.initialize();
 approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
   if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
   return null;
@@ -853,7 +1024,9 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
     await downloads.forget(plugin);
     for (const name of plugin.permissions.credentials ?? []) await credentials.clear(plugin.id, name);
     await credentialVault.revokePlugin(plugin.id).catch(error => console.error('凭证授权清理失败：', error.message));
-    await storage?.clear(plugin.id).catch(error => console.error('插件存储清理失败：', error.message));
+    if (mcpRuntime) await mcpRuntime.revokePlugin(plugin.id);
+    if (workspace) await workspace.forget(plugin.id);
+    if (storage) await storage.clear(plugin.id);
     await session.fromPartition('persist:commerce-' + plugin.id).clearStorageData();
   },
 });
@@ -951,4 +1124,4 @@ else void main().catch(error => {
 });
 
 // Trusted main-process integration access; never exposed over renderer IPC.
-export { network, downloads, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, browserRuntime, files, storage, shutdownRuntime };
+export { network, downloads, workers, manager, host, updateService, pluginInstallService, batches, proxy, imageEditor, downloadSources, browserRuntime, files, storage, workspace, wechatStore, wechatRuntime, mcpRuntime, shutdownRuntime };
