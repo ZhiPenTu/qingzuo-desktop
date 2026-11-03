@@ -18,6 +18,16 @@ test('market plugin icons must be bounded PNG data URLs', () => {
  assert.equal(validateCatalog({schemaVersion:1,plugins:[{...entry,icon}]})[0].icon,icon);
  for(const invalid of ['https://example.com/icon.png','data:image/svg+xml;base64,PHN2Zz4=','data:image/png;base64,AAAA','data:image/png;base64,'+'A'.repeat(49153)]) assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,icon:invalid}]}));
 });
+test('market entries expose official and community publisher identity', () => {
+ const entries=validateCatalog({schemaVersion:1,plugins:[
+  entry,
+  {...entry,id:'community.fixture'},
+  {...entry,id:'community.verified',official:true},
+  {...entry,id:'official.legacy',official:false},
+]});
+ assert.deepEqual(entries.map(item=>item.official),[true,false,true,false]);
+ assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,official:'yes'}]}));
+});
 
 test('source entries resolve the latest release without changing the market catalog', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
@@ -45,6 +55,14 @@ test('new releases do not reuse release notes from the legacy snapshot', async (
  const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,api:'^1.0.0',artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
  assert.equal(resolved.releaseNotes,undefined);
+});
+test('release fragments cannot change the publisher identity reviewed in the catalog', async () => {
+ const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
+ const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};
+ const version='0.2.0',url=expectedReleaseArtifactUrl(repository,sourceEntry.id,version,platform);
+ const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,official:false,artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+ const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
+ assert.equal(resolved.official,true);
 });
 
 test('release fragments must keep the artifact inside the registered repository and version', async () => {

@@ -118,7 +118,7 @@ export class PluginManager {
       } else if (items.has(id)) items.set(id, { ...items.get(id), enabled: row.enabled !== false });
     }
     const providers = new Set([...items.values()].filter(p => p.enabled).flatMap(p => p.services?.provides ?? []));
-    return [...items.values()].map(p => ({ ...p, missing: (p.services?.requires ?? []).filter(s => !providers.has(s)) }));
+    return [...items.values()].map(p => ({ ...p, bundled: this.defaults.has(p.id), missing: (p.services?.requires ?? []).filter(s => !providers.has(s)) }));
   }
   async get(id) { const p = (await this.list()).find(p => p.id === id); if (!p) throw new Error('插件未安装。'); return p; }
   async install(bytes, { source = 'local', record, enabled } = {}) {

@@ -20,6 +20,7 @@ function validateText(entry) {
   if (typeof entry.title !== 'string' || !entry.title.trim() || entry.title.length > 80
     || typeof entry.description !== 'string' || entry.description.length > 2000
     || entry.category !== undefined && (typeof entry.category !== 'string' || !entry.category.trim() || entry.category.length > 40)
+    || entry.official !== undefined && typeof entry.official !== 'boolean'
     || entry.releaseNotes !== undefined && (typeof entry.releaseNotes !== 'string' || entry.releaseNotes.length > 64000)) {
     throw new Error('市场插件条目无效。');
   }
@@ -78,6 +79,7 @@ export function validateCatalog(value) {
     const { verification: _verification, sourceUnavailable: _sourceUnavailable, ...entry } = item;
     return {
       ...entry,
+      official: entry.official ?? entry.id.startsWith('official.'),
       compatible: semver.satisfies(API_VERSION, entry.api ?? '^1.0.0'),
     };
   });
@@ -153,6 +155,7 @@ export async function resolveMarketEntries(value, {
         releaseNotes: release.releaseNotes,
         category: release.category ?? entry.category,
         icon: release.icon ?? entry.icon,
+        official: entry.official,
         source: entry.source,
         stats: entry.stats,
         verification: 'github-release',
