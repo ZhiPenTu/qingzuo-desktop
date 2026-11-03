@@ -34,8 +34,8 @@ jobs:
           echo "分支流向: ${HEAD} -> ${BASE}"
           case "${BASE}" in
             develop)
-              if [[ "${HEAD}" == "main" || "${HEAD}" == "develop" ]]; then
-                echo "::error::功能分支不得与 main 或 develop 直接互提，请基于 origin/develop 创建 codex/<type>-<name> 分支"
+              if [[ "${HEAD}" == "main" || "${HEAD}" == "develop" ]] || ! printf '%s' "${HEAD}" | grep -Eq '^codex/[a-z0-9][a-z0-9._/-]*$'; then
+                echo "::error::合入 develop 的来源分支必须以 codex/ 开头；请基于 origin/develop 创建并遵循 codex/<type>-<name>；当前来源分支: ${HEAD}"
                 exit 1
               fi
               ;;
