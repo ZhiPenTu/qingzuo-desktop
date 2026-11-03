@@ -1,14 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import Platform from './Platform';
 import type { Plugin, ToolEntry } from './PluginCard';
 import type { BrowserStatus, PluginInstallState } from './commerce';
 
 vi.mock('../theme/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
-const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', category: '标签与文档', version: '0.2.0' };
-const communityEntry: ToolEntry = { id: 'community.tool', title: '社区工具', description: '社区开发的效率工具', category: '效率工具', version: '1.0.0' };
-const bundled: Plugin = { id: 'builtin.tool', title: '内置工具', description: '随应用提供的基础工具', category: '效率工具', version: '1.0.0', enabled: true, source: 'bundled', local: false, missing: [] };
+const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', category: '标签与文档', version: '0.2.0', tier: 'official' };
+const communityEntry: ToolEntry = { id: 'community.tool', title: '社区工具', description: '社区开发的效率工具', category: '效率工具', version: '1.0.0', tier: 'community' };
+const bundled: Plugin = { id: 'builtin.tool', title: '内置工具', description: '随应用提供的基础工具', category: '效率工具', version: '1.0.0', tier: 'platform', enabled: true, source: 'bundled', local: false, missing: [] };
 const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
+const aiAssistant: Plugin = { id: 'official.ai-assistant', title: 'AI 助手', description: '对话与图像服务', category: 'AI 助手', version: '0.1.0', tier: 'platform', enabled: true, source: 'market', local: false, missing: [], settings: { title: 'AI 设置' } };
+const diagnostics: Plugin = { id: 'official.diagnostics', title: '日志调试', description: '查看运行日志', category: '开发工具', version: '0.1.0', tier: 'platform', enabled: true, source: 'market', local: false, missing: [] };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
 function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus, options: { marketItems?: ToolEntry[]; plugins?: Plugin[] } = {}) {
@@ -58,6 +60,7 @@ function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = 
       return { canceled: false, debugLog: structuredClone(debugLog) };
     }
     if (method === 'debugLog.openDirectory') return true;
+    if (method === 'debugLog.revokePluginAccess') return { revoked: true };
     if (method === 'updates.configure') {
       updatePreferences = { autoUpdate: (args as { autoUpdate: boolean }).autoUpdate };
       listener();
@@ -100,29 +103,57 @@ it('merges installed tools and the catalog into one page with two tabs', async (
   expect(screen.getByRole('button', { name: '管理' })).toBeTruthy();
 });
 
-it('filters the catalog by built-in, community, official and unofficial origins', async () => {
+it('filters the catalog with one platform, official and community trust group', async () => {
   fixture(undefined, false, false, [], undefined, { marketItems: [entry, communityEntry], plugins: [bundled] });
   render(<Platform />);
   await screen.findByRole('heading', { name: '内置工具' });
   await openToolTab('全部');
 
-  expect(await screen.findByRole('group', { name: '按来源筛选' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: '内置插件' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: '社区插件' })).toBeTruthy();
+  const tierFilters = await screen.findByRole('group', { name: '按信任层筛选' });
+  expect(within(tierFilters).getByRole('button', { name: '全部' })).toBeTruthy();
+  expect(within(tierFilters).getByRole('button', { name: '底座内置' })).toBeTruthy();
+  expect(within(tierFilters).getByRole('button', { name: '官方社区' })).toBeTruthy();
+  expect(within(tierFilters).getByRole('button', { name: '第三方' })).toBeTruthy();
+  expect(screen.queryByRole('group', { name: '按发布者筛选' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '内置插件' }));
+  fireEvent.click(screen.getByRole('button', { name: '底座内置' }));
   await screen.findByRole('heading', { name: '内置工具' });
   expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '社区插件' }));
-  expect(await screen.findByRole('group', { name: '按发布者筛选' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '非官方插件' }));
+  fireEvent.click(screen.getByRole('button', { name: '第三方' }));
   await screen.findByRole('heading', { name: '社区工具' });
   expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '官方插件' }));
+  fireEvent.click(screen.getByRole('button', { name: '官方社区' }));
   await screen.findByRole('heading', { name: 'LabelEdit' });
   expect(screen.queryByRole('heading', { name: '社区工具' })).toBeNull();
+});
+
+it('labels bundled installations separately from their platform trust tier', async () => {
+  fixture(undefined, false, false, [], undefined, { plugins: [bundled] });
+  render(<Platform />);
+  await screen.findByRole('heading', { name: '内置工具' });
+  expect(screen.getByText('底座内置')).toBeTruthy();
+  expect(screen.getByText('随应用内置')).toBeTruthy();
+});
+
+it('keeps installed identity and source separate from the same-id market catalog entry', async () => {
+  const local: Plugin = { ...entry, title: '安装标题', icon: 'data:image/png;base64,iVBORw0KGgo=', tier: 'community', source: 'local', version: '0.1.0', enabled: true, local: true, missing: [] };
+  fixture(undefined, true, false, [], undefined, {
+    plugins: [local],
+    marketItems: [{ ...entry, title: '市场标题', icon: 'data:image/png;base64,iVBORw0KGgoAAA==' }],
+  });
+  render(<Platform />);
+  await screen.findByRole('heading', { name: '安装标题' });
+  expect(screen.getByText('第三方')).toBeTruthy();
+  expect(screen.getByText('本地导入')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '市场标题' })).toBeNull();
+
+  await openToolTab('全部');
+  await screen.findByRole('heading', { name: '市场标题' });
+  await openToolTab('已安装');
+  await screen.findByRole('heading', { name: '安装标题' });
+  expect(screen.getByText('本地导入')).toBeTruthy();
 });
 
 it('keeps backend progress after acknowledgment, restores it across tabs, and completes on the installed state', async () => {
@@ -288,37 +319,19 @@ it('persists the automatic update switch and waits for user confirmation before 
   await waitFor(() => expect(invoke.mock.calls.filter(([method]) => method === 'updates.install')).toHaveLength(1));
 });
 
-it('reveals the debug log page from settings and streams logs from every scope', async () => {
-  const { invoke, emitDebug } = fixture();
+it('keeps log controls in settings and opens the trusted diagnostics plugin from the sidebar', async () => {
+  const { invoke } = fixture(undefined, true, false, [], undefined, { plugins: [installed, diagnostics] });
   render(<Platform />);
   await navigate('设置');
+  await screen.findByRole('heading', { name: '按你的习惯，轻松工作。' });
 
   const toggle = await screen.findByRole('switch', { name: '开启日志调试' });
   expect(toggle.getAttribute('aria-checked')).toBe('false');
-  expect(screen.queryByRole('button', { name: '日志调试' })).toBeNull();
+  expect(screen.getByRole('button', { name: '日志调试' })).toBeTruthy();
 
   fireEvent.click(toggle);
-  const logNav = await screen.findByRole('button', { name: '日志调试' });
-  expect(screen.getByRole('switch', { name: '关闭日志调试' }).getAttribute('aria-checked')).toBe('true');
+  await screen.findByRole('switch', { name: '关闭日志调试' });
   expect(invoke.mock.calls.some(([method, args]) => method === 'debugLog.configure' && (args as { enabled?: boolean }).enabled === true)).toBe(true);
-
-  fireEvent.click(logNav);
-  await screen.findByRole('heading', { name: '日志调试' });
-  await screen.findByRole('heading', { name: '实时日志' });
-  expect(screen.getByText('已使用 0 KB')).toBeTruthy();
-
-  emitDebug([
-    { time: Date.parse('2026-10-31T08:30:00.000Z'), scope: 'app', source: 'app', level: 'info', message: '底座日志' },
-    { time: Date.parse('2026-10-31T08:30:01.000Z'), scope: 'plugin', source: 'plugin/demo', level: 'warn', message: '插件日志' },
-    { time: Date.parse('2026-10-31T08:30:02.000Z'), scope: 'browser', source: 'tab/demo', level: 'error', message: '浏览器日志' },
-  ]);
-  expect(await screen.findByText('底座日志')).toBeTruthy();
-  expect(screen.getByText('插件日志')).toBeTruthy();
-  expect(screen.getByText('浏览器日志')).toBeTruthy();
-
-  fireEvent.click(screen.getByRole('button', { name: '插件' }));
-  expect(screen.queryByText('底座日志')).toBeNull();
-  expect(screen.getByText('插件日志')).toBeTruthy();
 
   const size = screen.getByLabelText('最大保存大小') as HTMLSelectElement;
   fireEvent.change(size, { target: { value: '100' } });
@@ -328,6 +341,51 @@ it('reveals the debug log page from settings and streams logs from every scope',
   await screen.findByText('/tmp/qingzuo-logs/chosen');
   fireEvent.click(screen.getByRole('button', { name: '打开目录' }));
   await waitFor(() => expect(invoke.mock.calls.some(([method]) => method === 'debugLog.openDirectory')).toBe(true));
+
+  fireEvent.click(screen.getByRole('button', { name: '撤销日志访问' }));
+  await screen.findByText('日志访问授权已撤销，查看器下次读取时会重新询问。');
+  expect(invoke.mock.calls.some(([method, args]) => method === 'debugLog.revokePluginAccess' && (args as { pluginId?: string }).pluginId === 'official.diagnostics')).toBe(true);
+
+  fireEvent.click(screen.getByRole('button', { name: '日志调试' }));
+  await waitFor(() => expect(invoke.mock.calls.some(([method, args]) => method === 'view.open' && (args as { id?: string }).id === 'official.diagnostics')).toBe(true));
+});
+
+it('offers AI and diagnostics market installs without creating shell pages', async () => {
+  const { invoke } = fixture(undefined, false);
+  render(<Platform />);
+  await navigate('设置');
+  await screen.findByRole('heading', { name: '按你的习惯，轻松工作。' });
+
+  expect(screen.queryByRole('button', { name: 'AI 对话' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '日志调试' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '从市场安装' }));
+  await waitFor(() => expect(invoke.mock.calls.some(([method, args]) => method === 'market.install' && (args as { id?: string }).id === 'official.ai-assistant')).toBe(true));
+
+  fireEvent.click(screen.getByRole('button', { name: '从市场安装日志查看器' }));
+  await waitFor(() => expect(invoke.mock.calls.some(([method, args]) => method === 'market.install' && (args as { id?: string }).id === 'official.diagnostics')).toBe(true));
+});
+
+it('hides first-party entry points for local or disabled installations and opens installed AI settings', async () => {
+  const localAI: Plugin = { ...aiAssistant, source: 'local', tier: 'community' };
+  const disabledDiagnostics: Plugin = { ...diagnostics, enabled: false };
+  fixture(undefined, true, false, [], undefined, { plugins: [installed, localAI, disabledDiagnostics] });
+  render(<Platform />);
+  await navigate('设置');
+  await screen.findByRole('heading', { name: '按你的习惯，轻松工作。' });
+
+  expect(screen.queryByRole('button', { name: 'AI 对话' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '日志调试' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'AI 助手暂不可用' }).hasAttribute('disabled')).toBe(true);
+
+  cleanup();
+  const second = fixture(undefined, true, false, [], undefined, { plugins: [installed, aiAssistant] });
+  render(<Platform />);
+  await screen.findByRole('heading', { name: '工具中心' });
+  await navigate('设置');
+  await screen.findByRole('heading', { name: '按你的习惯，轻松工作。' });
+  fireEvent.click(screen.getByRole('button', { name: '打开 AI 设置' }));
+  await waitFor(() => expect(second.invoke.mock.calls.some(([method, args]) => method === 'view.open' && (args as { id?: string; settings?: boolean }).id === 'official.ai-assistant' && (args as { settings?: boolean }).settings === true)).toBe(true));
 });
 
 it('checks plugin versions on demand and offers the update from installed tools', async () => {
@@ -377,15 +435,15 @@ it('renders workspace tabs without a duplicate page title bar', async () => {
   expect(toolTab.getAttribute('aria-selected')).toBe('false');
   expect(toolTab.querySelector('img.commerce-tab-icon-image')).toBeTruthy();
 
-  await navigate('AI 对话');
-  const chatShellTab = await screen.findByRole('tab', { name: 'AI 对话' });
-  expect(chatShellTab.getAttribute('aria-selected')).toBe('true');
-  expect(chatShellTab.querySelector('img.commerce-tab-icon-image')).toBeTruthy();
+  await navigate('设置');
+  const settingsShellTab = await screen.findByRole('tab', { name: '设置' });
+  expect(settingsShellTab.getAttribute('aria-selected')).toBe('true');
+  expect(settingsShellTab.querySelector('img.commerce-tab-icon-image')).toBeNull();
 
   fireEvent.click(toolTab);
   await waitFor(() => expect(toolTab.getAttribute('aria-selected')).toBe('true'));
-  expect(chatShellTab.getAttribute('aria-selected')).toBe('false');
-  expect(chatShellTab.textContent).toBe('AI 对话');
+  expect(settingsShellTab.getAttribute('aria-selected')).toBe('false');
+  expect(settingsShellTab.textContent).toBe('设置');
 
   const closeBtn = screen.getByRole('button', { name: '关闭工具' });
   fireEvent.click(closeBtn);

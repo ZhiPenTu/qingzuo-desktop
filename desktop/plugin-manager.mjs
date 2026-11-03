@@ -5,6 +5,24 @@ import AdmZip from 'adm-zip';
 import semver from 'semver';
 import { validateManifest, safeRelative, confinedPath, TARGET } from './security.mjs';
 export const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
+const PLUGIN_TIERS = new Set(['platform', 'official', 'community']);
+const TIER_RANK = { community: 0, official: 1, platform: 2 };
+function installedTier(row) {
+  return row?.source === 'market' && PLUGIN_TIERS.has(row.tier) ? row.tier : 'community';
+}
+function tierRecorded(row) {
+  return row?.source === 'market' && PLUGIN_TIERS.has(row.tier);
+}
+export function marketTierMigrationMatches(plugin, entry, platform) {
+  const artifact = entry?.artifacts?.[platform];
+  return Boolean(
+    plugin?.tierKnown === false
+    && plugin.version === entry?.version
+    && /^[a-f0-9]{64}$/.test(plugin.artifactSha256 || '')
+    && /^[a-f0-9]{64}$/.test(artifact?.sha256 || '')
+    && plugin.artifactSha256 === artifact.sha256,
+  );
+}
 export function verifyArtifact(bytes, record, publicKey) {
   if (!record?.sha256 || record.platform !== TARGET) throw new Error('市场制品缺少摘要或平台信息。');
   if (createHash('sha256').update(bytes).digest('hex') !== record.sha256) throw new Error('插件包校验失败。');
@@ -101,7 +119,7 @@ export class PluginManager {
     for (const name of await readdir(this.bundled).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
       const folder = path.join(this.bundled, name);
       const manifest = validateManifest(JSON.parse(await readFile(path.join(folder, 'package.json'), 'utf8')));
-      this.defaults.set(manifest.id, { ...manifest, folder, source: 'bundled', enabled: true });
+      this.defaults.set(manifest.id, { ...manifest, folder, source: 'bundled', tier: 'platform', tierKnown: true, enabled: true });
     }
     // Staging is never active; discard interrupted transactions on the next boot.
     await rm(path.join(this.root, '.staging'), { recursive: true, force: true });
@@ -113,17 +131,33 @@ export class PluginManager {
     for (const [id, row] of Object.entries(this.state.plugins)) {
       if (row.removed) { items.delete(id); continue; }
       if (row.folder) {
-        try { const folder = await confinedPath(this.root, row.folder); const manifest = validateManifest(JSON.parse(await readFile(path.join(folder, 'package.json'), 'utf8'))); if (manifest.id !== id) throw new Error('invalid identity'); items.set(id, { ...manifest, ...row, folder }); }
+        try {
+          const folder = await confinedPath(this.root, row.folder);
+          const manifest = validateManifest(JSON.parse(await readFile(path.join(folder, 'package.json'), 'utf8')));
+          if (manifest.id !== id) throw new Error('invalid identity');
+          const tier = installedTier(row);
+          items.set(id, {
+            ...manifest, ...row, folder, tier, tierKnown: tierRecorded(row), official: tier !== 'community',
+            title: manifest.title, description: manifest.description, category: manifest.category, icon: manifest.icon,
+          });
+        }
         catch (error) { const fallback = this.defaults.get(id); if (fallback) items.set(id, { ...fallback, error: error.message }); }
       } else if (items.has(id)) items.set(id, { ...items.get(id), enabled: row.enabled !== false });
     }
     const providers = new Set([...items.values()].filter(p => p.enabled).flatMap(p => p.services?.provides ?? []));
-    return [...items.values()].map(p => ({ ...p, bundled: this.defaults.has(p.id), missing: (p.services?.requires ?? []).filter(s => !providers.has(s)) }));
+    return [...items.values()].map(p => {
+      const tier = p.source === 'bundled' ? 'platform' : installedTier(p);
+      return {
+        ...p, tier, tierKnown: p.tierKnown ?? p.source === 'bundled', official: tier !== 'community',
+        bundled: this.defaults.has(p.id), missing: (p.services?.requires ?? []).filter(s => !providers.has(s)),
+      };
+    });
   }
   async get(id) { const p = (await this.list()).find(p => p.id === id); if (!p) throw new Error('插件未安装。'); return p; }
-  async install(bytes, { source = 'local', record, enabled } = {}) {
+  async install(bytes, { source = 'local', record, enabled, tier } = {}) {
     return this.transaction(async () => {
       if (source === 'market') verifyArtifact(bytes, record, this.publicKey);
+      if (source === 'market' && !PLUGIN_TIERS.has(tier)) throw new Error('市场插件缺少有效的信任层。');
       const staged = path.join(this.root, '.staging', randomUUID());
       try {
         const m = await unpackPackage(bytes, staged);
@@ -142,10 +176,20 @@ export class PluginManager {
         const installationId = Buffer.from(randomUUID().replaceAll('-', ''), 'hex').toString('base64url');
         const relative = 'installed/' + m.id + '/' + installationId;
         const folder = path.join(this.root, relative); await mkdir(path.dirname(folder), { recursive: true }); await rename(staged, folder);
+        const artifactSha256 = createHash('sha256').update(bytes).digest('hex');
+        const installedTier = source === 'market' ? tier : 'community';
         let activated = false;
         try {
           await this.stop(m.id);
-          this.state.plugins[m.id] = { folder: relative, enabled: enabled ?? installed?.enabled ?? previous?.enabled ?? true, source, previous };
+          this.state.plugins[m.id] = {
+            folder: relative,
+            enabled: enabled ?? installed?.enabled ?? previous?.enabled ?? true,
+            source,
+            tier: installedTier,
+            tierKnown: true,
+            artifactSha256,
+            previous,
+          };
           activated = true;
           const item = await this.get(m.id); if (item.enabled && item.missing.length) throw new Error('缺少运行所需的组件：' + item.missing.join('、')); if (item.enabled) await this.probe(item); await this.persist();
         } catch (error) {
@@ -167,9 +211,30 @@ export class PluginManager {
     catch(error){await this.stop(id);if(previous)this.state.plugins[id]=previous;else delete this.state.plugins[id];throw error;}
   }); }
   async uninstall(id) { return this.transaction(async () => { const plugin = await this.get(id); await this.stop(id); await this.forget(plugin); this.state.plugins[id] = { removed: true }; await this.persist(); await rm(path.join(this.root,'installed',id),{recursive:true,force:true,maxRetries:5,retryDelay:100}); }); }
-  async rollback(id) { return this.transaction(async () => { const row = this.state.plugins[id]; if (!row?.previous && !this.defaults.has(id)) throw new Error('没有可恢复的版本。'); await this.stop(id); if (row.previous) this.state.plugins[id] = row.previous; else delete this.state.plugins[id];
+  async setMarketTier(id, tierOrOptions, extra = {}) {
+    return this.transaction(async () => {
+      const options = typeof tierOrOptions === 'string'
+        ? { tier: tierOrOptions, ...(typeof extra === 'string' ? { version: extra } : extra) }
+        : tierOrOptions;
+      if (!options || !PLUGIN_TIERS.has(options.tier)) throw new Error('插件信任层无效。');
+      if (typeof options.version !== 'string' || !semver.valid(options.version)) throw new Error('插件版本匹配信息无效。');
+      if (options.artifactSha256 !== undefined && !/^[a-f0-9]{64}$/.test(options.artifactSha256)) throw new Error('插件制品摘要无效。');
+      const row = this.state.plugins[id];
+      if (!row || row.removed || row.source !== 'market' || !row.folder) throw new Error('只有市场安装的插件可以更新信任层。');
+      const item = await this.get(id);
+      if (item.source !== 'market') throw new Error('只有市场安装的插件可以更新信任层。');
+      if (item.version !== options.version) throw new Error('插件版本与信任层记录不匹配。');
+      if (options.artifactSha256 !== undefined && row.artifactSha256 !== options.artifactSha256) throw new Error('插件制品摘要与信任层记录不匹配。');
+      const previous = row;
+      this.state.plugins[id] = { ...row, tier: options.tier, tierKnown: true };
+      try { await this.persist(); }
+      catch (error) { this.state.plugins[id] = previous; throw error; }
+      return { ...item, tier: options.tier, official: options.tier !== 'community' };
+    });
+  }
+  async rollback(id) { return this.transaction(async () => { const row = this.state.plugins[id]; if (!row?.previous && !this.defaults.has(id)) throw new Error('没有可恢复的版本。'); await this.stop(id); if (row?.previous) { const currentTier = installedTier(row), previousTier = installedTier(row.previous); const tier = TIER_RANK[previousTier] < TIER_RANK[currentTier] ? previousTier : currentTier; this.state.plugins[id] = { ...row.previous, tier, tierKnown: tierRecorded(row) && tierRecorded(row.previous), official: tier !== 'community' }; } else delete this.state.plugins[id];
     try {const target=await this.get(id);if(target.missing.length)throw new Error('恢复版本缺少运行所需的组件。');if(target.enabled)await this.probe(target);await this.persist();}
-    catch(error){await this.stop(id);this.state.plugins[id]=row;throw error;} }); }
+    catch(error){await this.stop(id);if(row)this.state.plugins[id]=row;else delete this.state.plugins[id];throw error;} }); }
 }
 export async function boundedDownload(url, limit = MAX_PACKAGE_BYTES, signal, { onProgress = () => {}, request = fetch, idleTimeoutMs = 120000, totalTimeoutMs = 30 * 60_000 } = {}) {
   const parsed = new URL(url); if (parsed.protocol !== 'https:') throw new Error('下载地址必须使用 HTTPS。');

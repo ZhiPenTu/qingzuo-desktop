@@ -413,6 +413,7 @@ h2 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .debug-log-size label { font-size: 12px; font-weight: 550; }
 .debug-log-size .download-source-select { min-width: 120px; max-width: 140px; height: 34px; }
 .debug-log-size > span { margin-left: auto; }
+.debug-log-setting-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .debug-log-viewer { min-height: 0; }
 .debug-log-viewer-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
 .debug-log-viewer-head [data-slot="card-description"] { margin-top: 5px; }

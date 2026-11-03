@@ -24,7 +24,7 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 
 目录中的可选 `stats.downloads` 会显示为插件的累计下载量。该数据来自 GitHub Release 制品下载计数，包含重复下载，不等同于唯一用户或安装量。
 
-插件市场按来源分为「内置插件」与「社区插件」，社区插件再分为「官方插件」与「非官方插件」。官网目录展示的是社区插件：`id` 以 `official.` 开头或显式声明 `official: true` 的条目归为官方插件，其余归为非官方插件。内置插件来自桌面应用自身，不会出现在官网目录中。
+插件市场使用三档信任层：`platform`（底座内置）、`official`（官方社区）与 `community`（第三方）。官网按同一组筛选展示目录条目；随应用提供的插件通常不在市场目录中，但目录显式声明 `platform` 时仍会按底座内置展示。旧目录没有 `tier` 时，显式 `official: true` / `false` 分别归为官方社区与第三方；两者都没有时，`official.` 前缀仅作为旧目录兼容回退，绝不据此推断 `platform`。
 
 目录字段到页面元素的映射：
 
@@ -34,7 +34,8 @@ https://raw.githubusercontent.com/ZhiPenTu/qingzuo-market/main/catalog.json
 | `title` | 卡片标题与文字标记（中文标题改用 `id` 词首字母，避免多个插件标记相同） |
 | `version` | 标题右侧版本徽标 |
 | `category` | 副标题，同时用于类型筛选按钮 |
-| `official` | 来源标签：`official.` 前缀或 `official: true` 为社区官方插件，其余为非官方插件 |
+| `tier` | 信任层筛选与标签：`platform`、`official`、`community` |
+| `official` | 旧目录兼容字段；必须与 `tier` 投影一致，无 `tier` 时才用于迁移信任层 |
 | `description` | 卡片正文 |
 | `artifacts` 的键 | 平台徽标（`darwin-arm64` → macOS，`win32-x64` → Windows） |
 | `artifacts[*].url` | 反推出插件仓库地址，作为卡片链接 |

@@ -6,16 +6,21 @@ import path from 'node:path';
 import os from 'node:os';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
-import { PluginManager, inspectPackage, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
+import { PluginManager, inspectPackage, marketTierMigrationMatches, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
 import { validateManifest, TARGET } from '../../desktop/security.mjs';
 function archive(version = '0.1.0', overrides = {}) {
   const zip = new AdmZip(); zip.addFile('package.json', Buffer.from(JSON.stringify({ name: 'fixture', version, commerce: { manifestVersion: 1, id: 'local.fixture', title: 'Fixture', description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {}, ...overrides } }))); zip.addFile('ui/index.html', Buffer.from('<h1>Fixture</h1>')); return zip.toBuffer();
+}
+function releaseRecord(bytes, version = '0.1.0', extra = {}) {
+  return { id: 'local.fixture', version, api: '^1.0.0', platform: TARGET, sha256: createHash('sha256').update(bytes).digest('hex'), verification: 'github-release', ...extra };
 }
 test('local plugin can install, persist, disable, enable, upgrade, rollback and uninstall without a base build', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-manager-')); const bundled = path.join(root, 'bundled'); await mkdir(bundled);
   const stops = []; const manager = new PluginManager(path.join(root, 'plugins'), bundled, { stop: async id => stops.push(id) });
   try {
     await manager.initialize(); await manager.install(archive()); assert.equal((await manager.list())[0].version, '0.1.0');
+    assert.equal((await manager.get('local.fixture')).tier, 'community');
+    assert.match(manager.state.plugins['local.fixture'].artifactSha256, /^[a-f0-9]{64}$/);
     assert.match(manager.state.plugins['local.fixture'].folder, /^installed\/local\.fixture\/[A-Za-z0-9_-]{22}$/);
     await manager.setEnabled('local.fixture', false); assert.equal((await manager.get('local.fixture')).enabled, false);
     await manager.setEnabled('local.fixture', true); await manager.install(archive('0.2.0')); assert.equal((await manager.get('local.fixture')).version, '0.2.0');
@@ -104,7 +109,7 @@ test('legacy signed records keep their original package metadata contract', asyn
   };
   try {
     await mkdir(bundled); await manager.initialize();
-    await manager.install(bytes, { source: 'market', record });
+    await manager.install(bytes, { source: 'market', tier: 'community', record });
     assert.equal((await manager.get('local.fixture')).version, '0.1.0');
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -124,11 +129,137 @@ test('registered GitHub releases install through the normal atomic manager trans
   };
   try {
     await manager.initialize();
-    await manager.install(bytes, { source: 'market', record });
+    await manager.install(bytes, { source: 'market', tier: 'official', record });
     assert.equal((await manager.get('local.fixture')).version, '0.1.0');
+    assert.equal((await manager.get('local.fixture')).tier, 'official');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+test('market installs require an explicit catalog tier while local installs are always community', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-market-tier-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  const bytes = archive(), record = releaseRecord(bytes, '0.1.0', { tier: 'platform', official: true });
+  try {
+    await manager.initialize();
+    await assert.rejects(manager.install(bytes, { source: 'market', record }), /信任层/);
+    for (const tier of ['builtin', 'unknown', null]) {
+      await assert.rejects(manager.install(bytes, { source: 'market', tier, record }), /信任层/);
+    }
+    await manager.install(bytes, { source: 'market', tier: 'community', record });
+    assert.equal((await manager.get('local.fixture')).tier, 'community');
+    assert.equal((await manager.get('local.fixture')).official, false);
+    assert.equal(manager.state.plugins['local.fixture'].artifactSha256, record.sha256);
+    const reloaded = new PluginManager(path.join(root, 'plugins'), bundled);
+    await reloaded.initialize();
+    assert.equal((await reloaded.get('local.fixture')).tier, 'community');
+    const localBytes = archive('0.2.0');
+    await reloaded.install(localBytes, { source: 'local', tier: 'platform' });
+    assert.equal((await reloaded.get('local.fixture')).tier, 'community');
+    assert.equal(reloaded.state.plugins['local.fixture'].artifactSha256, createHash('sha256').update(localBytes).digest('hex'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('legacy market state without a tier is community and manifest or identifier fields cannot elevate it', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-legacy-tier-')), bundled = path.join(root, 'bundled'), plugins = path.join(root, 'plugins');
+  const legacyFolder = path.join(plugins, 'installed', 'official.forged', 'fixture');
+  const reviewedFolder = path.join(plugins, 'installed', 'official.reviewed', 'fixture');
+  const localFolder = path.join(plugins, 'installed', 'local.forged', 'fixture');
+  await mkdir(legacyFolder, { recursive: true });
+  await mkdir(reviewedFolder, { recursive: true });
+  await mkdir(localFolder, { recursive: true });
+  await mkdir(bundled);
+  const manifest = (id, tier) => JSON.stringify({ name: 'fixture', version: '0.1.0', commerce: { manifestVersion: 1, id, title: id, description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {}, tier } });
+  await writeFile(path.join(legacyFolder, 'package.json'), manifest('official.forged', 'platform'));
+  await writeFile(path.join(reviewedFolder, 'package.json'), manifest('official.reviewed', 'community'));
+  await writeFile(path.join(localFolder, 'package.json'), manifest('local.forged', 'platform'));
+  await writeFile(path.join(plugins, 'state.json'), JSON.stringify({ plugins: {
+    'official.forged': { folder: 'installed/official.forged/fixture', enabled: true, source: 'market' },
+    'official.reviewed': { folder: 'installed/official.reviewed/fixture', enabled: true, source: 'market', tier: 'official' },
+    'local.forged': { folder: 'installed/local.forged/fixture', enabled: true, source: 'local', tier: 'platform' },
+  } }));
+  const manager = new PluginManager(plugins, bundled);
+  try {
+    await manager.initialize();
+    const plugin = await manager.get('official.forged');
+    assert.equal(plugin.tier, 'community');
+    assert.equal(plugin.official, false);
+    assert.equal((await manager.get('official.reviewed')).tier, 'official');
+    assert.equal((await manager.get('local.forged')).tier, 'community');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('setMarketTier updates only a matching market installation and persists the reviewed tier', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-set-tier-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  const bytes = archive(), record = releaseRecord(bytes);
+  try {
+    await manager.initialize();
+    await manager.install(bytes, { source: 'market', tier: 'community', record });
+    await assert.rejects(manager.setMarketTier('local.fixture', 'official', { version: '0.2.0' }), /版本/);
+    await assert.rejects(manager.setMarketTier('local.fixture', 'official', { version: '0.1.0', artifactSha256: 'f'.repeat(64) }), /摘要/);
+    await assert.rejects(manager.setMarketTier('local.fixture', 'platform-invalid', { version: '0.1.0' }), /信任层/);
+    const updated = await manager.setMarketTier('local.fixture', 'official', { version: '0.1.0', artifactSha256: record.sha256 });
+    assert.equal(updated.tier, 'official');
+    assert.equal(manager.state.plugins['local.fixture'].tier, 'official');
+    const reloaded = new PluginManager(path.join(root, 'plugins'), bundled);
+    await reloaded.initialize();
+    assert.equal((await reloaded.get('local.fixture')).tier, 'official');
+    await reloaded.install(archive('0.2.0'), { source: 'local' });
+    await assert.rejects(reloaded.setMarketTier('local.fixture', 'official', { version: '0.2.0' }), /市场安装/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('rollback keeps the active installation tier instead of restoring a previous row tier', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-rollback-tier-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  const first = archive('0.1.0'), second = archive('0.2.0');
+  try {
+    await manager.initialize();
+    await manager.install(first, { source: 'market', tier: 'community', record: releaseRecord(first) });
+    await manager.install(second, { source: 'market', tier: 'official', record: releaseRecord(second, '0.2.0') });
+    manager.state.plugins['local.fixture'].previous.tier = 'platform';
+    await manager.rollback('local.fixture');
+    const restored = await manager.get('local.fixture');
+    assert.equal(restored.version, '0.1.0');
+    assert.equal(restored.tier, 'official');
+    assert.equal(manager.state.plugins['local.fixture'].tier, 'official');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('rollback never raises a lower previous tier to the active platform tier', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-rollback-lower-tier-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+  const first = archive('0.1.0'), second = archive('0.2.0');
+  try {
+    await manager.initialize();
+    await manager.install(first, { source: 'market', tier: 'community', record: releaseRecord(first) });
+    await manager.install(second, { source: 'market', tier: 'platform', record: releaseRecord(second, '0.2.0') });
+    await manager.rollback('local.fixture');
+    assert.equal((await manager.get('local.fixture')).version, '0.1.0');
+    assert.equal((await manager.get('local.fixture')).tier, 'community');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('legacy tier migration requires matching version, artifact digest and catalog digest', () => {
+  const sha256 = 'a'.repeat(64);
+  const plugin = { tierKnown: false, version: '1.0.0', artifactSha256: sha256 };
+  const entry = { version: '1.0.0', artifacts: { [TARGET]: { sha256 } } };
+  assert.equal(marketTierMigrationMatches(plugin, entry, TARGET), true);
+  assert.equal(marketTierMigrationMatches({ ...plugin, version: '1.0.1' }, entry, TARGET), false);
+  assert.equal(marketTierMigrationMatches({ ...plugin, tierKnown: true }, entry, TARGET), false);
+  assert.equal(marketTierMigrationMatches({ ...plugin, artifactSha256: undefined }, entry, TARGET), false);
+  assert.equal(marketTierMigrationMatches(plugin, { ...entry, artifacts: {} }, TARGET), false);
+  assert.equal(marketTierMigrationMatches(plugin, { ...entry, artifacts: { [TARGET]: { sha256: 'b'.repeat(64) } } }, TARGET), false);
 });
 test('path traversal and symlink package entries are rejected before extraction', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-malicious-'));
@@ -172,10 +303,12 @@ test('bundled identity survives a later installation', async () => {
   try {
     await manager.initialize();
     assert.equal((await manager.list())[0].bundled, true);
+    assert.equal((await manager.list())[0].tier, 'platform');
     await manager.install(archive('0.2.0'));
     const installed = await manager.get('local.fixture');
     assert.equal(installed.source, 'local');
     assert.equal(installed.bundled, true);
+    assert.equal(installed.tier, 'community');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

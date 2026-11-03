@@ -10,6 +10,8 @@ import videoDownloaderIcon from '@/assets/plugin-icons/official.video-downloader
 
 export { aiChatIcon };
 
+type PluginTier = 'platform' | 'official' | 'community';
+
 const officialPluginIcons: Record<string, string> = {
   'official.ai-image': aiImageIcon,
   'official.labeledit': labelEditIcon,
@@ -21,6 +23,10 @@ const officialPluginIcons: Record<string, string> = {
   'official.video-downloader': videoDownloaderIcon,
 };
 
-export function resolvePluginIcon(id: string, icon?: string | null): string | undefined {
-  return icon || officialPluginIcons[id];
+export function resolvePluginIcon(id: string, icon?: string | null, trust?: boolean | { tier?: PluginTier; source?: string }): string | undefined {
+  if (icon) return icon;
+  if (typeof trust === 'boolean') return trust ? officialPluginIcons[id] : undefined;
+  const trustedTier = trust?.tier === 'platform' || trust?.tier === 'official';
+  const trustedSource = trust?.source === 'market' || trust?.source === 'bundled';
+  return trustedTier && trustedSource ? officialPluginIcons[id] : undefined;
 }
