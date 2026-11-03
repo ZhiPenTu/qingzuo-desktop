@@ -1,7 +1,7 @@
 {
   "name": "qingzuo-desktop",
   "private": true,
-  "version": "0.6.24",
+  "version": "0.7.0",
   "engines": {
     "node": "24.x"
   },
