@@ -132,6 +132,14 @@ function validateReleaseFragment(value, entry, platform) {
   }
   if (Object.keys(item).some(key => !RELEASE_FIELDS.has(key) && !LEGACY_RELEASE_FIELDS.has(key))) throw new Error('插件发布清单包含未授权字段。');
   validateText(item);
+  if (item.artifacts !== undefined) {
+    if (!item.artifacts || typeof item.artifacts !== 'object' || Array.isArray(item.artifacts)
+      || Object.entries(item.artifacts).some(([artifactPlatform, artifact]) => !PLATFORMS.has(artifactPlatform)
+        || !artifact || typeof artifact !== 'object' || Array.isArray(artifact)
+        || Object.keys(artifact).some(key => !RELEASE_ARTIFACT_FIELDS.has(key)))) {
+      throw new Error('插件发布制品信息无效。');
+    }
+  }
   const artifact = item.artifacts?.[platform];
   if (!artifact || !Number.isSafeInteger(artifact.size) || artifact.size < 1
     || !/^[a-f0-9]{64}$/.test(artifact.sha256)
