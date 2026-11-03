@@ -22,6 +22,7 @@ import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
 import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
 import { DebugLogPage } from './DebugLogPage';
+import { CapabilitySettings } from './CapabilitySettings';
 const AIChat = lazy(() => import('./AIChat'));
 type Page = 'home' | 'chat' | 'ai' | 'settings' | 'logs';
 type ToolTab = 'installed' | 'all';
@@ -589,6 +590,7 @@ export default function Platform() {
         {page === 'ai' ? <AISettings onOpenChat={() => void navigate('chat')} /> : null}
         {page === 'logs' ? <DebugLogPage state={debugLogState} onStateChange={next => setStatus(current => current ? { ...current, debugLog: next } : current)} /> : null}
         {page === 'settings' ? <div className="commerce-settings">
+          <CapabilitySettings desktop={desktop} />
           <Card>
             <CardHeader>
               <CardTitle role="heading" aria-level={2}>AI 助手</CardTitle>

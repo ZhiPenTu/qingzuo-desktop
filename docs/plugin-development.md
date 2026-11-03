@@ -1,6 +1,6 @@
 # 插件开发
 
-底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.8.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
+底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.9.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
 
 ## 快速创建
 
@@ -134,6 +134,52 @@ SDK 提供文件选择/读取/保存、插件私密凭据设置/状态/清除、
 - 禁止直接在隔离页面依赖宿主 `--primary`、`.dark` 或主题状态。
 
 ## 市场发布与升级
+
+### API 1.9 工作区、远程 MCP 与公众号发布
+
+SDK 1.9.0 为需要本地文章目录、外部只读资料和公众号发布的插件增加三组宿主托管能力。插件仍然不接触真实文件路径、MCP 鉴权信息或微信密钥；所有持久化、网络请求、确认和错误恢复都由主进程完成。
+
+清单示例：
+
+```json
+{
+  "api": "^1.9.0",
+  "permissions": {
+    "files": true,
+    "storage": true,
+    "ai": ["text", "image-edit"],
+    "workspace": true,
+    "mcp": ["read"],
+    "wechat": ["draft", "publish", "list"]
+  }
+}
+```
+
+#### 持久工作区
+
+`workspace.pick/status/revoke/list/readText/readFile/writeText/writeFile/writeBase64/mkdir/rename/remove/url/importBundle` 使用一个由用户选择的普通文件夹。宿主只向插件返回显示名和相对路径，不返回绝对路径。可用根目录固定为 `.aws-article/`、`drafts/`、`posts/` 和 `series/`；`aws.env`、`.env*`、常见密钥扩展名、`.git`、符号链接和越界路径一律拒绝。
+
+写入先落同目录临时文件再原子替换。目录被移动、删除或替换后，`status()` 返回不可用并要求重新授权；撤销授权、停用或卸载只移除访问权，不删除用户文件。工作区记录绑定真实路径、设备号和 inode，重启后继续校验。
+
+`.aws` 预设包通过 `workspace.importBundle({ fileToken | url, dryRun, confirmSecrets })` 导入。宿主校验 ZIP 路径、重复项、符号链接、文件数和大小，只接受公网 HTTPS 地址并拒绝重定向。预览会返回预设替换、`config.yaml` 差异、`writing-spec.md` 动作、公众号账号变化、忽略项和警告。已有 `config.yaml` 永不覆盖；确认后预设子目录整体替换，`writing-spec.md` 覆盖，微信账号写入系统凭据库。包内模型密钥、端点和旧代理地址被剔除，插件继续使用轻作共享 AI。
+
+#### 远程 MCP
+
+用户在底座「设置 → 能力连接」添加远程 Streamable HTTP MCP 服务，支持无认证、静态 Bearer/API Key 和 OAuth 2.1 + PKCE。插件只通过 `mcp.servers/tools/grant/revoke/call` 查看服务器名称、状态和工具摘要；服务器 URL、鉴权头和令牌不会返回插件。
+
+只有声明 `annotations.readOnlyHint: true` 的工具可被发现和调用，并且需要用户按「服务器 + 工具」单独授权。宿主拒绝本机、私网、HTTP 和重定向地址，默认 60 秒超时；调用参数最多 256 KB，响应最多 2 MB。工具返回内容按不可信数据处理，插件不得据此自动执行本地操作。卸载插件会撤销其 MCP 授权。
+
+#### 公众号发布
+
+公众号账号在底座设置中录入，AppSecret 保存在系统凭据库，access token 只驻留主进程内存。固定访问 `https://api.weixin.qq.com`，不使用第三方代理。`wechat.accounts/verify/createDraft/publish/publishStatus/list` 分别读取掩码账号、验证连接、创建草稿、提交发布、查询状态和读取草稿/已发表列表。
+
+`createDraft` 的 HTML 正文必须用 `qingzuo-asset:<placeholder>` 引用当前文章目录内的 PNG/JPEG，封面和正文图片分别由宿主上传到 `material/add_material` 与 `media/uploadimg`，再替换为微信 CDN 地址。宿主拒绝脚本、表单、事件属性、外部图片和越出文章目录的素材。
+
+`publish` 每次显示原生确认框，列出公众号、文章标题和发布方式。Token 失效会刷新并只重试一次；发布回执持久化，结果未知时先查询，不重复提交。草稿 `mediaId` 由插件保存，便于在确认后重试发布。日志只记录阶段、数量、域名、微信错误码和结果，不记录 AppSecret、token、完整 HTML 或正文。
+
+#### AI 补全与批图
+
+`ai.complete` 新增 `maxTokens`（1–65536）与返回字段 `finishReason`。插件应检测 `length` 等截断原因并提示继续或缩短输入。`ai.batch.start` 新增与 `directoryToken` 互斥的 `workspacePath`；宿主在启动前确认图片数量、模型、目标目录和可能产生的费用，保存失败或结果未知时不会自动重发。
 
 ### API 1.8 文件下载
 
@@ -272,7 +318,7 @@ const result = await client.ai.complete({
 SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。插件不再自带模型地址与密钥，统一复用用户在底座「设置 → AI 模型」中连接的 OpenAI 兼容服务，全部能力要求显式清单权限：
 
 - **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是服务 `/v1/models` 全部返回中过滤出的可用文本模型（`id`、`title`）；底座不再保存指定模型，`defaultModel` 只是目录中的首个文本模型，方便旧插件兼容。新插件应展示目录并由用户或插件逻辑自行选择。
-- **文本补全**：`ai.complete({ model?, messages, temperature?, responseFormat? })` 通过主进程调用配置的代理 `/v1/chat/completions`，返回 `{ content, model }`。`messages` 为 1 到 100 条 `system / user / assistant` 消息，单条不超过 10 万字符；`responseFormat` 仅接受 `text` 或 `json_object`。密钥不出主进程，请求与响应大小受主进程限制。
+- **文本补全**：`ai.complete({ model?, messages, temperature?, maxTokens?, responseFormat? })` 通过主进程调用配置的代理 `/v1/chat/completions`，返回 `{ content, model, finishReason? }`。`messages` 为 1 到 100 条 `system / user / assistant` 消息，单条不超过 10 万字符；`maxTokens` 为 1 到 65536；`responseFormat` 仅接受 `text` 或 `json_object`。密钥不出主进程，请求与响应大小受主进程限制。
 - **共享助手**：`ai.assistant.send({ text, model? })` 也可显式传入目录中的模型；省略时沿用该插件会话已选模型，首次会话回退到目录中的首个文本模型。
 - **清单权限**：`permissions.ai` 新增 `text` 值；`api: '^1.4.0'` 声明本能力。旧插件不受影响。
 

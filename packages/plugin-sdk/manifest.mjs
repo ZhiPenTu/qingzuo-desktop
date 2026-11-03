@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import { validateToolSchema } from './tool-schema-core.mjs';
-export const API_VERSION = '1.8.0';
+export const API_VERSION = '1.9.0';
 export const TARGET = process.platform + '-' + process.arch;
 export const RESERVED_HEADERS = ['authorization', 'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-connection', 'te', 'trailer'];
 export function validatePluginIcon(value) {
@@ -29,12 +29,15 @@ export function validateManifest(pkg, target = TARGET) {
   safeRelative(m.ui);
   if (m.settings) { if (typeof m.settings.title !== 'string') throw new Error('插件设置无效。'); safeRelative(m.settings.entry); }
   const permissions = m.permissions ?? {};
-  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'credentialVault', 'downloads', 'ai', 'browser', 'browserOrigins', 'networkHeaders', 'storage'].includes(k))) throw new Error('插件申请了不支持的权限。');
+  if (Object.keys(permissions).some(k => !['files', 'network', 'credentials', 'credentialVault', 'downloads', 'ai', 'browser', 'browserOrigins', 'networkHeaders', 'storage', 'workspace', 'mcp', 'wechat'].includes(k))) throw new Error('插件申请了不支持的权限。');
   if (permissions.credentialVault !== undefined && !['use', 'manage'].includes(permissions.credentialVault)) throw new Error('共享凭证权限无效。');
   if (permissions.downloads !== undefined && !['use', 'manage'].includes(permissions.downloads)) throw new Error('下载权限无效。');
   if (permissions.ai !== undefined && (!Array.isArray(permissions.ai) || new Set(permissions.ai).size !== permissions.ai.length || permissions.ai.some(value => !['assistant', 'image-edit', 'text'].includes(value)))) throw new Error('AI 权限无效。');
   if (permissions.files !== undefined && typeof permissions.files !== 'boolean') throw new Error('文件权限无效。');
   if (permissions.storage !== undefined && typeof permissions.storage !== 'boolean') throw new Error('存储权限无效。');
+  if (permissions.workspace !== undefined && typeof permissions.workspace !== 'boolean') throw new Error('工作区权限无效。');
+  if (permissions.mcp !== undefined && (!Array.isArray(permissions.mcp) || new Set(permissions.mcp).size !== permissions.mcp.length || permissions.mcp.some(value => value !== 'read'))) throw new Error('MCP 权限无效。');
+  if (permissions.wechat !== undefined && (!Array.isArray(permissions.wechat) || new Set(permissions.wechat).size !== permissions.wechat.length || permissions.wechat.some(value => !['draft', 'publish', 'list'].includes(value)))) throw new Error('微信权限无效。');
   if (permissions.browser !== undefined && (!Array.isArray(permissions.browser) || new Set(permissions.browser).size !== permissions.browser.length || permissions.browser.some(value => !['detect', 'download', 'automate'].includes(value)))) throw new Error('浏览器权限无效。');
   for (const key of ['network', 'credentials']) if (permissions[key] !== undefined && (!Array.isArray(permissions[key]) || permissions[key].length > 16 || permissions[key].some(v => typeof v !== 'string'))) throw new Error('插件权限无效。');
   for (const origin of permissions.network ?? []) { const url = new URL(origin); if (url.protocol !== 'https:' || url.origin !== origin || url.username || url.password) throw new Error('网络权限必须为 HTTPS 来源。'); }

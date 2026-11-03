@@ -10,7 +10,7 @@ export async function atomicJson(filename, value) {
   try { await rename(temporary, filename); } finally { await rm(temporary, { force: true }); }
 }
 export class BatchRuntime {
-  constructor(root, files, editor, changed = () => {}) { this.root = root; this.files = files; this.editor = editor; this.changed = changed; this.batches = new Map(); this.running = new Map(); this.writes = new Map(); this.closed = false; }
+  constructor(root, files, editor, changed = () => {}, workspace = null, confirmWorkspace = async () => true) { this.root = root; this.files = files; this.editor = editor; this.changed = changed; this.workspace = workspace; this.confirmWorkspace = confirmWorkspace; this.batches = new Map(); this.running = new Map(); this.starting = new Map(); this.writes = new Map(); this.closed = false; }
   async initialize() {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     for (const id of await readdir(this.root)) {
@@ -45,7 +45,7 @@ export class BatchRuntime {
     const selection = this.editor.resolve ? await this.editor.resolve(plugin, options) : imageOptions(options.modelId, options.parameters);
     if (!Array.isArray(options.items) || !options.items.length || options.items.length > (mode === 'generate' ? 20 : 200) || !Number.isInteger(options.concurrency ?? 2) || (options.concurrency ?? 2) < 1 || (options.concurrency ?? 2) > 4) throw new Error('批次项目或并发数无效。');
     const id = randomUUID(), directory = path.join(this.root, id);
-    const batch = { schemaVersion: 1, id, owner: plugin.id, created: Date.now(), revision: 1, state: 'draft', mode, source: options.source ?? 'official', modelId: options.modelId, parameters: selection.parameters, selection, concurrency: options.concurrency ?? 2, directory: null, items: [] };
+    const batch = { schemaVersion: 1, id, owner: plugin.id, created: Date.now(), revision: 1, state: 'draft', mode, source: options.source ?? 'official', modelId: options.modelId, parameters: selection.parameters, selection, concurrency: options.concurrency ?? 2, directory: null, workspacePath: null, items: [] };
     await mkdir(directory, { recursive: true, mode: 0o700 });
     try {
       for (const [index, input] of options.items.entries()) {
@@ -70,19 +70,44 @@ export class BatchRuntime {
     if (this.running.has(id) || batch.state !== 'draft' || batch.revision !== revision || !Array.isArray(prompts) || prompts.length !== batch.items.length || prompts.some(prompt => typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000)) throw new Error('方案已改变或提示词无效。');
     batch.items.forEach((item, index) => { item.prompt = prompts[index]; }); batch.revision++; await this.persist(batch); return this.snapshot(batch);
   }
-  async start(plugin, { id, revision, directoryToken, retryFailed = false }) {
+  async start(plugin, { id, revision, directoryToken, workspacePath, retryFailed = false }) {
+    const pending = this.starting.get(id);
+    if (pending) {
+      await pending;
+      return this.snapshot(this.get(plugin, id));
+    }
+    const operation = this.startOne(plugin, { id, revision, directoryToken, workspacePath, retryFailed });
+    this.starting.set(id, operation);
+    try {
+      return await operation;
+    } finally {
+      this.starting.delete(id);
+    }
+  }
+  async startOne(plugin, { id, revision, directoryToken, workspacePath, retryFailed = false }) {
     const batch = this.get(plugin, id);
     if (this.running.has(id)) { await this.running.get(id).ready; return this.snapshot(batch); }
     if (batch.revision !== revision || !['draft', 'interrupted', 'finished', 'canceled'].includes(batch.state)) throw new Error('方案已改变，请重新确认。');
+    if ((directoryToken === undefined) === (workspacePath === undefined)) throw new Error('请选择一个输出目录。');
+    if (workspacePath !== undefined) {
+      if (!this.workspace) throw new Error('工作区输出不可用。');
+      if (typeof workspacePath !== 'string' || !workspacePath || workspacePath.length > 512) throw new Error('工作区目录无效。');
+      const target = await this.workspace.resolveExisting(plugin, workspacePath);
+      if (!target.info.isDirectory()) throw new Error('工作区目录无效。');
+      const approved = await this.confirmWorkspace(plugin, this.snapshot(batch), workspacePath);
+      if (!approved) throw new Error('已取消图片生成。');
+    }
     const operation = { controllers: new Set(), canceled: false, done: null };
     let ready, rejectReady;
     operation.ready = new Promise((resolve, reject) => { ready = resolve; rejectReady = reject; });
     this.running.set(id, operation);
     operation.done = (async () => {
-      const grant = this.files.directory(plugin, directoryToken); await this.validateDirectory(grant);
+      const grant = directoryToken !== undefined ? this.files.directory(plugin, directoryToken) : null;
+      if (grant) await this.validateDirectory(grant);
       if (batch.items.some(item => item.state === 'pending' || retryFailed && item.state === 'failed')) await this.editor.assertSelection?.(plugin, batch.selection);
       if (operation.canceled || this.closed) throw new Error('批次启动已取消。');
       batch.directory = grant;
+      batch.workspacePath = workspacePath ?? null;
       if (retryFailed) for (const item of batch.items) if (item.state === 'failed') { item.state = 'pending'; item.error = null; }
       batch.state = 'running'; await this.persist(batch); ready();
       await this.run(plugin, batch, operation);
@@ -94,10 +119,26 @@ export class BatchRuntime {
     const info = await lstat(grant.filename);
     if (!info.isDirectory() || info.isSymbolicLink() || await realpath(grant.filename) !== grant.filename || info.dev !== grant.dev || info.ino !== grant.ino) throw new Error('输出目录已改变，请重新授权。');
   }
-  async saveResult(batch, item, index) {
-    await this.validateDirectory(batch.directory);
+  async validateWorkspace(plugin, workspacePath) {
+    if (!this.workspace || typeof workspacePath !== 'string') throw new Error('工作区目录已改变，请重新授权。');
+    const target = await this.workspace.resolveExisting(plugin, workspacePath);
+    if (!target.info.isDirectory()) throw new Error('工作区目录已改变，请重新授权。');
+  }
+  async saveResult(plugin, batch, item, index) {
     const extension = item.outputMime === 'image/jpeg' ? 'jpg' : item.outputMime === 'image/webp' ? 'webp' : 'png';
     const name = path.parse(item.name).name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 90) + '-ai-' + batch.id.slice(0, 8) + '-' + (index + 1) + '.' + extension;
+    if (batch.workspacePath) {
+      await this.validateWorkspace(plugin, batch.workspacePath);
+      await this.workspace.writeBase64(plugin, {
+        path: batch.workspacePath + '/' + name,
+        data: (await readFile(path.join(this.root, batch.id, 'output-' + index))).toString('base64'),
+        mime: item.outputMime,
+        overwrite: false,
+      });
+      item.output = name; item.state = 'succeeded'; item.error = null;
+      return;
+    }
+    await this.validateDirectory(batch.directory);
     await copyFile(path.join(this.root, batch.id, 'output-' + index), path.join(batch.directory.filename, name), constants.COPYFILE_EXCL);
     item.output = name; item.state = 'succeeded'; item.error = null;
   }
@@ -118,7 +159,7 @@ export class BatchRuntime {
             await writeFile(path.join(this.root, batch.id, 'output-' + index), output.bytes, { mode: 0o600 }); item.outputMime = output.mime;
           }
           item.state = 'save-failed'; await this.persist(batch);
-          await this.saveResult(batch, item, index);
+          await this.saveResult(plugin, batch, item, index);
         } catch (error) {
           item.state = item.outputMime ? 'save-failed' : controller.signal.aborted ? 'unknown' : 'failed';
           item.error = controller.signal.aborted ? '请求已停止，服务结果未知；不会自动重发。' : error.message;
