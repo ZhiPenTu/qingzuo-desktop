@@ -63,6 +63,8 @@ export class TextRuntime {
     if (model.length > 160) throw new Error('模型标识无效。');
     const temperature = args.temperature === undefined ? undefined : Number(args.temperature);
     if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) throw new Error('temperature 必须在 0 到 2 之间。');
+    const maxTokens = args.maxTokens === undefined ? undefined : Number(args.maxTokens);
+    if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 65536)) throw new Error('maxTokens 必须在 1 到 65536 之间。');
     const responseFormat = args.responseFormat === undefined ? undefined : args.responseFormat;
     if (responseFormat !== undefined && (typeof responseFormat !== 'object' || responseFormat === null || !['text', 'json_object'].includes(responseFormat.type))) throw new Error('responseFormat 无效。');
     if (!Array.isArray(args.messages) || args.messages.length === 0 || args.messages.length > MAX_MESSAGES) throw new Error('messages 必须为 1 到 100 条。');
@@ -75,6 +77,7 @@ export class TextRuntime {
     if (!selectedModel) throw new Error('没有可用的文本模型，请检查 AI 服务配置。');
     const body = { model: selectedModel, messages };
     if (temperature !== undefined) body.temperature = temperature;
+    if (maxTokens !== undefined) body.max_tokens = maxTokens;
     if (responseFormat !== undefined) body.response_format = { type: responseFormat.type };
     if (Buffer.byteLength(JSON.stringify(body)) > MAX_BODY_BYTES) throw new Error('补全请求过大。');
     const response = await this.proxy.request(connection.base, '/v1/chat/completions', {
@@ -89,6 +92,7 @@ export class TextRuntime {
     const value = await boundedJson(response, MAX_RESPONSE_BYTES);
     const content = value?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.length === 0) throw new Error('AI 服务没有返回内容。');
-    return { content, model: body.model };
+    const finishReason = value?.choices?.[0]?.finish_reason;
+    return { content, model: body.model, ...(typeof finishReason === 'string' ? { finishReason } : {}) };
   }
 }

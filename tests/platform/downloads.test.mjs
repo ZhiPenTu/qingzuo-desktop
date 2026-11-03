@@ -765,8 +765,8 @@ test('symlinked partial files and replaced directories never redirect writes', a
   assert.match(stopped.error, /临时文件不可用/);
 });
 
-test('manifest and SDK expose the downloads contract at API 1.8', async () => {
-  assert.equal(API_VERSION, '1.8.0');
+test('manifest and SDK expose the downloads contract at API 1.9', async () => {
+  assert.equal(API_VERSION, '1.9.0');
   const base = {
     name: 'fixture',
     version: '0.1.0',
