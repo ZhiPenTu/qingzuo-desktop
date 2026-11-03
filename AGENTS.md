@@ -30,7 +30,7 @@
 
 Codex Desktop 采用多任务工作树机制，每个任务应在独立的 Git Worktree 中进行，保持主干纯净与上下文隔离：
 
-- **分支规范**：仓库采用 `main`（生产主干）与 `develop`（开发集成）双分支，禁止在 `main` 或 `develop` 上直接提交或推送代码，禁止在处于 detached HEAD 状态时盲目提交。所有开发与发布任务必须基于最新的 `origin/develop` 创建独立分支，分支命名统一遵循 `codex/<type>-<name>` 或 `codex/<feature-name>`（例如 `codex/optimize-settings-ui`、`codex/release-v0.3.16`）。
+- **分支规范**：仓库采用 `main`（生产主干）与 `develop`（开发集成）双分支，禁止在 `main` 或 `develop` 上直接提交或推送代码，禁止在处于 detached HEAD 状态时盲目提交。所有开发与发布任务必须基于最新的 `origin/develop` 创建独立分支，分支命名统一遵循 `codex/<type>-<name>` 或 `codex/<feature-name>`（例如 `codex/optimize-settings-ui`、`codex/release-v0.3.16`）；`Branch policy` 会校验来源分支的 `codex/` 前缀，完整命名仍需遵守本约定。
 - **依赖快速复用**：新建 Worktree 默认不包含忽略的目录。为避免每次重复下载巨大依赖或重复编译 Rust 沙箱，可软链接主工作区的依赖与产物：
 
   ```sh
@@ -86,7 +86,7 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 
 所有变更均需通过 GitHub Pull Request 提交合并，确保主干可追溯且通过自动化验证：
 
-- **提交信息语义化**：遵循 Conventional Commits 规范，统一采用 `feat:`、`fix:`、`style:`、`chore:`、`docs:`、`test:`、`refactor:` 前缀，精准描述变更范围。
+- **提交信息语义化**：遵循 Conventional Commits 规范，统一采用 `feat:`、`fix:`、`style:`、`chore:`、`docs:`、`test:`、`refactor:`、`perf:`、`build:`、`ci:`、`revert:` 前缀，精准描述变更范围。
 - **PR 标题与模板**：
   - PR 标题应清晰概括业务或平台意图，与核心提交说明保持一致。
   - PR 正文必须使用项目模板（`.github/pull_request_template.md`），明确填写两项核心内容：
