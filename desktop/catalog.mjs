@@ -5,7 +5,9 @@ const PLUGIN_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PLATFORMS = new Set(['darwin-arm64', 'win32-x64']);
 const PLUGIN_TIERS = new Set(['platform', 'official', 'community']);
+const RELEASE_ROOT_FIELDS = new Set(['schemaVersion', 'plugins']);
 const RELEASE_FIELDS = new Set(['id', 'version', 'title', 'description', 'category', 'api', 'icon', 'releaseNotes', 'artifacts']);
+const RELEASE_ARTIFACT_FIELDS = new Set(['url', 'size', 'sha256']);
 // Immutable releases published before SDK 1.10 include harmless manifest fields.
 // Accept and strip them for rollout, while never allowing market trust metadata.
 const LEGACY_RELEASE_FIELDS = new Set(['manifestVersion', 'ui', 'permissions', 'settings', 'backend', 'services']);
@@ -123,6 +125,7 @@ function validateReleaseFragment(value, entry, platform) {
   if (value?.schemaVersion !== 1 || !Array.isArray(value.plugins) || value.plugins.length !== 1) {
     throw new Error('插件发布清单格式无效。');
   }
+  if (Object.keys(value).some(key => !RELEASE_ROOT_FIELDS.has(key))) throw new Error('插件发布清单包含未授权字段。');
   const item = value.plugins[0];
   if (item?.id !== entry.id || !PLUGIN_ID.test(item.id) || !stableVersion(item.version)) {
     throw new Error('插件发布清单与市场收录不一致。');
@@ -131,7 +134,8 @@ function validateReleaseFragment(value, entry, platform) {
   validateText(item);
   const artifact = item.artifacts?.[platform];
   if (!artifact || !Number.isSafeInteger(artifact.size) || artifact.size < 1
-    || !/^[a-f0-9]{64}$/.test(artifact.sha256)) {
+    || !/^[a-f0-9]{64}$/.test(artifact.sha256)
+    || Object.keys(artifact).some(key => !RELEASE_ARTIFACT_FIELDS.has(key))) {
     throw new Error('插件发布制品信息无效。');
   }
   const expected = expectedReleaseArtifactUrl(entry.source.repository, entry.id, item.version, platform);
