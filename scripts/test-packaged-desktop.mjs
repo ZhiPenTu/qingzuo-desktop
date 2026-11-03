@@ -32,6 +32,9 @@ try {
   expect(status.update.status).toBe('idle');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await expect(page.getByText('下载完成后由你选择何时重新启动；正在编辑的文件不会受影响。', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'AI 助手', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '从市场安装', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'AI 对话', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '工具中心', exact: true }).click();
   await mkdir('output/electron-tests', { recursive: true });
   await page.screenshot({ path: 'output/electron-tests/packaged-home.png' });
@@ -41,13 +44,7 @@ try {
   const resources = process.platform === 'darwin' ? path.join(installedRoot, 'Contents/Resources/commerce') : path.join(installedRoot, 'resources/commerce');
   expect(await readdir(resources)).not.toContain('plugins');
   expect(JSON.parse(await readFile(path.join(resources, 'distribution.json'), 'utf8')).preview).toBe(false);
-  await page.getByRole('button', { name: 'AI 对话', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'AI 对话', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '打开 AI 设置', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '选择一个服务商', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^DeepSeek/ })).toBeVisible();
-  console.log('Standalone pure platform: seven Harness services, empty tool center and no bundled business plugins passed.');
+  console.log('Standalone pure platform: seven Harness services, empty tool center, market-installed AI assistant and no bundled business plugins passed.');
 } finally {
   if (app) await app.close();
   await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
