@@ -103,7 +103,27 @@ test('WeChat rejects executable HTML, external images and missing placeholders',
   assert.throws(() => sanitizeWechatHtml('<img src="https://evil.example/x.png">', new Map()), /工作区资产占位符/);
   assert.throws(() => sanitizeWechatHtml('<img src="qingzuo-asset:missing">', new Map()), /不存在/);
   assert.throws(() => sanitizeWechatHtml('<picture><source src="https://evil.example/x.png"><img src="qingzuo-asset:body"></picture>', new Map([['body', 'drafts/body.png']])), /资源标签/);
+  const cssImage = sanitizeWechatHtml('<p style="background-image:image-set(\'https://evil.example/x.png\' 1x)">ok</p>', new Map()).html;
+  assert.doesNotMatch(cssImage, /evil\.example|image-set|https?:/);
   assert.equal(sanitizeWechatHtml('<p>ok</p>').html, '<p>ok</p>');
+});
+
+test('WeChat workspace errors never expose absolute paths', async () => {
+  const runtime = new WechatRuntime({
+    store: null,
+    workspace: {
+      async resolveExisting() {
+        throw Object.assign(new Error('EACCES: permission denied, open \'/Users/example/private/cover.png\''), { code: 'EACCES' });
+      },
+    },
+    files: null,
+    confirm: async () => true,
+    root: path.join(os.tmpdir(), 'qingzuo-wechat-unused'),
+  });
+  await assert.rejects(
+    runtime.imageFile(plugin, 'drafts/20261103-demo', 'drafts/20261103-demo/cover.png', 1024),
+    error => !error.message.includes('/Users/') && /没有权限访问/.test(error.message),
+  );
 });
 
 test('WeChat keeps profile and mini-program embeds while dropping unsafe attributes', () => {

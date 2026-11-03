@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { imageOptions } from './ai-images.mjs';
+import { publicWorkspaceError } from './workspace.mjs';
 
 export async function atomicJson(filename, value) {
   const temporary = filename + '.' + randomUUID() + '.tmp';
@@ -121,8 +122,12 @@ export class BatchRuntime {
   }
   async validateWorkspace(plugin, workspacePath) {
     if (!this.workspace || typeof workspacePath !== 'string') throw new Error('工作区目录已改变，请重新授权。');
-    const target = await this.workspace.resolveExisting(plugin, workspacePath);
-    if (!target.info.isDirectory()) throw new Error('工作区目录已改变，请重新授权。');
+    try {
+      const target = await this.workspace.resolveExisting(plugin, workspacePath);
+      if (!target.info.isDirectory()) throw new Error('工作区目录已改变，请重新授权。');
+    } catch (error) {
+      throw publicWorkspaceError(error);
+    }
   }
   async saveResult(plugin, batch, item, index) {
     const extension = item.outputMime === 'image/jpeg' ? 'jpg' : item.outputMime === 'image/webp' ? 'webp' : 'png';
@@ -162,7 +167,7 @@ export class BatchRuntime {
           await this.saveResult(plugin, batch, item, index);
         } catch (error) {
           item.state = item.outputMime ? 'save-failed' : controller.signal.aborted ? 'unknown' : 'failed';
-          item.error = controller.signal.aborted ? '请求已停止，服务结果未知；不会自动重发。' : error.message;
+          item.error = controller.signal.aborted ? '请求已停止，服务结果未知；不会自动重发。' : publicWorkspaceError(error).message;
         } finally { clearTimeout(timer); operation.controllers.delete(controller); await this.persist(batch); }
       }
     };

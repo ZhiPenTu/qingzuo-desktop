@@ -109,3 +109,43 @@ test('AI batches run only one generation for concurrent starts of the same batch
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('AI batch workspace failures never expose absolute paths', async () => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-batch-workspace-'));
+  const editor = {
+    resolve: async () => ({ model: { id: 'fake' }, parameters: {} }),
+    assertSelection: async () => {},
+    generate: async () => ({ bytes: png, mime: 'image/png' }),
+  };
+  const workspace = {
+    async resolveExisting() { return { info: { isDirectory: () => true } }; },
+    async writeBase64() {
+      throw Object.assign(new Error('EACCES: permission denied, open \'/Users/example/private/.qingzuo-123.tmp\''), { code: 'EACCES' });
+    },
+  };
+  const runtime = new BatchRuntime(
+    path.join(base, 'batches'),
+    { async get() { throw new Error('not used'); }, directory() { throw new Error('not used'); } },
+    editor,
+    () => {},
+    workspace,
+    async () => true,
+  );
+  try {
+    await runtime.initialize();
+    const created = await runtime.create(plugin, { mode: 'generate', modelId: 'fake', items: [{ prompt: '画一张图' }] });
+    await runtime.start(plugin, { id: created.id, revision: created.revision, workspacePath: 'drafts/20261103-demo' });
+    let current = runtime.get(plugin, created.id);
+    for (let index = 0; index < 100 && current.state !== 'finished'; index += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      current = runtime.get(plugin, created.id);
+    }
+    assert.equal(current.state, 'finished');
+    assert.equal(current.items[0].state, 'save-failed');
+    assert.doesNotMatch(current.items[0].error, /Users|private|qingzuo-123/);
+    assert.match(current.items[0].error, /没有权限访问/);
+  } finally {
+    await runtime.shutdown();
+    await rm(base, { recursive: true, force: true });
+  }
+});

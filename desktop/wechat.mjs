@@ -4,6 +4,7 @@ import path from 'node:path';
 import { parseFragment, serialize } from 'parse5';
 import { maskAppId } from './credential-policy.mjs';
 import { secureRequest } from './network-transport.mjs';
+import { publicWorkspaceError } from './workspace.mjs';
 
 const API_ROOT = 'https://api.weixin.qq.com';
 const ACCOUNT_ID = /^wx-[a-f0-9]{12}$/;
@@ -258,7 +259,7 @@ export class WechatAccountStore {
 function sanitizeStyle(value) {
   if (typeof value !== 'string' || value.length > 12000) return null;
   const text = value.trim();
-  if (!text || /(?:expression\s*\(|javascript\s*:|url\s*\(|@import|behavior\s*:|-moz-binding|position\s*:\s*fixed)/i.test(text)) return null;
+  if (!text || /(?:expression\s*\(|javascript\s*:|url\s*\(|@import|behavior\s*:|-moz-binding|position\s*:\s*fixed|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|element\s*\(|paint\s*\(|src\s*\(|https?\s*:|\/\/|\\|\/\*)/i.test(text)) return null;
   return text;
 }
 
@@ -548,11 +549,15 @@ export class WechatRuntime {
 
   async imageFile(plugin, articleDir, assetPath, maxBytes) {
     this.assertArticlePath(articleDir, assetPath);
-    const item = await this.workspace.resolveExisting(plugin, assetPath);
-    if (!item.info.isFile() || item.info.size > maxBytes) throw new Error('公众号图片过大或不存在。');
-    const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(item.filename).toLowerCase()];
-    if (!mime) throw new Error('公众号图片仅支持 PNG 或 JPEG。');
-    return { filename: path.basename(item.filename), mime, bytes: await readFile(item.filename) };
+    try {
+      const item = await this.workspace.resolveExisting(plugin, assetPath);
+      if (!item.info.isFile() || item.info.size > maxBytes) throw new Error('公众号图片过大或不存在。');
+      const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(item.filename).toLowerCase()];
+      if (!mime) throw new Error('公众号图片仅支持 PNG 或 JPEG。');
+      return { filename: path.basename(item.filename), mime, bytes: await readFile(item.filename) };
+    } catch (error) {
+      throw publicWorkspaceError(error);
+    }
   }
 
   async createDraft(plugin, { accountId, article } = {}) {
@@ -568,8 +573,13 @@ export class WechatRuntime {
     if (!article.cover || typeof article.cover !== 'object') throw new Error('文章封面无效。');
     if (!Array.isArray(article.assets) || article.assets.length > 20) throw new Error('正文图片数量无效。');
 
-    const directory = await this.workspace.resolveExisting(plugin, articleDir);
-    if (!directory.info.isDirectory()) throw new Error('文章目录不存在。');
+    let directory;
+    try {
+      directory = await this.workspace.resolveExisting(plugin, articleDir);
+      if (!directory.info.isDirectory()) throw new Error('文章目录不存在。');
+    } catch (error) {
+      throw publicWorkspaceError(error);
+    }
     const placeholderMap = new Map();
     for (const asset of article.assets) {
       if (!asset || typeof asset.placeholder !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(asset.placeholder)) throw new Error('正文图片占位符无效。');
