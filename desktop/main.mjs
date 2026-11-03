@@ -5,7 +5,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { PluginManager, boundedDownload, inspectPackage } from './plugin-manager.mjs';
+import { PluginManager, boundedDownload, inspectPackage, marketTierMigrationMatches } from './plugin-manager.mjs';
 import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
@@ -30,6 +30,18 @@ import { TextRuntime } from './ai-text.mjs';
 import { DownloadSourceService } from './download-sources.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
+import {
+  FIRST_PARTY_ASSISTANT,
+  FIRST_PARTY_DIAGNOSTICS,
+  assertFirstPartyAccess,
+  isFirstPartyBridgePlugin,
+  sanitizeAssistantEvent,
+  sanitizeAssistantSession,
+  sanitizeAssistantSummary,
+  sanitizeAssistantTools,
+} from './first-party.mjs';
+import { FirstPartyGrants } from './first-party-grants.mjs';
+import { SecretPrompt } from './secret-prompt.mjs';
 import { BrowserRuntime } from './browser.mjs';
 import { testRoutedRequest } from './network-test-routes.mjs';
 import { DebugLogService } from './debug-logging.mjs';
@@ -59,8 +71,10 @@ let automaticUpdateTimer = null, automaticUpdateInterval = null, automaticUpdate
 let localPreview = false;
 let migration;
 let batches, proxy, imageEditor, textRuntime, approvals, downloadSources, workspace, wechatStore, wechatRuntime, mcpRuntime, awsImporter;
+let firstPartyGrants, secretPrompt;
 const pendingDebugLogs = [];
 let debugLogEventTimer = null;
+const approvalDialogs = new Set();
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -108,6 +122,7 @@ function queueDebugLog(entry) {
     window.webContents.send('commerce:debug-log', pendingDebugLogs.splice(0));
   }, 100);
   debugLogEventTimer.unref?.();
+  void broadcastFirstPartyDebugLogs([entry]);
 }
 function runtimeLog(scope) {
   return (level, source, message, extra = {}) => {
@@ -172,7 +187,74 @@ function startBrowserResize(args = {}) {
   };
   updateBrowserResize(args.startX);
 }
-function aiChanged(id, event) { if (isHostChat(id)) { if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) }); return; } const view = views.get(id); if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event); }
+function aiChanged(id, event) {
+  if (isHostChat(id)) {
+    const value = { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) };
+    if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', value);
+    if (value.type === 'approvals') void presentApprovals(id);
+    const safe = sanitizeAssistantEvent(value);
+    if (safe) void sendAssistantEvent(safe);
+    return;
+  }
+  const view = views.get(id);
+  if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event);
+}
+async function sendAssistantEvent(event) {
+  if (!manager) return;
+  const plugin = await manager.get(FIRST_PARTY_ASSISTANT).catch(() => null);
+  if (!isFirstPartyBridgePlugin(plugin)) return;
+  const view = views.get(plugin.id);
+  if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event);
+}
+async function broadcastFirstPartyDebugLogs(entries) {
+  if (!manager || !firstPartyGrants || !entries.length) return;
+  const plugin = await manager.get(FIRST_PARTY_DIAGNOSTICS).catch(() => null);
+  if (!isFirstPartyBridgePlugin(plugin)) return;
+  let granted = false;
+  try { granted = firstPartyGrants.status(plugin, 'logs'); } catch { return; }
+  if (!granted) return;
+  const view = views.get(plugin.id);
+  if (!view || view.webContents.isDestroyed()) return;
+  view.webContents.send('commerce:debug-log', {
+    sessionId: debugLog.sessionId,
+    entries: entries.map(entry => ({ ...entry })),
+    nextCursor: entries.at(-1)?.seq ?? debugLog.sequence,
+  });
+}
+async function presentApprovals(owner) {
+  if (!window || window.isDestroyed() || !approvals) return;
+  for (const approval of approvals.list(owner)) {
+    if (approvalDialogs.has(approval.id)) continue;
+    approvalDialogs.add(approval.id);
+    const detail = JSON.stringify({
+      plugin: approval.pluginId,
+      version: approval.version,
+      tool: approval.tool,
+      arguments: approval.args,
+      ...(approval.detail ? { review: approval.detail } : {}),
+    }, null, 2);
+    const result = await dialog.showMessageBox(window, {
+      type: 'warning',
+      modal: true,
+      buttons: ['拒绝', '允许'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: '确认 AI 插件调用',
+      message: '「' + approval.pluginTitle + '」请求执行：' + approval.title,
+      detail: detail.slice(0, 24000) + (detail.length > 24000 ? '\n…' : ''),
+    }).catch(() => ({ response: 0 }));
+    try {
+      if (approvals.list(owner).some(entry => entry.id === approval.id)) {
+        approvals.respond(owner, approval.id, result.response === 1);
+      }
+    } catch {
+      // The session or approval may have expired while the native dialog was open.
+    } finally {
+      approvalDialogs.delete(approval.id);
+    }
+  }
+}
 async function stopPlugin(id) {
   approvals?.cancelPlugin(id);
   const plugin = await manager.get(id).catch(() => null);
@@ -182,7 +264,18 @@ async function stopPlugin(id) {
   for (const [token, directory] of files?.directories || []) if (directory.owner === id) files.directories.delete(token);
   await closeView(id);
 }
-function sanitizePlugin(p) { const { folder, backend, ...publicValue } = p; return { ...publicValue, local: Boolean(backend) }; }
+function sanitizePlugin(p) {
+  const { folder, backend, artifactSha256, previous, tierKnown, ...publicValue } = p;
+  return { ...publicValue, local: Boolean(backend) };
+}
+function trustedOfficialTool(plugin, id) {
+  return Boolean(
+    plugin
+    && plugin.id === id
+    && (plugin.tier === 'platform' || plugin.tier === 'official')
+    && ['market', 'bundled'].includes(plugin.source),
+  );
+}
 function assertFrame(event, shellOnly = false) {
   if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('未授权的框架请求。');
   if (shellOnly) { if (event.sender !== window?.webContents) throw new Error('未授权的平台请求。'); return; }
@@ -222,7 +315,7 @@ async function servePlugin(request, id) {
       return new Response(await readFile(item.filename), { headers: { 'Content-Type': item.mime, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox" } });
     }
     const image = url.pathname.match(/^\/api\/documents\/([a-f0-9]{32})\/pages\/(\d{1,2})\/image$/);
-    if (image && plugin.id === 'official.labeledit') { const value = await (await workers.start(plugin)).call('image', { id: image[1], page: Number(image[2]) }); return new Response(Buffer.from(value.data, 'base64'), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } }); }
+    if (image && trustedOfficialTool(plugin, 'official.labeledit')) { const value = await (await workers.start(plugin)).call('image', { id: image[1], page: Number(image[2]) }); return new Response(Buffer.from(value.data, 'base64'), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } }); }
     const filename = await confinedPath(plugin.folder, decodeURIComponent(url.pathname.slice(1)));
     const response = await resourceResponse(filename);
     response.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'");
@@ -401,7 +494,27 @@ async function catalog(signal, id) {
       ? downloadSources.runWithFallback(url, address => load(address, limit), { signal })
       : load(url, limit),
   });
+  await reconcileInstalledTiers(items);
   return { items, configured: true };
+}
+async function reconcileInstalledTiers(items) {
+  if (!manager || !Array.isArray(items) || !items.length) return;
+  const rank = { community: 0, official: 1, platform: 2 };
+  for (const entry of items) {
+    if (!['platform', 'official', 'community'].includes(entry.tier)) continue;
+    const plugin = await manager.get(entry.id).catch(() => null);
+    if (!plugin || plugin.source !== 'market' || plugin.tier === entry.tier) continue;
+    const legacyMigration = marketTierMigrationMatches(plugin, entry, process.platform + '-' + process.arch);
+    const downgrade = rank[entry.tier] < rank[plugin.tier];
+    if (!legacyMigration && !downgrade) continue;
+    await manager.setMarketTier(entry.id, {
+      tier: entry.tier,
+      version: plugin.version,
+      ...(legacyMigration && plugin.artifactSha256 ? { artifactSha256: plugin.artifactSha256 } : {}),
+    }).catch(error => {
+      debugLog?.record({ scope: 'plugin', source: entry.id, level: 'warn', message: '插件信任层同步失败：' + error.message });
+    });
+  }
 }
 let credentialDialog = Promise.resolve();
 function confirmWorkspaceBatch(plugin, batch, workspacePath) {
@@ -544,6 +657,152 @@ async function purgeLegacyCredentials() {
     debugLog?.record({ scope: 'credential', source: 'vault', level: 'warn', message: '旧版明文凭据清理未完成。' });
   }
 }
+function bridgeArgs(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('第一方调用参数无效。');
+  return value;
+}
+function chatIdArg(value) {
+  if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/i.test(value)) throw new Error('对话标识无效。');
+  return value;
+}
+function imageProviderArg(value) {
+  if (!['google', 'openai'].includes(value)) throw new Error('图像服务无效。');
+  return value;
+}
+async function diagnosticsGrant(plugin) {
+  let granted = false;
+  try {
+    granted = firstPartyGrants.status(plugin, 'logs');
+  } catch {
+    throw new Error('诊断插件安装信息不完整，请重新安装。');
+  }
+  if (granted) return true;
+  const accepted = await firstPartyGrants.ensure(plugin, 'logs', async () => {
+    if (!window || window.isDestroyed()) throw new Error('请先打开轻作窗口。');
+    const result = await dialog.showMessageBox(window, {
+      type: 'warning',
+      buttons: ['不允许', '允许'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: '授权查看运行日志',
+      message: '「' + plugin.title + '」请求读取轻作运行日志',
+      detail: '日志可能包含本地文件路径、网页地址、服务地址和错误信息。密钥、令牌、密码、签名及敏感查询参数会先被替换为 [REDACTED]。'
+        + '\n\n授权仅对当前插件版本和安装制品有效；插件更新或重新安装后会再次询问。',
+    });
+    return result.response === 1;
+  });
+  if (!accepted) throw new Error('未授权读取运行日志。');
+  return true;
+}
+function diagnosticsStatus(plugin, authorized) {
+  const state = debugLog.snapshot();
+  return {
+    authorized,
+    granted: authorized,
+    enabled: state.enabled,
+    count: debugLog.recent().length,
+    maxBytes: state.maxBytes,
+    storedBytes: state.storedBytes,
+    lastError: state.lastError,
+    lastSeq: debugLog.sequence,
+    ...(authorized ? { directory: state.directory, currentFile: state.currentFile, sessionId: debugLog.sessionId } : {}),
+  };
+}
+async function firstPartyInvoke(plugin, method, rawArgs) {
+  const rule = assertFirstPartyAccess(plugin, method);
+  const args = bridgeArgs(rawArgs);
+  if (rule.namespace === 'firstParty.assistant.chat') {
+    if (rule.operation === 'list') {
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.list', args: {} });
+      return Array.isArray(value) ? value.map(sanitizeAssistantSummary).filter(Boolean) : [];
+    }
+    if (rule.operation === 'tools') {
+      return sanitizeAssistantTools(pluginToolCatalog(await manager.list()));
+    }
+    if (rule.operation === 'create') {
+      const model = args.model === undefined ? undefined : String(args.model).slice(0, 160);
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.create', args: { model } });
+      return sanitizeAssistantSession(value);
+    }
+    const id = chatIdArg(args.id);
+    if (rule.operation === 'status') {
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.status', args: { id } });
+      return sanitizeAssistantSession({ ...value, waitingForApproval: approvals.list(HOST_CHAT_PREFIX + id).length > 0 });
+    }
+    if (rule.operation === 'send') {
+      if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 16000) throw new Error('助手消息无效。');
+      if (args.model !== undefined && (typeof args.model !== 'string' || args.model.length > 160)) throw new Error('模型标识无效。');
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.send', args: { id, text: args.text, ...(args.model ? { model: args.model } : {}) } }, 0);
+      return sanitizeAssistantSession(value);
+    }
+    if (rule.operation === 'cancel') {
+      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.cancel', args: { id } }, 0);
+      return sanitizeAssistantSession(value);
+    }
+    if (rule.operation === 'delete') {
+      approvals.cancelOwner(HOST_CHAT_PREFIX + id);
+      await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.delete', args: { id } });
+      return { deleted: true };
+    }
+  }
+  if (rule.namespace === 'firstParty.assistant.settings') {
+    if (rule.operation === 'status') return proxy.status();
+    if (rule.operation === 'models') return proxy.models();
+    if (rule.operation === 'testModel') {
+      const model = typeof args.model === 'string' ? args.model.slice(0, 160) : '';
+      if (!model) throw new Error('模型标识无效。');
+      return proxy.testModel({ model });
+    }
+    if (rule.operation === 'beginTextSetup') {
+      const address = args.address === undefined ? proxy.status().address : typeof args.address === 'string' ? args.address.slice(0, 2048) : '';
+      if (!address) throw new Error('服务地址无效。');
+      const input = await secretPrompt.show({
+        title: '连接 AI 服务',
+        message: '输入这家服务的访问密钥。密钥只交给轻作宿主，不会进入插件页面。',
+        detail: '服务地址：' + address,
+        label: '访问密钥',
+        confirmLabel: '连接并验证',
+      });
+      if (input.canceled) return { ok: false, canceled: true };
+      return proxy.setup({ address, apiKey: input.secret });
+    }
+    if (rule.operation === 'beginImageKeySetup') {
+      const provider = imageProviderArg(args.provider);
+      const name = provider === 'google' ? 'Google 官方' : 'OpenAI 官方';
+      const input = await secretPrompt.show({
+        title: '配置共享图像服务',
+        message: '输入 ' + name + ' 的访问密钥。所有图像工具共用这份宿主托管配置。',
+        label: name + '访问密钥',
+        confirmLabel: '保存密钥',
+      });
+      if (input.canceled) return { canceled: true };
+      return imageEditor.configureShared({ provider, apiKey: input.secret });
+    }
+    if (rule.operation === 'clearImageKey') {
+      return imageEditor.configureShared({ provider: imageProviderArg(args.provider), clear: true });
+    }
+    if (rule.operation === 'imageStatus') return imageEditor.sharedStatus();
+    if (rule.operation === 'imageModels') return imageEditor.catalog();
+  }
+  if (rule.namespace === 'firstParty.diagnostics') {
+    if (rule.operation === 'status') {
+      let authorized = false;
+      try { authorized = firstPartyGrants.status(plugin, 'logs'); } catch {}
+      return diagnosticsStatus(plugin, authorized);
+    }
+    if (rule.operation === 'recent') {
+      await diagnosticsGrant(plugin);
+      const cursor = Number.isSafeInteger(args.cursor) && args.cursor >= 0 ? args.cursor : 0;
+      return {
+        ...debugLog.recentSince(cursor),
+        snapshot: diagnosticsStatus(plugin, true),
+      };
+    }
+  }
+  throw new Error('第一方能力未授权。');
+}
 async function systemInvoke(service, method, args = {}) {
   if (service === 'ai') {
     if (method === 'models') return proxy.models();
@@ -664,6 +923,12 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
     if (error) throw new Error('无法打开日志目录：' + error);
     return true;
   }
+  if (method === 'debugLog.revokePluginAccess') {
+    if (args.pluginId !== FIRST_PARTY_DIAGNOSTICS) throw new Error('诊断插件标识无效。');
+    const revoked = await firstPartyGrants.revoke(FIRST_PARTY_DIAGNOSTICS, 'logs');
+    debugLog?.record({ scope: 'app', source: 'diagnostics', level: 'info', message: revoked ? '用户已撤销诊断日志访问授权。' : '诊断日志访问授权已不存在。' });
+    return { revoked };
+  }
   if (method.startsWith('capabilities.mcp.')) {
     const action = method.slice('capabilities.mcp.'.length);
     if (action === 'list') return mcpRuntime.adminList();
@@ -746,6 +1011,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
   if (!plugin.enabled || plugin.missing.length) throw new Error('插件不可用。');
+  if (method.startsWith('firstParty.')) return firstPartyInvoke(plugin, method, args);
   if (method.startsWith('workspace.')) {
     if (!plugin.permissions.workspace) throw new Error('工作区未授权。');
     const action = method.slice('workspace.'.length);
@@ -908,6 +1174,8 @@ migration = await preparePluginMigration(app.getPath('userData'));
 await mkdir(app.getPath('userData'), { recursive: true });
 updatePreferences = new UpdatePreferences({ root: app.getPath('userData') });
 await updatePreferences.initialize();
+firstPartyGrants = new FirstPartyGrants({ root: app.getPath('userData') });
+await firstPartyGrants.initialize();
 debugLog = new DebugLogService({
   root: app.getPath('userData'),
   onEntry: queueDebugLog,
@@ -980,12 +1248,12 @@ imageEditor = new ImageEditor(credentials, undefined, proxy);
 textRuntime = new TextRuntime({ proxy });
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged, workspace, confirmWorkspaceBatch); await batches.initialize();
 approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
-  if (plugin.id === 'official.ai-image' && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
+  if (trustedOfficialTool(plugin, 'official.ai-image') && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
   return null;
 }, execute: async (plugin, tool, args, owner, signal) => {
   signal.throwIfAborted();
   if (tool === 'open' || tool === 'settings') { await openView(plugin.id, tool === 'settings'); if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { type: 'navigate', pluginId: plugin.id, chatId: owner.slice(HOST_CHAT_PREFIX.length) }); changed(); return { opened: plugin.id, settings: tool === 'settings' }; }
-  if (plugin.id === 'official.ai-image' && plugin.permissions.ai?.includes('image-edit')) {
+  if (trustedOfficialTool(plugin, 'official.ai-image') && plugin.permissions.ai?.includes('image-edit')) {
     if (tool === 'list_batches') return { batches: batches.list(plugin) };
     if (tool === 'get_batch') return batches.snapshot(batches.get(plugin, args.id));
     if (tool === 'prepare_plan') return batches.revise(plugin, args);
@@ -1024,6 +1292,7 @@ manager = new PluginManager(path.join(app.getPath('userData'), 'plugins'), path.
     await downloads.forget(plugin);
     for (const name of plugin.permissions.credentials ?? []) await credentials.clear(plugin.id, name);
     await credentialVault.revokePlugin(plugin.id).catch(error => console.error('凭证授权清理失败：', error.message));
+    await firstPartyGrants.revokePlugin(plugin.id).catch(error => console.error('第一方授权清理失败：', error.message));
     if (mcpRuntime) await mcpRuntime.revokePlugin(plugin.id);
     if (workspace) await workspace.forget(plugin.id);
     if (storage) await storage.clear(plugin.id);
@@ -1070,13 +1339,17 @@ pluginInstallService = new PluginInstallService(async (id, notify, signal) => {
   const bytes = downloadSources ? await downloadSources.runWithFallback(artifact.url, downloadArtifactBytes, { signal }) : await downloadArtifactBytes(artifact.url);
   signal.throwIfAborted();
   notify({ status: 'verifying' });
-  const restoring = id === 'official.labeledit' && await migration.status(manager);
+  const restoring = id === 'official.labeledit'
+    && (entry.tier === 'platform' || entry.tier === 'official')
+    && entry.source?.type === 'github-release'
+    && await migration.status(manager);
   signal.throwIfAborted();
   notify({ status: 'installing' });
   // Cancellation is checked before entering the atomic manager transaction.
   // Once installation begins, shutdown drains it before disposing the kernel.
   await manager.install(bytes, { source: 'market', enabled: restoring ? migration.enabled : undefined,
-    record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, title: entry.title, description: entry.description, category: entry.category, releaseNotes: entry.releaseNotes, icon: entry.icon, platform: process.platform + '-' + process.arch, verification: entry.verification } });
+    tier: entry.tier,
+    record: { ...artifact, id: entry.id, version: entry.version, api: entry.api, title: entry.title, description: entry.description, category: entry.category, releaseNotes: entry.releaseNotes, icon: entry.icon, tier: entry.tier, artifactSha256: artifact.sha256, platform: process.platform + '-' + process.arch, verification: entry.verification } });
   pluginFinalizations.set(id, { version: entry.version, restoring });
   await finalizePlugin(id, notify);
 }, changed);
@@ -1087,6 +1360,7 @@ window = new BrowserWindow({
   ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7faf7', symbolColor: '#244638', height: 48 } } : {}),
   webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
 });
+secretPrompt = new SecretPrompt({ parent: window, htmlFile: path.join(root, 'desktop/secret-prompt.html'), preload: path.join(root, 'desktop/secret-prompt.cjs') });
 captureWebContents(window.webContents, 'app', 'app');
 browserRuntime = new BrowserRuntime({ window, changed, event: browserEvent, preload: path.join(root, 'desktop/browser-preload.cjs'), resizeStop: stopBrowserResize, resizeMove: updateBrowserResize, files, storage, cookieStore: path.join(app.getPath('userData'), 'browser-session-cookies.json'), log: runtimeLog('browser') });
 ipcMain.on('commerce:browser-candidates', (event, payload) => {

@@ -21,6 +21,35 @@
 | GitHub 更新和发布 | v0.2.4 双平台验证与正式发布通过，21 个公开文件的 SHA-256 全部匹配，插件及组件生产签名通过；macOS 隔离安装副本从公开 v0.2.3 实际下载、安装和自动重启至 v0.2.4，通过离线 OCR 与 PDF 导出。新增差量、续传和组件复用，首次升级仍完整下载。默认不要求 Apple/Windows 发布者证书。最低支持系统和 Windows 真实安装升级验收仍待进行；详见下方发布记录 |
 | 上游升级 | 2026-11-01 在隔离候选完成 0.2.1-alpha.1→0.2.2-alpha.2 的整组依赖、公开导出、Node/Electron 原生加载器、UI 构建、会话恢复、插件确认和取消契约验证；安装包的两平台验收仍待进行 |
 
+## 第一方插件拆分（本地开发验收）
+
+2026-11-03 在 `codex/first-party-plugin-split` 完成三档信任层、市场契约、SDK/API 1.10.0、凭证与下载器平台归类、AI 助手插件和诊断插件的第一方拆分。本节记录本地实现与测试证据；提交、CI、合并和发布状态以对应 Git 记录为准。
+
+- 市场注册表升级为 schema v2，repository 与 `{ id, tier }` 双向唯一；目录保持 schema v1，条目显式提供 `tier` 和一致投影 `official = tier !== 'community'`。`official.credentials`、`official.downloader` 为 `platform`，其余八个现有条目为 `official`。发布片段只能更新版本、展示信息和制品字段，信任、来源、统计与校验字段在市场和桌面两端均被拒绝。
+- 桌面安装记录将来源 `bundled / market / local` 与信任层分开处理。本地导入固定为 `community`；市场安装必须携带目录显式 `tier` 并保存内部 `artifactSha256`；旧安装缺少 tier 时先按 `community` 处理，只有加载审核目录并同时匹配版本和两端制品摘要后才迁移。回滚只保留当前与目标版本中较低的信任层，不会因当前版本为 `platform` 而提升较低信任的旧制品。
+- `firstParty.*` 未加入公开 SDK 客户端。AI 助手、设置和诊断桥均要求精确 ID、市场来源、`platform` tier、已启用状态和无缺失依赖，并由宿主白名单限制到方案列出的方法。AI DTO 已移除审批、工具参数和内部结果；密钥通过原生输入框直接交给宿主；审批仍由宿主独占。
+- AI 助手插件 `official.ai-assistant` 与诊断插件 `official.diagnostics` 已在独立仓库完成实现和双平台同字节制品打包。主壳 `/chat`、`/ai`、`/logs` 页面已移除，侧栏入口仅在对应可信插件安装并启用时显示。设置页保留未安装时的市场安装入口和已安装时的插件设置入口。
+- 日志入口统一脱敏密钥、Bearer/Basic 令牌、JWT、常见 API key、password/token/secret/signature 字段、URL 用户信息和敏感查询参数。诊断授权绑定插件 ID、版本、制品摘要、API 范围和能力；升级、重装或撤销后重新询问，卸载时清除。日志批次带单调递增 `seq`，可检测缺口并避免重复。
+- 浏览器面板原生视图位置在入场动画结束后重新上报，修复完整 Electron 回归中 2 像素位置偏差。
+
+已实际执行的本地验证：
+
+- `npm run build`：通过。
+- `npm test`：9 个文件、87 个测试通过。
+- `npm run test:platform`：293 个测试通过。
+- `npm run test:kernel`：1 个真实 Harness 启动与生命周期测试通过。
+- `npm run test:harness-contract`：Node 契约 39 个测试及 UI 15 个测试通过。
+- `npm run test:desktop`：完整 Electron 流程 23/23 通过，包括真实市场信任安装、原生密钥输入、宿主独占审批、重启会话恢复、共享凭证授权与撤销、下载器暂停/继续/重启恢复、诊断授权和日志脱敏落盘。
+- qingzuo-market：`npm test` 23/23 通过，`npm run validate` 通过；`npm run verify:release` 已单独验证 9 个插件仓库的双平台制品，`official.labeledit` 的大文件下载验证仍待完成。
+- 两个插件仓库：AI 助手 `npm test` 15/15、诊断 `npm test` 17/17；`npm run pack` 均生成双平台字节一致的 `.ecplugin`、对应 release fragment 和制品摘要。`test:host` 因未设置真实宿主可执行文件而跳过。
+
+尚未完成或不得宣称完成：
+
+- 干净用户目录的离线首次启动、在线安装四个插件后断网冷启动及四个插件的真实市场端到端安装仍需在发布候选版本验收。
+- 尚未在真实打包的 API 1.10 桌面版本和 Windows 实机验证新插件；现有 Electron 证据来自本地宿主构建。
+- `sdk-v1.10.0` 尚未发布。市场仓库已指向该未来制品，但在 Release 生成前不能更新 lockfile 或执行 `npm ci`；当前安装的 SDK 1.8.0 与市场依赖声明不一致，正式 CI 前必须完成 SDK 发布和锁文件同步。
+- 市场 tier 数据、插件 Release、市场公开收录和桌面发布均未执行；发布顺序必须为市场 tier 数据 → 桌面与 SDK 1.10.0 → 新插件 Release → 市场收录。
+
 ## v0.2.9 准备与发布
 
 针对应用内更新时出现的 `ENOTDIR: not a directory, open .../app.asar/desktop/mac-install.sh` 报错完成彻底修复与版本发布：

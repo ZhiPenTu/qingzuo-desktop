@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 export const DEFAULT_DEBUG_LOG_BYTES = 50 * 1024 * 1024;
 export const MIN_DEBUG_LOG_BYTES = 1024 * 1024;
@@ -11,6 +12,19 @@ const SCOPES = new Set(['app', 'plugin', 'browser']);
 const LEVELS = new Set(['debug', 'info', 'warn', 'error']);
 const LOG_FILE = /^qingzuo-debug-\d{8}-\d{6}-\d{3}-\d+-\d+\.jsonl$/;
 const ACTIVE_FILE_CHUNK = 4 * 1024 * 1024;
+const SECRET_KEY = String.raw`authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|password|passwd|secret[-_]?key|secret|client[-_]?secret|app[-_]?secret|private[-_]?key|signature|sig|hmac`;
+
+export function redactSensitiveText(value) {
+  let text = String(value ?? '');
+  text = text.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}/gi, '$1 [REDACTED]');
+  text = text.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]');
+  text = text.replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g, '[REDACTED]');
+  text = text.replace(new RegExp(`("(?:${SECRET_KEY})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`, 'gi'), '$1"[REDACTED]"');
+  text = text.replace(new RegExp(`(\\b(?:${SECRET_KEY})\\b\\s*[:=]\\s*)(?!Bearer\\b|Basic\\b)(["']?)([^\\s"',;&}]+)\\2`, 'gi'), '$1$2[REDACTED]$2');
+  text = text.replace(new RegExp(`([?&](?:${SECRET_KEY})=)[^&#\\s"']+`, 'gi'), '$1[REDACTED]');
+  text = text.replace(/(https?:\/\/[^/\s:@]+:)([^/\s@]+)(@)/gi, '$1[REDACTED]$3');
+  return text;
+}
 
 function cleanText(value, limit) {
   return String(value ?? '')
@@ -30,9 +44,9 @@ function normalizeEntry(value = {}) {
     scope: SCOPES.has(value.scope) ? value.scope : 'app',
     source: cleanText(value.source || 'debug', 160),
     level,
-    message: cleanText(value.message, MAX_DEBUG_LOG_MESSAGE_LENGTH),
+    message: redactSensitiveText(cleanText(value.message, MAX_DEBUG_LOG_MESSAGE_LENGTH)),
     ...(Number.isSafeInteger(value.line) && value.line > 0 ? { line: value.line } : {}),
-    ...(typeof value.url === 'string' && value.url ? { url: cleanText(value.url, 2048) } : {}),
+    ...(typeof value.url === 'string' && value.url ? { url: redactSensitiveText(cleanText(value.url, 2048)) } : {}),
   };
 }
 
@@ -78,7 +92,7 @@ function validateDirectory(value) {
 }
 
 export class DebugLogService {
-  constructor({ root, onEntry = () => {}, onStateChange = () => {}, now = Date.now, activeFileChunk = ACTIVE_FILE_CHUNK } = {}) {
+  constructor({ root, onEntry = () => {}, onStateChange = () => {}, now = Date.now, activeFileChunk = ACTIVE_FILE_CHUNK, sessionId = randomUUID() } = {}) {
     this.root = root;
     this.settingsFile = path.join(root, 'debug-logging.json');
     this.defaultDirectory = path.join(root, 'logs');
@@ -90,6 +104,8 @@ export class DebugLogService {
     this.activeBytes = 0;
     this.storedBytes = 0;
     this.fileSequence = 0;
+    this.sessionId = sessionId;
+    this.sequence = 0;
     this.entries = [];
     this.writeQueue = Promise.resolve();
     this.state = {
@@ -113,6 +129,18 @@ export class DebugLogService {
 
   recent() {
     return [...this.entries];
+  }
+
+  recentSince(cursor = 0) {
+    const requested = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
+    const oldest = this.entries[0]?.seq ?? this.sequence + 1;
+    const entries = this.entries.filter(entry => entry.seq > requested);
+    return {
+      sessionId: this.sessionId,
+      entries: entries.map(entry => ({ ...entry })),
+      nextCursor: entries.at(-1)?.seq ?? this.sequence,
+      gap: requested > 0 && requested < oldest - 1,
+    };
   }
 
   async initialize() {
@@ -167,7 +195,7 @@ export class DebugLogService {
 
   record(value) {
     if (!this.state.enabled) return null;
-    const entry = normalizeEntry({ time: this.now(), ...value });
+    const entry = { ...normalizeEntry({ time: this.now(), ...value }), seq: ++this.sequence };
     this.entries.push(entry);
     if (this.entries.length > MAX_DEBUG_LOG_ENTRIES) {
       this.entries.splice(0, this.entries.length - MAX_DEBUG_LOG_ENTRIES);
@@ -285,7 +313,7 @@ export class DebugLogService {
   }
 
   setError(error) {
-    this.state.lastError = cleanText(error instanceof Error ? error.message : error, 500) || '日志写入失败。';
+    this.state.lastError = redactSensitiveText(cleanText(error instanceof Error ? error.message : error, 500)) || '日志写入失败。';
     this.onStateChange(this.snapshot());
   }
 }

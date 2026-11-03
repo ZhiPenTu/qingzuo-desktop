@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
+import { installMarketFixture, prepareMarketFixture } from './market-fixture.mjs';
 
 const root = process.cwd();
 
@@ -28,6 +29,41 @@ function pluginArtifact() {
   return zip;
 }
 
+const diagnosticsPlugin = {
+  id: 'official.diagnostics',
+  title: '日志调试',
+  description: '查看轻作运行日志',
+  category: '开发工具',
+  tier: 'platform',
+  manifest: {
+    ui: 'ui/index.html',
+    settings: { title: '日志调试', entry: 'ui/index.html' },
+  },
+  files: {
+    'ui/index.html': '<!doctype html><meta charset="utf-8"><h1>日志调试</h1><p id="authorization">正在读取授权</p><div id="logs"></div><script src="./ui.js"></script>',
+    'ui/ui.js': `
+      const logs = document.querySelector('#logs');
+      const authorization = document.querySelector('#authorization');
+      const append = entries => {
+        for (const entry of entries) {
+          const line = document.createElement('p');
+          line.textContent = entry.message;
+          logs.append(line);
+        }
+      };
+      window.commercePlugin.onDebugLog(batch => append(batch.entries));
+      async function load() {
+        const status = await window.commercePlugin.invoke('firstParty.diagnostics.status');
+        authorization.textContent = status.authorized ? '已授权' : '待授权';
+        const result = await window.commercePlugin.invoke('firstParty.diagnostics.recent', { cursor: 0 });
+        authorization.textContent = result.snapshot.authorized ? '已授权' : '待授权';
+        append(result.entries);
+      }
+      void load().catch(error => { authorization.textContent = error.message; });
+    `,
+  },
+};
+
 async function fixtureServer() {
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -43,6 +79,7 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
   const logsDirectory = path.join(temporary, 'custom-logs');
   await mkdir(logsDirectory);
   const fixture = await fixtureServer();
+  const market = await prepareMarketFixture([diagnosticsPlugin]);
   let application;
   try {
     const artifact = path.join(temporary, 'debug-log-fixture.ecplugin');
@@ -51,9 +88,15 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
     const shell = await application.firstWindow();
     await expect(shell.getByText('工具服务已就绪')).toBeVisible();
 
+    await installMarketFixture(application, shell, market, ['official.diagnostics']);
+    await expect.poll(async () => {
+      const plugin = (await shell.evaluate(() => window.commerceDesktop.invoke('status'))).plugins
+        .find(candidate => candidate.id === 'official.diagnostics');
+      return plugin && { source: plugin.source, tier: plugin.tier, enabled: plugin.enabled };
+    }).toEqual({ source: 'market', tier: 'platform', enabled: true });
+
     await shell.getByRole('button', { name: '设置', exact: true }).click();
     await shell.getByRole('switch', { name: '开启日志调试', exact: true }).click();
-    await shell.getByRole('button', { name: '日志调试', exact: true }).click();
     await application.evaluate(({ dialog }, directory) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] });
     }, logsDirectory);
@@ -61,7 +104,9 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
     await expect(shell.getByText(logsDirectory, { exact: true })).toBeVisible();
 
     await shell.evaluate(() => console.info('app-debug-marker'));
-    await expect(shell.getByText('app-debug-marker', { exact: true })).toBeVisible();
+    await expect.poll(async () => (
+      await shell.evaluate(() => window.commerceDesktop.invoke('debugLog.recent'))
+    ).some(entry => entry.message === 'app-debug-marker')).toBe(true);
 
     await shell.getByRole('button', { name: '工具中心', exact: true }).click();
     await shell.getByRole('button', { name: '打开浏览器', exact: true }).click();
@@ -74,16 +119,21 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
       dialog.showMessageBox = async () => ({ response: 1 });
     }, artifact);
     await shell.evaluate(() => window.commerceDesktop.invoke('plugins.import'));
-    await expect(shell.getByRole('button', { name: '打开', exact: true })).toBeVisible();
-    await shell.getByRole('button', { name: '打开', exact: true }).click();
+    const debugCard = shell.locator('[data-slot="card"]').filter({ hasText: 'Debug log fixture' });
+    await expect(debugCard.getByRole('button', { name: '打开', exact: true })).toBeVisible();
+    await debugCard.getByRole('button', { name: '打开', exact: true }).click();
     await expect.poll(() => application.context().pages().some(page => page.url().startsWith('commerce-plugin://local.debug-log-fixture/'))).toBe(true);
 
     await shell.getByRole('button', { name: '日志调试', exact: true }).click();
-    await expect(shell.getByText('plugin-debug-marker', { exact: true }).first()).toBeVisible();
-    await expect(shell.getByText('browser-debug-marker', { exact: true }).first()).toBeVisible();
+    await expect.poll(() => application.context().pages().some(page => page.url().startsWith('commerce-plugin://official.diagnostics/'))).toBe(true);
+    const diagnostics = application.context().pages().find(page => page.url().startsWith('commerce-plugin://official.diagnostics/'));
+    await expect(diagnostics.getByText('已授权', { exact: true })).toBeVisible();
+    await expect(diagnostics.getByText('app-debug-marker', { exact: true })).toBeVisible();
+    await expect(diagnostics.getByText('plugin-debug-marker', { exact: true }).first()).toBeVisible();
+    await expect(diagnostics.getByText('browser-debug-marker', { exact: true }).first()).toBeVisible();
     if (process.env.QINGZUO_UI_EVIDENCE_DIR) {
       await mkdir(process.env.QINGZUO_UI_EVIDENCE_DIR, { recursive: true });
-      await shell.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '日志调试.png') });
+      await diagnostics.screenshot({ path: path.join(process.env.QINGZUO_UI_EVIDENCE_DIR, '日志调试.png') });
     }
 
     await expect.poll(async () => {
@@ -102,6 +152,7 @@ test('debug logging saves base, plugin, and browser logs to the selected directo
     expect(saved).toContain('"scope":"browser"');
   } finally {
     await application?.close().catch(() => {});
+    await market.restore();
     await new Promise(resolve => fixture.server.close(resolve));
     await rm(temporary, { recursive: true, force: true });
   }

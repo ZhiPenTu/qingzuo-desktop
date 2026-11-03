@@ -59,14 +59,22 @@ export function BrowserWorkspace({ status, busy, onAction, showTabs = true }: Br
   useEffect(() => {
     const element = surface.current;
     if (!element || !activeTab?.url || typeof ResizeObserver === 'undefined') return;
+    const pane = element.closest<HTMLElement>('.commerce-browser-pane');
     const update = () => {
       const rect = element.getBoundingClientRect();
       void window.commerceDesktop?.invoke('browser.bounds', { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
     };
+    const updateAfterAnimation = (event: AnimationEvent) => {
+      if (event.target === pane) requestAnimationFrame(update);
+    };
     const observer = new ResizeObserver(update);
     observer.observe(element);
+    pane?.addEventListener('animationend', updateAfterAnimation);
     update();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      pane?.removeEventListener('animationend', updateAfterAnimation);
+    };
   }, [activeTab?.id, activeTab?.url]);
 
   const submitAddress = (event: FormEvent) => {

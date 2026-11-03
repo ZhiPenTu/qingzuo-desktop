@@ -4,6 +4,11 @@ import { API_VERSION, validatePluginIcon } from './security.mjs';
 const PLUGIN_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PLATFORMS = new Set(['darwin-arm64', 'win32-x64']);
+const PLUGIN_TIERS = new Set(['platform', 'official', 'community']);
+const RELEASE_FIELDS = new Set(['id', 'version', 'title', 'description', 'category', 'api', 'icon', 'releaseNotes', 'artifacts']);
+// Immutable releases published before SDK 1.10 include harmless manifest fields.
+// Accept and strip them for rollout, while never allowing market trust metadata.
+const LEGACY_RELEASE_FIELDS = new Set(['manifestVersion', 'ui', 'permissions', 'settings', 'backend', 'services']);
 export const RELEASE_FRAGMENT_BYTES = 256 * 1024;
 const RELEASE_FRAGMENT_CONCURRENCY = 6;
 
@@ -32,6 +37,23 @@ function validateText(entry) {
     || entry.stats.downloads !== undefined && (!Number.isSafeInteger(entry.stats.downloads) || entry.stats.downloads < 0))) {
     throw new Error('市场插件统计无效。');
   }
+}
+
+function catalogIdentity(entry) {
+  if (entry.official !== undefined && typeof entry.official !== 'boolean') {
+    throw new Error('市场插件条目无效。');
+  }
+  let tier;
+  if (entry.tier !== undefined) {
+    if (!PLUGIN_TIERS.has(entry.tier)) throw new Error('市场插件条目无效。');
+    tier = entry.tier;
+    const official = tier !== 'community';
+    if (entry.official !== undefined && entry.official !== official) throw new Error('市场插件官方标识与信任层不一致。');
+    return { tier, official };
+  }
+  if (entry.official !== undefined) return { tier: entry.official ? 'official' : 'community', official: entry.official };
+  const official = entry.id.startsWith('official.');
+  return { tier: official ? 'official' : 'community', official };
 }
 
 function validateSource(source) {
@@ -65,6 +87,7 @@ export function validateCatalog(value) {
       throw new Error('市场插件条目无效。');
     }
     validateText(item);
+    const identity = catalogIdentity(item);
     if (item.source !== undefined) validateSource(item.source);
     if (!item.source && !item.artifacts) throw new Error('市场插件条目缺少来源或制品。');
     if (item.artifacts !== undefined) {
@@ -77,9 +100,11 @@ export function validateCatalog(value) {
   }
   return value.plugins.map(item => {
     const { verification: _verification, sourceUnavailable: _sourceUnavailable, ...entry } = item;
+    const { tier, official } = catalogIdentity(entry);
     return {
       ...entry,
-      official: entry.official ?? entry.id.startsWith('official.'),
+      tier,
+      official,
       compatible: semver.satisfies(API_VERSION, entry.api ?? '^1.0.0'),
     };
   });
@@ -102,6 +127,7 @@ function validateReleaseFragment(value, entry, platform) {
   if (item?.id !== entry.id || !PLUGIN_ID.test(item.id) || !stableVersion(item.version)) {
     throw new Error('插件发布清单与市场收录不一致。');
   }
+  if (Object.keys(item).some(key => !RELEASE_FIELDS.has(key) && !LEGACY_RELEASE_FIELDS.has(key))) throw new Error('插件发布清单包含未授权字段。');
   validateText(item);
   const artifact = item.artifacts?.[platform];
   if (!artifact || !Number.isSafeInteger(artifact.size) || artifact.size < 1
@@ -111,7 +137,14 @@ function validateReleaseFragment(value, entry, platform) {
   const expected = expectedReleaseArtifactUrl(entry.source.repository, entry.id, item.version, platform);
   if (artifact.url !== expected) throw new Error('插件发布制品地址无效。');
   return {
-    ...item,
+    id: item.id,
+    version: item.version,
+    title: item.title,
+    description: item.description,
+    ...(item.category !== undefined ? { category: item.category } : {}),
+    ...(item.api !== undefined ? { api: item.api } : {}),
+    ...(item.icon !== undefined ? { icon: item.icon } : {}),
+    ...(item.releaseNotes !== undefined ? { releaseNotes: item.releaseNotes } : {}),
     artifacts: { [platform]: { url: artifact.url, size: artifact.size, sha256: artifact.sha256 } },
     compatible: semver.satisfies(API_VERSION, item.api ?? '^1.0.0'),
   };
@@ -155,6 +188,7 @@ export async function resolveMarketEntries(value, {
         releaseNotes: release.releaseNotes,
         category: release.category ?? entry.category,
         icon: release.icon ?? entry.icon,
+        tier: entry.tier,
         official: entry.official,
         source: entry.source,
         stats: entry.stats,
@@ -162,7 +196,7 @@ export async function resolveMarketEntries(value, {
       };
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
-      return { ...entry, sourceUnavailable: true };
+      return { ...entry, tier: entry.tier, official: entry.official, sourceUnavailable: true };
     }
   });
 }

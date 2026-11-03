@@ -40,6 +40,24 @@ test('disabled plugins, arbitrary services, extra arguments, cancellation and pe
   const pending = approvals.request(owner, { pluginId: fixturePlugin.id, tool: 'open' }); await waitUntil(() => approvals.list(owner).length); assert.equal(approvals.list(HOST_CHAT_PREFIX + randomUUID()).length, 0); approvals.cancelPlugin(fixturePlugin.id); await assert.rejects(pending, /停用/);
   const stopped = approvals.request(owner, { pluginId: fixturePlugin.id, tool: 'open' }); approvals.cancelOwner(owner); await assert.rejects(stopped, /停止/); approvals.dispose();
 });
+test('image batch tools require an explicit trusted tier and installation source', () => {
+  const imagePlugin = {
+    id: 'official.ai-image',
+    title: 'AI 批图',
+    description: '测试',
+    enabled: true,
+    missing: [],
+    source: 'market',
+    tier: 'official',
+    permissions: { ai: ['image-edit'] },
+  };
+  const names = plugin => pluginToolCatalog([plugin])[0]?.tools.map(tool => tool.name) ?? [];
+  assert.ok(names(imagePlugin).includes('start_batch'));
+  assert.ok(names({ ...imagePlugin, tier: 'platform' }).includes('start_batch'));
+  assert.equal(names({ ...imagePlugin, tier: 'community', source: 'bundled' }).includes('start_batch'), false);
+  assert.equal(names({ ...imagePlugin, tier: 'platform', source: 'local' }).includes('start_batch'), false);
+  assert.equal(names({ ...imagePlugin, tier: 'unexpected', source: 'market' }).includes('start_batch'), false);
+});
 test('public Harness host chat calls declared plugins only after confirmation and restores conversations', async context => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-host-chat-')); let round = 0, executions = 0; const requests = [];
   const server = createServer(async (request, response) => {

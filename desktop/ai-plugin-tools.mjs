@@ -14,13 +14,19 @@ const imageTools = [
   { name: 'cancel_batch', title: '停止图片批次', parameters: batchSchema },
 ];
 
+function trustedOfficialTool(plugin, id) {
+  return plugin.id === id
+    && (plugin.tier === 'platform' || plugin.tier === 'official')
+    && ['market', 'bundled'].includes(plugin.source);
+}
+
 export function pluginToolCatalog(plugins) {
   return plugins.filter(plugin => plugin.enabled && !plugin.missing?.length).map(plugin => ({
     id: plugin.id, title: plugin.title, description: plugin.description,
     tools: [
       { name: 'open', title: '打开插件', parameters: empty },
       ...(plugin.settings ? [{ name: 'settings', title: '打开插件设置', parameters: empty }] : []),
-      ...(plugin.id === 'official.ai-image' && plugin.permissions?.ai?.includes('image-edit') ? imageTools : []),
+      ...(trustedOfficialTool(plugin, 'official.ai-image') && plugin.permissions?.ai?.includes('image-edit') ? imageTools : []),
       ...(plugin.assistant?.tools || []).map(({ name, title, description, parameters }) => ({ name, title, description, parameters })),
     ],
   }));

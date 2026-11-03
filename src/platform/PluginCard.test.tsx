@@ -1,25 +1,32 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginCard, formatDownloadCount, pluginGroup, pluginOriginLabel, pluginPublisher, type Plugin } from './PluginCard';
+import { PluginCard, formatDownloadCount, pluginInstallSourceLabel, pluginOriginLabel, pluginTier, type Plugin } from './PluginCard';
 import type { PluginInstallState } from './commerce';
 
 const entry = { id: 'official.labeledit', title: 'LabelEdit', description: '本地 PDF 标签编辑', version: '0.2.0', category: '标签与文档' };
-const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
+const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', tier: 'official', local: false, missing: [] };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
 describe('PluginCard installation state', () => {
   afterEach(cleanup);
 
-  it('classifies bundled tools separately from official and unofficial community plugins', () => {
-    expect(pluginGroup(entry)).toBe('community');
-    expect(pluginGroup(entry, { source: 'bundled' })).toBe('builtin');
-    expect(pluginGroup(entry, { source: 'market', bundled: true })).toBe('builtin');
-    expect(pluginPublisher(entry)).toBe('official');
-    expect(pluginPublisher({ ...entry, id: 'community.tool' })).toBe('unofficial');
-    expect(pluginPublisher({ ...entry, id: 'community.verified', official: true })).toBe('official');
-    expect(pluginOriginLabel(entry)).toBe('社区插件 · 官方插件');
-    expect(pluginOriginLabel({ ...entry, id: 'community.tool' })).toBe('社区插件 · 非官方插件');
-    expect(pluginOriginLabel(entry, { source: 'bundled' })).toBe('内置插件');
+  it('classifies platform, official and community tiers without using bundled flags as trust', () => {
+    expect(pluginTier(entry)).toBe('official');
+    expect(pluginTier({ ...entry, id: 'community.tool' })).toBe('community');
+    expect(pluginTier({ ...entry, id: 'official.demoted', official: false })).toBe('community');
+    expect(pluginTier({ ...entry, id: 'community.verified', official: true })).toBe('official');
+    expect(pluginTier({ ...entry, tier: 'platform' })).toBe('platform');
+    expect(pluginTier(entry, { source: 'bundled' })).toBe('platform');
+    expect(pluginTier({ ...entry, tier: 'platform' }, { source: 'local', tier: 'platform' })).toBe('community');
+    expect(pluginTier(entry, { source: 'market' })).toBe('community');
+    const bundledFlag = { source: 'market', bundled: true };
+    expect(pluginTier(entry, bundledFlag)).toBe('community');
+    expect(pluginOriginLabel(entry)).toBe('官方社区');
+    expect(pluginOriginLabel({ ...entry, id: 'community.tool' })).toBe('第三方');
+    expect(pluginOriginLabel(entry, { source: 'bundled' })).toBe('底座内置');
+    expect(pluginInstallSourceLabel('bundled')).toBe('随应用内置');
+    expect(pluginInstallSourceLabel('market')).toBe('市场安装');
+    expect(pluginInstallSourceLabel('local')).toBe('本地导入');
   });
 
   it('offers upgrades and prevents catalog downgrades', () => {
@@ -100,9 +107,9 @@ describe('PluginCard installation state', () => {
     expect(screen.queryByLabelText(/累计下载/)).toBeNull();
   });
 
-  it('shows the market origin on catalog cards', () => {
+  it('shows the trust tier on catalog cards', () => {
     render(<PluginCard entry={{ ...entry, id: 'community.tool' }} mode="catalog" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
-    expect(screen.getByText('社区插件 · 非官方插件')).toBeTruthy();
+    expect(screen.getByText('第三方')).toBeTruthy();
   });
 
   it('disables install and update actions when the release source is unavailable', () => {
@@ -138,10 +145,26 @@ describe('PluginCard installation state', () => {
     expect(container.querySelector('.commerce-tool-icon svg')).toBeNull();
   });
 
-  it('uses built-in official brand icons when an older installed plugin lacks manifest.icon', () => {
-    const { container } = render(<PluginCard entry={entry} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+  it('uses built-in official brand icons only for trusted market or bundled installations', () => {
+    const { container, rerender } = render(<PluginCard entry={entry} installed={installed} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
     const image = container.querySelector('.commerce-tool-icon.has-image img');
     expect(image?.getAttribute('src')).toBeTruthy();
     expect(container.querySelector('.commerce-tool-icon svg')).toBeNull();
+    rerender(<PluginCard entry={entry} installed={{ ...installed, source: 'local', tier: 'platform', official: true }} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(container.querySelector('.commerce-tool-icon.has-image img')).toBeNull();
+    expect(container.querySelector('.commerce-tool-icon svg')).toBeTruthy();
+    expect(screen.queryByText('离线识别')).toBeNull();
+  });
+
+  it('uses the installed title and icon instead of the same-id catalog entry', () => {
+    const catalogIcon = 'data:image/png;base64,iVBORw0KGgo=';
+    const installedIcon = 'data:image/png;base64,iVBORw0KGgoAAA==';
+    const catalog = { ...entry, title: '市场标题', icon: catalogIcon };
+    const { container, rerender } = render(<PluginCard entry={catalog} installed={{ ...installed, title: '安装标题', icon: installedIcon }} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: '安装标题' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '市场标题' })).toBeNull();
+    expect(container.querySelector('.commerce-tool-icon img')?.getAttribute('src')).toBe(installedIcon);
+    rerender(<PluginCard entry={catalog} installed={{ ...installed, title: '安装标题', icon: undefined }} mode="installed" disabled={false} ready={true} onOpen={vi.fn()} onAction={vi.fn()} />);
+    expect(container.querySelector('.commerce-tool-icon img')?.getAttribute('src')).not.toBe(catalogIcon);
   });
 });

@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.7.0，插件 API / SDK 1.9.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.7.0，插件 API / SDK 1.10.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -40,6 +40,8 @@ sdk-v1.8.0 增加宿主托管的文件下载能力：清单权限 `downloads: 'u
 
 sdk-v1.9.0 增加持久工作区、远程 MCP 与公众号发布：`workspace` 固定四个根目录并绑定真实路径与 inode，支持原子写入、不透明文件 URL 和 `.aws` 预设包预览/导入；`mcp` 只暴露服务器摘要与只读工具，逐工具授权，支持 OAuth 2.1 + PKCE，并限制 SSRF、重定向、超时和响应大小；`wechat` 由宿主保存账号密钥、上传封面与正文图片、创建草稿、确认发布并查询状态，回执未知时不会重复提交。`ai.complete` 同时增加 `maxTokens` 与 `finishReason`，`ai.batch.start` 支持 `workspacePath`。SDK 设置 latest=false。
 
+sdk-v1.10.0 增加三档信任层和第一方插件受控桥。市场注册表升级为 schema v2，目录保持 schema v1 并显式审核 `tier`；本地插件始终为 `community`，市场安装必须携带目录 `tier`，旧安装先按 `community` 处理。`official.ai-assistant` 与 `official.diagnostics` 只能通过精确 ID、市场来源、`platform` 层、启用状态和无缺失依赖校验调用内部 `firstParty.*`；API 密钥由原生输入框直接交给宿主，诊断日志授权绑定版本、制品摘要、API 范围和能力。SDK 新增 `onDebugLog` 类型，仍不公开 `firstParty.*`。设置 latest=false。
+
 市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
 
 插件源码、Python/模型/字体、业务测试和打包在各自仓库完成。插件 CI 必须提供成功的底座验收运行 ID，从该运行下载对应平台安装制品并在真实沙箱中验收，不能借用底座源码依赖。
@@ -47,6 +49,8 @@ sdk-v1.9.0 增加持久工作区、远程 MCP 与公众号发布：`workspace` �
 ## 市场
 
 qingzuo-market 的目录条目记录固定 GitHub Release 来源；桌面端直接从插件 Release 读取最新版本，插件发版不依赖市场目录提交。市场验证工作流只检查已登记仓库的正式 Release，不再改写版本条目。旧 market/catalog.json 中的版本、制品和 Ed25519 签名继续供旧客户端兼容使用。
+
+`publishers.json` 必须保持 schema v2，每个 repository 与 `{ id, tier }` 双向唯一；`catalog.json` 保持 schema v1，`official` 必须等于 `tier !== 'community'`，repository、ID 和 tier 必须与注册表完全一致。发布片段不能覆盖信任、来源、统计或校验字段。既有不可变 Release 中的旧清单字段会在校验后剥离，以免信任层升级导致现有插件下线。
 
 市场定时从 GitHub Release API 汇总各插件正式版本双平台制品的累计下载数，写入目录的可选 `stats.downloads` 字段。它只作为产品展示数据，不用于计费、唯一用户或安装成功率判断。
 

@@ -9,6 +9,9 @@ export interface BrowserSnapshot { tabId: string; url: string; title: string; no
 export type BrowserAction = { tabId?: string } & ({ action: 'click' | 'hover'; ref: string } | { action: 'type' | 'select'; ref: string; value: string } | { action: 'scroll'; value: number });
 export interface BrowserActionResult { tabId: string; url: string; action: 'click' | 'type' | 'select' | 'scroll' | 'hover'; ok: true; value?: string; scrollY?: number }
 export interface BrowserWaitOptions { tabId?: string; selector?: string; text?: string; absent?: boolean; timeoutMs?: number }
+/** 宿主调试日志条目；敏感值在写入和事件分发前已脱敏。 */
+export interface PluginDebugLogEntry { seq: number; time: number; scope: 'app' | 'plugin' | 'browser'; source: string; level: 'debug' | 'info' | 'warn' | 'error'; message: string; line?: number; url?: string }
+export interface PluginDebugLogBatch { sessionId: string; entries: PluginDebugLogEntry[]; nextCursor?: number }
 export interface StorageFile { token: string; name: string; size: number; mime: string }
 export type CredentialEnvironment = 'production' | 'sandbox';
 /** `appId` 是可公开的标识；`secretKey` 永远不会返回给插件。 */
@@ -30,7 +33,7 @@ export interface DownloadTask {
   createdAt: number; updatedAt: number; completedAt: number | null;
   canPause: boolean; canResume: boolean; canCancel: boolean; canRemove: boolean; canReveal: boolean;
 }
-export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void; onBrowser?(callback: (event: BrowserEvent) => void): () => void }
+export interface PluginBridge { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onDispose(callback: () => void): () => void; onAI?(callback: (event: AIEvent) => void): () => void; onBrowser?(callback: (event: BrowserEvent) => void): () => void; onDebugLog?(callback: (event: PluginDebugLogBatch) => void): () => void }
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
   ui: string; category?: string; releaseNotes?: string; icon?: string;
