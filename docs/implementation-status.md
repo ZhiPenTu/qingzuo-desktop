@@ -47,8 +47,8 @@
 
 - 干净用户目录的离线首次启动、在线安装四个插件后断网冷启动及四个插件的真实市场端到端安装仍需在发布候选版本验收。
 - 尚未在真实打包的 API 1.10 桌面版本和 Windows 实机验证新插件；现有 Electron 证据来自本地宿主构建。
-- `sdk-v1.10.0` 尚未发布。市场仓库已指向该未来制品，但在 Release 生成前不能更新 lockfile 或执行 `npm ci`；当前安装的 SDK 1.8.0 与市场依赖声明不一致，正式 CI 前必须完成 SDK 发布和锁文件同步。
-- 市场 tier 数据、插件 Release、市场公开收录和桌面发布均未执行；发布顺序必须为市场 tier 数据 → 桌面与 SDK 1.10.0 → 新插件 Release → 市场收录。
+- [`sdk-v1.10.0`](https://github.com/ZhiPenTu/qingzuo-desktop/releases/tag/sdk-v1.10.0) 已发布，市场仓库已使用该 Release 的固定制品和 integrity；`npm ci --ignore-scripts`、24 个市场测试、目录校验和现有 10 个插件的发布验证通过。
+- 市场 tier 数据、校验规则和 SDK 锁定已合入 `qingzuo-market` 的 `main`。新插件发布必须使用成功的桌面 Release 运行制品完成真实宿主验收；市场只登记已经发布并通过来源校验的版本。
 
 ## v0.2.9 准备与发布
 
