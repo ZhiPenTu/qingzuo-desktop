@@ -35,7 +35,26 @@ describe('PluginCard installation state', () => {
     fireEvent.click(screen.getByRole('button', { name: '更新插件' }));
     expect(props.onAction).toHaveBeenCalledWith('market.install', { id: entry.id });
     rerender(<PluginCard {...props} installed={{ ...installed, version: '0.3.0' }} />);
-    expect(screen.getByRole('button', { name: '已安装' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByRole('button', { name: '已安装' })).toBeNull();
+    expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('disables opening a catalog tool while it is stopped, incomplete or the kernel is not ready', () => {
+    const onOpen = vi.fn();
+    const props = { entry, installed, mode: 'catalog' as const, disabled: false, ready: true, onOpen, onAction: vi.fn() };
+    const { rerender } = render(<PluginCard {...props} installed={{ ...installed, enabled: false }} />);
+    expect(screen.getByText('已停用')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(true);
+
+    rerender(<PluginCard {...props} installed={{ ...installed, missing: ['sandbox'] }} />);
+    expect(screen.getByText('缺少组件')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(true);
+
+    rerender(<PluginCard {...props} ready={false} />);
+    const open = screen.getByRole('button', { name: '打开' });
+    expect(open.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(open);
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('shows measured download progress and blocks duplicate updates without a global busy flag', () => {

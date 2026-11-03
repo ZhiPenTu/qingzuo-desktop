@@ -1,5 +1,5 @@
 import { lazy, Suspense, useId, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, Download, FileText, Image, LoaderCircle, Puzzle } from 'lucide-react';
+import { AlertCircle, Check, Download, FileText, Image, LoaderCircle, Puzzle, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -67,7 +67,6 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const trusted = isTrustedPluginTier(tier) && isTrustedPluginSource(trustSource);
   const isLabel = trusted && entry.id === 'official.labeledit';
   const isCutout = trusted && entry.id === 'official.removebg';
-  const isCredentials = trusted && entry.id === 'official.credentials';
   const Icon = isLabel ? FileText : isCutout ? Image : Puzzle;
   const iconSrc = resolvePluginIcon(entry.id, installedIdentity ? installedIdentity.icon : entry.icon, { tier, source: trustSource });
   // A stale catalog must not offer a downgrade of a newer bundled/local tool.
@@ -77,6 +76,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const updating = pluginInstallActive(install);
   const unavailable = disabled || updating;
   const failed = install?.status === 'error';
+  const catalogInstalled = mode === 'catalog' && installed !== undefined && (installed.source === 'market' || installed.source === 'bundled');
   const progress = install?.status === 'downloading' && install.progress !== null ? Math.min(100, Math.max(0, install.progress)) : null;
   const marketDownloads = entry.stats?.downloads;
   const downloads = mode === 'catalog' && typeof marketDownloads === 'number' && Number.isSafeInteger(marketDownloads) && marketDownloads > 0 ? marketDownloads : null;
@@ -85,7 +85,9 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
   const [notesOpen, setNotesOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const hasNotes = Boolean(entry.releaseNotes);
-  const notesToggle = hasNotes ? <Button className="plugin-notes-toggle" variant="ghost" size="xs" aria-label={notesOpen ? '收起版本说明' : '查看版本说明'} aria-expanded={notesOpen} aria-controls={notesId} onClick={() => setNotesOpen(open => !open)}>版本说明<ChevronDown aria-hidden="true" /></Button> : null;
+  const notesToggle = hasNotes ? <Button className="plugin-notes-toggle" variant="ghost" size="icon-xs" title="版本说明" aria-label={notesOpen ? '收起版本说明' : '查看版本说明'} aria-expanded={notesOpen} aria-controls={notesOpen ? notesId : undefined} onClick={() => setNotesOpen(open => !open)}><ScrollText aria-hidden="true" /></Button> : null;
+  const openAction = installed && (mode === 'installed' || catalogInstalled) ? <Button variant="outline" size="sm" disabled={unavailable || !ready || !installed.enabled || Boolean(installed.missing.length)} onClick={() => onOpen()}>打开</Button> : null;
+  const showInstallAction = !installed || failed || (catalogInstalled && !current && !entry.sourceUnavailable);
   const phase = install ? ({ checking: '正在检查插件版本…', downloading: installed ? '正在下载新版本…' : '正在下载插件…', verifying: '正在校验插件包…', installing: installed ? '正在安装新版本…' : '正在安装插件…', syncing: '正在刷新工具…', installed: `安装完成${install.version ? ` · v${install.version}` : ''}`, error: '' }[install.status]) : '';
   const retryLabel = installed ? '重试更新' : '重试安装';
   const retry = () => onAction('market.install', { id: entry.id });
@@ -107,9 +109,11 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       {entry.sourceUnavailable ? <p role="status">暂时无法获取最新版本，请稍后重试。</p> : null}
       {notesOpen && entry.releaseNotes ? <div className="plugin-notes-panel" id={notesId}><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></div> : null}
       {mode === 'catalog' ? <>
-        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : isCredentials ? <p className="plugin-capabilities">统一管理各工具的 AppID 与密钥</p> : null}
+        {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : null}
         <span className="plugin-market-meta">
-          <span className="plugin-origin">{pluginOriginLabel(entry)}</span>
+          {installed ? <span className={cn('plugin-installed', !installed.enabled && 'is-muted')}><Check aria-hidden="true" />{installed.enabled ? (installed.source === 'local' ? '本地已安装' : '已安装') : '已停用'}</span> : null}
+          {installed?.missing.length ? <span className="plugin-status-warning">缺少组件</span> : null}
+          <span className="plugin-origin">{pluginOriginLabel(entry, installed)}</span>
           <span className="plugin-version">v{entry.version}</span>
           {downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}
         </span>
@@ -138,13 +142,14 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
     </CardContent>
     <CardFooter>
       {mode === 'catalog' ? <>{notesToggle}<div className="plugin-card-actions">
-        <Button size="sm" disabled={unavailable || entry.sourceUnavailable || (current && !failed) || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.sourceUnavailable ? '暂不可用' : entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : current ? '已安装' : installed ? '更新插件' : '安装插件'}</Button>
+        {openAction}
+        {showInstallAction ? <Button size="sm" disabled={unavailable || entry.sourceUnavailable || entry.compatible === false} aria-label={updating ? (installed ? '更新插件' : '安装插件') : undefined} onClick={retry}>{entry.sourceUnavailable ? '暂不可用' : entry.compatible === false ? '需要升级轻作' : updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />{installed ? '更新中…' : '安装中…'}</> : failed ? retryLabel : installed ? '更新插件' : '安装插件'}</Button> : null}
       </div></> : <>
         {notesToggle}
         <div className="plugin-card-actions">
-          {updateAvailable && !entry.sourceUnavailable ? <Button variant="outline" size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
-          <Button variant="outline" size="sm" disabled={unavailable} aria-expanded={manageOpen} aria-controls={manageId} onClick={() => setManageOpen(open => !open)}>管理</Button>
-          <Button size="sm" disabled={unavailable || !ready || !installed?.enabled || Boolean(installed?.missing.length)} onClick={() => onOpen()}>打开</Button>
+          {updateAvailable && !entry.sourceUnavailable ? <Button size="sm" disabled={unavailable || entry.compatible === false} onClick={retry}>{updating ? <><LoaderCircle data-icon="inline-start" className="animate-spin" />更新中…</> : entry.compatible === false ? '需要升级轻作' : '更新插件'}</Button> : null}
+          <Button variant="outline" size="sm" disabled={unavailable} aria-expanded={manageOpen} aria-controls={manageOpen ? manageId : undefined} onClick={() => setManageOpen(open => !open)}>管理</Button>
+          {openAction}
         </div>
       </>}
     </CardFooter>

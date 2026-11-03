@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -555,6 +555,7 @@ export default function Platform() {
     setCategory('all');
     setTierFilter('all');
   };
+  const tierFilterOptions = ([['all', '全部'], ['platform', '底座内置'], ['official', '官方社区'], ['community', '第三方']] as const).filter(([value]) => value === 'all' || tierCounts[value] > 0);
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
     try { window.localStorage.setItem('qingzuo.sidebarCollapsed', next ? '1' : '0'); } catch { /* storage is optional */ }
@@ -616,9 +617,31 @@ export default function Platform() {
               <button type="button" role="tab" id="tool-tab-installed" aria-selected={toolTab === 'installed'} aria-controls="tool-panel-installed" className={cn('tool-tab', toolTab === 'installed' && 'is-active')} onClick={() => selectToolTab('installed')}>已安装<span className="tool-tab-count" aria-hidden="true">{plugins.length}</span></button>
               <button type="button" role="tab" id="tool-tab-all" aria-selected={toolTab === 'all'} aria-controls="tool-panel-all" className={cn('tool-tab', toolTab === 'all' && 'is-active')} onClick={() => selectToolTab('all')}>全部{marketState === 'ready' ? <span className="tool-tab-count" aria-hidden="true">{catalogEntries.length}</span> : null}</button>
             </div>
+            {toolTab === 'all' ? <div className="tool-filters" role="group" aria-label="工具筛选">
+              <label className={cn('tool-filter', tierFilter !== 'all' && 'is-active')}>
+                <span className="tool-filter-label">来源</span>
+                <span className="tool-filter-control">
+                  <select aria-label="按来源筛选" value={tierFilter} onChange={event => selectTierFilter(event.target.value as 'all' | PluginTier)}>
+                    {tierFilterOptions.map(([value, label]) => <option key={value} value={value}>{label}{value === 'all' ? `（${tierCounts.all}）` : `（${tierCounts[value]}）`}</option>)}
+                  </select>
+                  <ChevronDown aria-hidden="true" />
+                </span>
+              </label>
+              {categories.length ? <label className={cn('tool-filter', category !== 'all' && 'is-active')}>
+                <span className="tool-filter-label">类型</span>
+                <span className="tool-filter-control">
+                  <select aria-label="按功能分类筛选" value={category} onChange={event => setCategory(event.target.value)}>
+                    <option value="all">全部</option>
+                    {categories.map(item => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <ChevronDown aria-hidden="true" />
+                </span>
+              </label> : null}
+              {filtersActive ? <><span className="tool-result-count" role="status">找到 {results.length} 个</span>{results.length ? <button type="button" className="tool-filter-clear" onClick={clearToolFilters}>清除筛选</button> : null}</> : null}
+            </div> : null}
             {toolTab === 'installed' ? <div className="tool-center-status">
               <span className="tool-status-text" role="status">
-                <span className={cn('tool-status-title', pluginUpdates.length > 0 && 'is-update')}>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : '检查插件是否有新版本'}</span>
+                <span className={cn('tool-status-title', pluginUpdates.length > 0 && 'is-update')}>{pluginUpdates.length ? `发现 ${pluginUpdates.length} 个插件更新` : marketCheckedAt ? '所有插件均为最新版本' : null}</span>
                 {marketCheckedAt ? <span className="tool-status-time">上次检查 {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(marketCheckedAt)}</span> : null}
               </span>
               <Button variant="outline" size="sm" disabled={!desktop || busy || pluginCheckBusy} onClick={() => void checkPluginUpdates()}>{pluginCheckBusy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}检查插件更新</Button>
@@ -631,16 +654,6 @@ export default function Platform() {
             <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`installed:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="installed" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
             {!results.length ? <Empty><EmptyHeader><Boxes /><EmptyTitle>{query ? '没有找到工具' : '还没有安装工具'}</EmptyTitle><EmptyDescription>{query ? '换个关键词试试。' : '从全部工具中挑选，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query ? <Button variant="outline" onClick={() => setQuery('')}>清除筛选</Button> : <Button variant="outline" onClick={() => selectToolTab('all')}>浏览全部工具<ArrowRight data-icon="inline-end" /></Button>}</Empty> : null}
           </div> : <div id="tool-panel-all" role="tabpanel" aria-labelledby="tool-tab-all" className="tool-tab-panel">
-            <div className="market-filters" role="group" aria-label="工具筛选">
-              <div className="market-filter-row" role="group" aria-label="按信任层筛选">
-                <span className="market-filter-label">信任层</span>
-                {([['all', '全部'], ['platform', '底座内置'], ['official', '官方社区'], ['community', '第三方']] as const).map(([value, label]) => <Button key={value} variant={tierFilter === value ? 'default' : 'outline'} aria-pressed={tierFilter === value} onClick={() => selectTierFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{tierCounts[value]}</span></Button>)}
-              </div>
-              {categories.length ? <div className="market-filter-row" role="group" aria-label="按功能分类筛选">
-                <span className="market-filter-label">类型</span>
-                {['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部' : item}</Button>)}
-              </div> : null}
-            </div>
             {marketState === 'loading' ? <div className="market-loading" role="status"><LoaderCircle className="animate-spin" />正在加载插件目录…</div> : marketState === 'error' || marketState === 'unavailable' ? <Empty className="market-empty"><EmptyHeader><Store /><EmptyTitle>{marketState === 'error' ? '暂时无法加载插件市场' : desktop ? '插件目录尚未就绪' : '在桌面应用中发现更多工具'}</EmptyTitle><EmptyDescription>{marketMessage}</EmptyDescription></EmptyHeader>{desktop ? <Button variant="outline" onClick={() => setMarketRevision(value => value + 1)}><RefreshCw data-icon="inline-start" />重新加载</Button> : null}</Empty> : <>
               <div className="commerce-grid tool-grid">{results.map(entry => <PluginCard key={`all:${entry.id}`} entry={entry} installed={plugins.find(p => p.id === entry.id)} mode="catalog" disabled={!desktop || busy} ready={status.kernel.ready} install={installFor(entry.id)} onOpen={settings => void navigate(entry.id, settings)} onAction={act} />)}</div>
               {!results.length ? <Empty><EmptyHeader><Search /><EmptyTitle>{filtersActive ? '没有找到工具' : '这里还没有工具'}</EmptyTitle><EmptyDescription>{filtersActive ? '换个关键词、来源或分类，试试其他工具。' : '稍后再来看看，或导入本地插件。'}</EmptyDescription></EmptyHeader>{filtersActive ? <Button variant="outline" onClick={clearToolFilters}>清除筛选</Button> : null}</Empty> : null}
