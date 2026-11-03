@@ -7,6 +7,7 @@ import {
   DebugLogService,
   MIN_DEBUG_LOG_BYTES,
   MAX_DEBUG_LOG_MESSAGE_LENGTH,
+  redactSensitiveText,
 } from '../../desktop/debug-logging.mjs';
 
 async function temporaryRoot() {
@@ -111,6 +112,60 @@ test('debug logging rejects invalid retention limits and relative directories', 
     await service.initialize();
     await assert.rejects(service.configure({ enabled: true, maxBytes: MIN_DEBUG_LOG_BYTES - 1 }), /1 MB/);
     await assert.rejects(service.configure({ directory: 'relative/logs' }), /目录无效/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('debug logs redact secrets while preserving paths, URLs, line numbers, and order', async () => {
+  const root = await temporaryRoot();
+  try {
+    const service = new DebugLogService({ root, sessionId: 'session-one' });
+    await service.initialize();
+    await service.configure({ enabled: true });
+    service.record({
+      scope: 'plugin',
+      source: 'official.demo',
+      level: 'error',
+      message: 'Authorization: Bearer abcdefghijkl api_key=sk-1234567890abcdef password="hunter2"',
+      line: 42,
+      url: 'https://user:pass@example.com/path?token=secret-value&safe=1',
+    });
+    service.record({ scope: 'app', source: 'app', level: 'info', message: '普通文件 /Users/me/file.txt 第 7 行 https://example.com/a?foo=bar' });
+    await service.flush();
+
+    const entries = service.recentSince(0).entries;
+    assert.equal(entries[0].seq, 1);
+    assert.equal(entries[1].seq, 2);
+    assert.equal(entries[0].line, 42);
+    assert.match(entries[0].message, /Authorization: Bearer \[REDACTED\]/);
+    assert.match(entries[0].message, /api_key=\[REDACTED\]/);
+    assert.match(entries[0].message, /password="\[REDACTED\]"/);
+    assert.equal(entries[0].url, 'https://user:[REDACTED]@example.com/path?token=[REDACTED]&safe=1');
+    assert.equal(entries[1].message, '普通文件 /Users/me/file.txt 第 7 行 https://example.com/a?foo=bar');
+    assert.deepEqual(service.recentSince(1).entries.map(entry => entry.seq), [2]);
+    assert.equal(redactSensitiveText('normal /tmp/a.txt line 5'), 'normal /tmp/a.txt line 5');
+    assert.equal(redactSensitiveText('{"secretKey":"hidden","privateKey":"hidden","apiKey":"hidden"}'), '{"secretKey":"[REDACTED]","privateKey":"[REDACTED]","apiKey":"[REDACTED]"}');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('debug log cursor reports gaps when retained history no longer covers the cursor', async () => {
+  const root = await temporaryRoot();
+  try {
+    const service = new DebugLogService({ root, sessionId: 'session-two' });
+    await service.initialize();
+    await service.configure({ enabled: true });
+    for (let index = 0; index < 1202; index += 1) service.record({ scope: 'app', source: 'test', level: 'info', message: 'entry-' + index });
+    const page = service.recentSince(1);
+    assert.equal(page.sessionId, 'session-two');
+    assert.equal(page.entries.length, 1200);
+    assert.equal(page.entries[0].seq, 3);
+    assert.equal(page.nextCursor, 1202);
+    assert.equal(page.gap, true);
+    assert.equal(service.recentSince(2).gap, false);
+    await service.flush();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

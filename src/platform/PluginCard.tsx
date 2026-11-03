@@ -11,23 +11,35 @@ import gte from 'semver/functions/gte';
 const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'));
 
 export interface ToolEntry {
-  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; official?: boolean; sourceUnavailable?: boolean; stats?: { downloads?: number };
+  id: string; title: string; description: string; category?: string; version: string; releaseNotes?: string; icon?: string; api?: string; compatible?: boolean; tier?: PluginTier; official?: boolean; sourceUnavailable?: boolean; stats?: { downloads?: number };
 }
 export interface Plugin extends ToolEntry {
   enabled: boolean; source: string; local: boolean; bundled?: boolean; missing: string[]; settings?: { title: string }; error?: string;
 }
-export type PluginGroup = 'builtin' | 'community';
-export type PluginPublisher = 'official' | 'unofficial';
+export type PluginTier = 'platform' | 'official' | 'community';
+export const pluginTierLabels: Record<PluginTier, string> = { platform: '底座内置', official: '官方社区', community: '第三方' };
+export function isPluginTier(value: unknown): value is PluginTier {
+  return value === 'platform' || value === 'official' || value === 'community';
+}
+export function isTrustedPluginTier(value: unknown): boolean {
+  return value === 'platform' || value === 'official';
+}
+export function isTrustedPluginSource(value: unknown): boolean {
+  return value === 'market' || value === 'bundled';
+}
 export function toolCategory(tool: ToolEntry) { return tool.category || '其他工具'; }
-export function pluginGroup(_tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'bundled'>): PluginGroup {
-  return installed?.bundled || installed?.source === 'bundled' ? 'builtin' : 'community';
+export function pluginTier(tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'tier'>): PluginTier {
+  if (installed) {
+    if (installed.source === 'local') return 'community';
+    if (isPluginTier(installed.tier)) return installed.tier;
+    return installed.source === 'bundled' ? 'platform' : 'community';
+  }
+  if (isPluginTier(tool.tier)) return tool.tier;
+  if (typeof tool.official === 'boolean') return tool.official ? 'official' : 'community';
+  return tool.id.startsWith('official.') ? 'official' : 'community';
 }
-export function pluginPublisher(tool: ToolEntry): PluginPublisher {
-  return (tool.official ?? tool.id.startsWith('official.')) ? 'official' : 'unofficial';
-}
-export function pluginOriginLabel(tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'bundled'>) {
-  if (pluginGroup(tool, installed) === 'builtin') return '内置插件';
-  return pluginPublisher(tool) === 'official' ? '社区插件 · 官方插件' : '社区插件 · 非官方插件';
+export function pluginOriginLabel(tool: ToolEntry, installed?: Pick<Plugin, 'source' | 'tier'>) {
+  return pluginTierLabels[pluginTier(tool, installed)];
 }
 export function pluginInstallActive(install?: PluginInstallState) {
   return Boolean(install && ['checking', 'downloading', 'verifying', 'installing', 'syncing'].includes(install.status));
@@ -38,17 +50,26 @@ const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact', comp
 export function formatDownloadCount(downloads: number) {
   return downloads >= 1000 ? compactNumber.format(downloads) : exactNumber.format(downloads);
 }
-const sourceLabel = (source?: string) => ({ bundled: '内置工具', local: '本地导入', market: '市场安装' }[source ?? ''] ?? source);
+export function pluginInstallSourceLabel(source?: string) {
+  return ({ bundled: '随应用内置', local: '本地导入', market: '市场安装' } as Record<string, string>)[source ?? ''] ?? source;
+}
 interface PluginCardProps {
   entry: ToolEntry; installed?: Plugin; mode: 'installed' | 'catalog'; disabled: boolean; ready: boolean; install?: PluginInstallState;
   onOpen: (settings?: boolean) => void; onAction: (method: string, args: unknown) => void;
 }
 export function PluginCard({ entry, installed, mode, disabled, ready, install, onOpen, onAction }: PluginCardProps) {
-  const isLabel = entry.id === 'official.labeledit';
-  const isCutout = entry.id === 'official.removebg';
-  const isCredentials = entry.id === 'official.credentials';
+  const installedIdentity = mode === 'installed' ? installed : undefined;
+  const displayTitle = installedIdentity?.title ?? entry.title;
+  const displayDescription = installedIdentity?.description ?? entry.description;
+  const displayCategory = toolCategory(installedIdentity ?? entry);
+  const tier = mode === 'catalog' ? pluginTier(entry) : pluginTier(entry, installed);
+  const trustSource = mode === 'catalog' ? (installed?.source === 'bundled' ? 'bundled' : 'market') : installed?.source;
+  const trusted = isTrustedPluginTier(tier) && isTrustedPluginSource(trustSource);
+  const isLabel = trusted && entry.id === 'official.labeledit';
+  const isCutout = trusted && entry.id === 'official.removebg';
+  const isCredentials = trusted && entry.id === 'official.credentials';
   const Icon = isLabel ? FileText : isCutout ? Image : Puzzle;
-  const iconSrc = resolvePluginIcon(entry.id, entry.icon ?? installed?.icon);
+  const iconSrc = resolvePluginIcon(entry.id, installedIdentity ? installedIdentity.icon : entry.icon, { tier, source: trustSource });
   // A stale catalog must not offer a downgrade of a newer bundled/local tool.
   const current = installed ? gte(installed.version, entry.version) : false;
   const updateAvailable = mode === 'installed' && Boolean(installed) && !current;
@@ -76,19 +97,19 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
     <CardHeader>
       <span className={cn('commerce-tool-icon', iconSrc && 'has-image')}>{iconSrc ? <img src={iconSrc} alt="" /> : <Icon />}</span>
       <div className="plugin-info">
-        <CardTitle role="heading" aria-level={2}>{entry.title}</CardTitle>
-        <span className="plugin-category">{toolCategory(entry)}</span>
+        <CardTitle role="heading" aria-level={2}>{displayTitle}</CardTitle>
+        <span className="plugin-category">{displayCategory}</span>
       </div>
     </CardHeader>
     <CardContent>
-      <CardDescription className="plugin-description" title={entry.description}>{entry.description}</CardDescription>
+      <CardDescription className="plugin-description" title={displayDescription}>{displayDescription}</CardDescription>
       {entry.compatible === false ? <p role="alert">请先将轻作更新到较新版本，再安装这个工具。</p> : null}
       {entry.sourceUnavailable ? <p role="status">暂时无法获取最新版本，请稍后重试。</p> : null}
       {notesOpen && entry.releaseNotes ? <div className="plugin-notes-panel" id={notesId}><Suspense fallback={<span>加载更新说明…</span>}><ReleaseNotes body={entry.releaseNotes} /></Suspense></div> : null}
       {mode === 'catalog' ? <>
         {isLabel ? <p className="plugin-capabilities">离线识别<span>·</span>原尺寸导出</p> : isCutout ? <p className="plugin-capabilities">使用你自己的 remove.bg 密钥</p> : isCredentials ? <p className="plugin-capabilities">统一管理各工具的 AppID 与密钥</p> : null}
         <span className="plugin-market-meta">
-          <span className="plugin-origin">{pluginOriginLabel(entry, installed)}</span>
+          <span className="plugin-origin">{pluginOriginLabel(entry)}</span>
           <span className="plugin-version">v{entry.version}</span>
           {downloads !== null ? <span className="plugin-downloads" title={`累计下载 ${exactNumber.format(downloads)} 次`} aria-label={`累计下载 ${exactNumber.format(downloads)} 次`}><Download aria-hidden="true" />{formatDownloadCount(downloads)}</span> : null}
         </span>
@@ -97,9 +118,10 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
         {updateAvailable ? <li className="plugin-state-chip is-update">可更新到 v{entry.version}</li> : null}
         <li className={cn('plugin-state-chip', installed?.enabled ? 'is-enabled' : 'is-disabled')}>{installed?.enabled ? '已启用' : '已停用'}</li>
         {installed?.missing.length ? <li className="plugin-state-chip is-warning">缺少所需组件</li> : null}
-        <li className="plugin-state-chip">{sourceLabel(installed?.bundled ? 'bundled' : installed?.source)}</li>
+        <li className="plugin-state-chip">{pluginOriginLabel(entry, installed)}</li>
+        <li className="plugin-state-chip">{pluginInstallSourceLabel(installed?.source)}</li>
       </ul>}
-      {mode === 'installed' && manageOpen ? <div id={manageId} className="plugin-manage-panel" role="group" aria-label={`${entry.title} 管理`}>
+      {mode === 'installed' && manageOpen ? <div id={manageId} className="plugin-manage-panel" role="group" aria-label={`${displayTitle} 管理`}>
         <Button variant="outline" size="sm" disabled={unavailable} onClick={() => manage('plugins.enable', { id: entry.id, enabled: !installed?.enabled })}>{installed?.enabled ? '停用' : '启用'}</Button>
         {installed?.settings ? <Button variant="outline" size="sm" disabled={unavailable || !installed.enabled} onClick={() => { setManageOpen(false); onOpen(true); }}>插件设置</Button> : null}
         <Button variant="ghost" size="sm" disabled={unavailable} onClick={() => manage('plugins.rollback', { id: entry.id })}>恢复版本</Button>
@@ -107,7 +129,7 @@ export function PluginCard({ entry, installed, mode, disabled, ready, install, o
       </div> : null}
       {installed?.error ? <p role="alert" className="text-destructive">{installed.error}</p> : null}
       {updating ? <div className="plugin-update-progress" role="status" aria-busy="true" aria-live="polite">
-        <Progress value={progress} indeterminate={progress === null} className="relative" aria-label={`${entry.title} 安装进度`} />
+        <Progress value={progress} indeterminate={progress === null} className="relative" aria-label={`${displayTitle} 安装进度`} />
         <span className="plugin-update-hint"><LoaderCircle className="animate-spin" />{phase}{progress !== null ? ` ${Math.floor(progress)}%` : ''}</span>
         {install?.status === 'downloading' && (install.transferred > 0 || install.total > 0) ? <span className="plugin-update-hint">{megabytes(install.transferred)}{install.total > 0 ? ` / ${megabytes(install.total)}` : ''}</span> : null}
       </div> : null}

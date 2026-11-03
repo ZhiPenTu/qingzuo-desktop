@@ -18,26 +18,35 @@ test('market plugin icons must be bounded PNG data URLs', () => {
  assert.equal(validateCatalog({schemaVersion:1,plugins:[{...entry,icon}]})[0].icon,icon);
  for(const invalid of ['https://example.com/icon.png','data:image/svg+xml;base64,PHN2Zz4=','data:image/png;base64,AAAA','data:image/png;base64,'+'A'.repeat(49153)]) assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,icon:invalid}]}));
 });
-test('market entries expose official and community publisher identity', () => {
+test('market entries project explicit tiers and legacy publisher fields without inferring platform', () => {
  const entries=validateCatalog({schemaVersion:1,plugins:[
   entry,
   {...entry,id:'community.fixture'},
   {...entry,id:'community.verified',official:true},
   {...entry,id:'official.legacy',official:false},
+  {...entry,id:'official.explicit-tier',tier:'community',official:false},
+  {...entry,id:'community.explicit-tier',tier:'official'},
+  {...entry,id:'community.platform-tier',tier:'platform',official:true},
 ]});
- assert.deepEqual(entries.map(item=>item.official),[true,false,true,false]);
+ assert.deepEqual(entries.map(item=>item.tier),['official','community','official','community','community','official','platform']);
+ assert.deepEqual(entries.map(item=>item.official),[true,false,true,false,false,true,true]);
  assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[{...entry,official:'yes'}]}));
+ for(const invalid of [
+  {...entry,tier:'builtin'},
+  {...entry,tier:'platform',official:false},
+  {...entry,tier:'community',official:true},
+ ]) assert.throws(()=>validateCatalog({schemaVersion:1,plugins:[invalid]}));
 });
 
 test('source entries resolve the latest release without changing the market catalog', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
  const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};
  const version='0.2.0',url=expectedReleaseArtifactUrl(repository,sourceEntry.id,version,platform);
- const fragment={schemaVersion:1,plugins:[{...sourceEntry,version,releaseNotes:'新版本',artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+ const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,releaseNotes:'新版本',artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
  const requested=[];
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async address=>{requested.push(address);return Buffer.from(JSON.stringify(fragment));}});
  assert.equal(requested[0],releaseFragmentUrl(repository,platform));
- assert.equal(resolved.version,version);assert.equal(resolved.releaseNotes,'新版本');assert.equal(resolved.verification,'github-release');
+ assert.equal(resolved.version,version);assert.equal(resolved.releaseNotes,'新版本');assert.equal(resolved.verification,'github-release');assert.equal(resolved.tier,'official');assert.equal(resolved.official,true);
  assert.deepEqual(resolved.artifacts[platform],{url,size:42,sha256:'c'.repeat(64)});
 });
 
@@ -45,7 +54,7 @@ test('source failures keep the legacy snapshot but mark it unavailable', async (
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
  const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>{throw new Error('offline');}});
- assert.equal(resolved.sourceUnavailable,true);assert.equal(resolved.version,entry.version);
+ assert.equal(resolved.sourceUnavailable,true);assert.equal(resolved.version,entry.version);assert.equal(resolved.tier,'official');assert.equal(resolved.official,true);
 });
 
 test('new releases do not reuse release notes from the legacy snapshot', async () => {
@@ -56,19 +65,52 @@ test('new releases do not reuse release notes from the legacy snapshot', async (
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
  assert.equal(resolved.releaseNotes,undefined);
 });
-test('release fragments cannot change the publisher identity reviewed in the catalog', async () => {
+test('release fragments cannot change or inject trust identity reviewed in the catalog', async () => {
+ const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
+ const sourceEntry={...entry,id:'community.explicit-tier',tier:'official',official:true,source:{type:'github-release',repository}};
+ const version='0.2.0',url=expectedReleaseArtifactUrl(repository,sourceEntry.id,version,platform);
+ for(const injected of [
+  {tier:'platform'},
+  {official:false},
+  {source:{type:'github-release',repository:'other/repository'}},
+  {stats:{downloads:1}},
+  {verification:'github-release'},
+ ]) {
+  const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,...injected,artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
+  assert.equal(resolved.sourceUnavailable,true);
+  assert.equal(resolved.tier,'official');
+  assert.equal(resolved.official,true);
+  assert.deepEqual(resolved.source,sourceEntry.source);
+ }
+});
+test('legacy release fragments keep working while harmless manifest fields are stripped', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
  const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};
  const version='0.2.0',url=expectedReleaseArtifactUrl(repository,sourceEntry.id,version,platform);
- const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version,title:entry.title,description:entry.description,official:false,artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}}}]};
+ const fragment={schemaVersion:1,plugins:[{
+  id:sourceEntry.id,
+  version,
+  title:entry.title,
+  description:entry.description,
+  manifestVersion:1,
+  ui:'ui/index.html',
+  permissions:{network:['https://example.com']},
+  backend:{type:'node',entry:'backend/index.mjs'},
+  services:{provides:['fixture']},
+  artifacts:{[platform]:{url,size:42,sha256:'c'.repeat(64)}},
+ }]};
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
- assert.equal(resolved.official,true);
+ assert.equal(resolved.sourceUnavailable,undefined);
+ assert.equal(resolved.version,version);
+ assert.equal(resolved.tier,'official');
+ for(const field of ['manifestVersion','ui','permissions','backend','services']) assert.equal(field in resolved,false);
 });
 
 test('release fragments must keep the artifact inside the registered repository and version', async () => {
  const platform='darwin-arm64',repository='ZhiPenTu/qingzuo-plugin-fixture';
  const sourceEntry={...entry,id:'official.fixture',source:{type:'github-release',repository}};
- const fragment={schemaVersion:1,plugins:[{...sourceEntry,version:'0.2.0',artifacts:{[platform]:{url:'https://github.com/other/repo/releases/download/v0.2.0/bad.ecplugin',size:42,sha256:'c'.repeat(64)}}}]};
+ const fragment={schemaVersion:1,plugins:[{id:sourceEntry.id,version:'0.2.0',title:entry.title,description:entry.description,artifacts:{[platform]:{url:'https://github.com/other/repo/releases/download/v0.2.0/bad.ecplugin',size:42,sha256:'c'.repeat(64)}}}]};
  const [resolved]=await resolveMarketEntries({schemaVersion:1,plugins:[sourceEntry]},{platform,load:async()=>Buffer.from(JSON.stringify(fragment))});
  assert.equal(resolved.sourceUnavailable,true);
 });

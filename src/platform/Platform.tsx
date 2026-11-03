@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { PluginCard, pluginGroup, pluginInstallActive, pluginPublisher, toolCategory, type Plugin, type PluginGroup, type PluginPublisher, type ToolEntry } from './PluginCard';
+import { PluginCard, isTrustedPluginSource, isTrustedPluginTier, pluginInstallActive, pluginTier, toolCategory, type Plugin, type PluginTier, type ToolEntry } from './PluginCard';
 import gt from 'semver/functions/gt';
 import type { DebugLogState, DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
@@ -18,14 +18,13 @@ import { useTheme } from '../theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
-import { AISettings } from './AISettings';
 import { HARNESS_UI_VERSION } from './harness-client';
-import { aiChatIcon, resolvePluginIcon } from './plugin-icons';
-import { DebugLogPage } from './DebugLogPage';
+import { resolvePluginIcon } from './plugin-icons';
 import { CapabilitySettings } from './CapabilitySettings';
-const AIChat = lazy(() => import('./AIChat'));
-type Page = 'home' | 'chat' | 'ai' | 'settings' | 'logs';
+type Page = 'home' | 'settings';
 type ToolTab = 'installed' | 'all';
+const FIRST_PARTY_AI_ASSISTANT = 'official.ai-assistant';
+const FIRST_PARTY_DIAGNOSTICS = 'official.diagnostics';
 interface ComponentUpdateState {
   status: string;
   currentVersion?: string;
@@ -39,8 +38,10 @@ interface ComponentUpdateState {
 }
 interface UpdatePreferencesState { autoUpdate: boolean }
 interface Status { version: string; system?: SystemDiagnostics; kernel: { ready: boolean; error: string | null; version: string; systems: { id: string; title: string; protected: boolean }[] }; plugins: Plugin[]; pluginInstalls?: PluginInstallState[]; tabs: string[]; browser?: BrowserStatus; update: UpdateState; updatePreferences?: UpdatePreferencesState; downloadSource?: DownloadSourceState; debugLog?: DebugLogState; componentUpdates?: { harness?: ComponentUpdateState }; migration?: { id: string; title: string; enabled: boolean } | null }
-const baseNavigation = [{ id: 'chat', title: 'AI 对话', icon: MessageCircle }, { id: 'home', title: '工具中心', icon: Boxes }, { id: 'settings', title: '设置', icon: Settings }] as const;
-const shellPageIds = ['home', 'chat', 'ai', 'settings', 'logs'] as const;
+type NavigationItem = { id: string; title: string; icon: typeof Boxes };
+const homeNavigation: NavigationItem = { id: 'home', title: '工具中心', icon: Boxes };
+const settingsNavigation: NavigationItem = { id: 'settings', title: '设置', icon: Settings };
+const shellPageIds = ['home', 'settings'] as const;
 const isShellPage = (id: string): id is Page => shellPageIds.includes(id as (typeof shellPageIds)[number]);
 const defaultDownloadSource: DownloadSourceState = { source: 'github', customMirrors: [], gitcodeAvailable: true, notice: null };
 const defaultDebugLog: DebugLogState = { enabled: false, directory: '', maxBytes: 50 * 1024 ** 2, currentFile: null, storedBytes: 0, lastError: null };
@@ -56,6 +57,7 @@ const BROWSER_PANE_MIN_RATIO = 0.15;
 const BROWSER_PANE_MAX_RATIO = 0.85;
 const BROWSER_PANE_RATIO_KEY = 'qingzuo.browserPaneRatio';
 const LEGACY_BROWSER_PANE_WIDTH_KEY = 'qingzuo.browserPaneWidth';
+const LOG_SIZE_OPTIONS = [10, 20, 50, 100, 250, 500, 1024];
 const clampBrowserPaneRatio = (ratio: number) => Math.min(BROWSER_PANE_MAX_RATIO, Math.max(BROWSER_PANE_MIN_RATIO, ratio));
 const browserPaneAvailableWidth = (collapsed: boolean) => {
   const sidebarWidth = collapsed ? 72 : window.innerWidth <= 420 ? 58 : window.innerWidth <= 760 ? 70 : window.innerWidth <= 1100 ? 182 : 208;
@@ -80,22 +82,39 @@ const emptyBrowser: BrowserStatus = { open: false, activeTabId: null, tabs: [], 
 const preview: Status = { version, kernel: { ready: false, error: null, version: HARNESS_UI_VERSION, systems: [] }, plugins: [], tabs: [], browser: emptyBrowser, downloadSource: defaultDownloadSource, debugLog: defaultDebugLog, updatePreferences: defaultUpdatePreferences, update: { status: 'idle', version: null, notes: '', error: null, progress: 0, transferred: 0, total: 0 } };
 const isLabel = (id: string) => id === 'official.labeledit';
 const isCutout = (id: string) => id === 'official.removebg';
-const tabIconFor = (id: string) => (id === 'browser' ? Globe : isLabel(id) ? FileText : isCutout(id) ? Image : Puzzle);
+const tabIconFor = (id: string, trusted = false) => (id === 'browser' ? Globe : trusted && isLabel(id) ? FileText : trusted && isCutout(id) ? Image : Puzzle);
 const pageCopy = {
   home: ['工具中心', '安装、管理和发现工具，都在一个地方。'],
-  ai: ['AI 设置', '选择服务商，连接后即可开始对话。'],
-  chat: ['AI 对话', '说一句话，让工具替你完成。'],
   settings: ['按你的习惯，轻松工作。', '选择舒适的外观，管理轻作与已安装的工具。'],
-  logs: ['日志调试', '查看轻作、插件和浏览器产生的运行记录。'],
 } as const;
+const formatLogBytes = (value: number) => {
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(value % (1024 ** 2) ? 1 : 0)} MB`;
+  return `${Math.max(0, Math.round(value / 1024))} KB`;
+};
 export default function Platform() {
   const desktop = Boolean(window.commerceDesktop);
   const [status, setStatus] = useState<Status | null>(desktop ? null : preview);
+  const plugins = status?.plugins ?? [];
   const debugLogState = status?.debugLog ?? defaultDebugLog;
-  const navigation = useMemo(() => debugLogState.enabled
-    ? [baseNavigation[0], baseNavigation[1], { id: 'logs' as const, title: '日志调试', icon: ScrollText }, baseNavigation[2]]
-    : baseNavigation, [debugLogState.enabled]);
-  const shellIconFor = (id: string) => (id === 'ai' ? Sparkles : id === 'logs' ? ScrollText : navigation.find(item => item.id === id)?.icon ?? Boxes);
+  const aiPlugin = plugins.find(plugin => plugin.id === FIRST_PARTY_AI_ASSISTANT);
+  const diagnosticsPlugin = plugins.find(plugin => plugin.id === FIRST_PARTY_DIAGNOSTICS);
+  const firstPartyReady = useCallback((plugin?: Plugin) => Boolean(
+    plugin
+    && plugin.enabled
+    && plugin.source === 'market'
+    && plugin.tier === 'platform'
+    && !plugin.missing.length,
+  ), []);
+  const aiReady = firstPartyReady(aiPlugin);
+  const diagnosticsReady = firstPartyReady(diagnosticsPlugin);
+  const navigation = useMemo<NavigationItem[]>(() => [
+    ...(aiReady ? [{ id: FIRST_PARTY_AI_ASSISTANT, title: 'AI 对话', icon: MessageCircle }] : []),
+    homeNavigation,
+    ...(diagnosticsReady ? [{ id: FIRST_PARTY_DIAGNOSTICS, title: '日志调试', icon: ScrollText }] : []),
+    settingsNavigation,
+  ], [aiReady, diagnosticsReady]);
+  const shellIconFor = (id: string) => navigation.find(item => item.id === id)?.icon ?? Boxes;
   const [page, setPage] = useState<Page | string>('home');
   const [toolTab, setToolTab] = useState<ToolTab>('installed');
   const [lastShellPage, setLastShellPage] = useState<Page>('home');
@@ -106,8 +125,7 @@ export default function Platform() {
   const [browserPaneResizing, setBrowserPaneResizing] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
-  const [groupFilter, setGroupFilter] = useState<'all' | PluginGroup>('all');
-  const [publisherFilter, setPublisherFilter] = useState<'all' | PluginPublisher>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | PluginTier>('all');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [startingPluginId, setStartingPluginId] = useState<string | null>(null);
@@ -133,6 +151,9 @@ export default function Platform() {
   const [customMirrorBusy, setCustomMirrorBusy] = useState(false);
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueDialogError, setIssueDialogError] = useState<CapturedError | null>(null);
+  const [debugSettingsBusy, setDebugSettingsBusy] = useState(false);
+  const [debugSettingsError, setDebugSettingsError] = useState<string | null>(null);
+  const [debugSettingsNotice, setDebugSettingsNotice] = useState<string | null>(null);
   const openIssueReport = (err?: unknown, source = '平台') => {
     const captured = err ? recordError(err, source) : (getLatestError() || null);
     setIssueDialogError(captured);
@@ -146,12 +167,6 @@ export default function Platform() {
   };
   const refresh = useCallback(async () => { if (window.commerceDesktop) try { setStatus(await window.commerceDesktop.invoke<Status>('status')); } catch (e) { recordError(e, '刷新状态'); setError(formatError(e)); } }, []);
   useEffect(() => { void refresh(); return window.commerceDesktop?.onChanged(() => { void refresh(); }); }, [refresh]);
-  useEffect(() => {
-    if (status && !debugLogState.enabled && page === 'logs') {
-      setPage('settings');
-      setLastShellPage('settings');
-    }
-  }, [status, debugLogState.enabled, page]);
   useEffect(() => window.commerceDesktop?.onBrowserResize?.(({ width }) => {
     if (Number.isFinite(width)) {
       let collapsed = false;
@@ -170,8 +185,6 @@ export default function Platform() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   useEffect(() => window.commerceDesktop?.onBrowserPane?.(() => setBrowserPaneOpen(true)), []);
-  const showChatPlugin = useCallback((id: string) => { setPage(id); setQuery(''); setCategory('all'); setGroupFilter('all'); setPublisherFilter('all'); }, []);
-  useEffect(() => window.commerceDesktop?.onAI?.(event => { if (event.type === 'navigate') showChatPlugin(event.pluginId); }), [showChatPlugin]);
   const run = async (method: string, args?: unknown) => {
     const installId = method === 'market.install' && args && typeof args === 'object' && 'id' in args && typeof args.id === 'string' ? args.id : null;
     if (installId && (pendingInstalls.current.has(installId) || pluginInstallActive(status?.pluginInstalls?.find(job => job.id === installId)))) return;
@@ -194,6 +207,60 @@ export default function Platform() {
       }
     } catch {
       // run() already surfaced the error.
+    }
+  };
+  const chooseDebugLogDirectory = async () => {
+    if (!desktop || debugSettingsBusy) return;
+    setDebugSettingsBusy(true);
+    setDebugSettingsError(null);
+    setDebugSettingsNotice(null);
+    try {
+      const result = await window.commerceDesktop!.invoke<{ canceled: boolean; debugLog: DebugLogState }>('debugLog.chooseDirectory');
+      setStatus(current => current ? { ...current, debugLog: result.debugLog } : current);
+    } catch (reason) {
+      setDebugSettingsError(formatError(reason));
+    } finally {
+      setDebugSettingsBusy(false);
+    }
+  };
+  const changeDebugLogSize = async (maxBytes: number) => {
+    if (!desktop || debugSettingsBusy) return;
+    setDebugSettingsBusy(true);
+    setDebugSettingsError(null);
+    setDebugSettingsNotice(null);
+    try {
+      const next = await window.commerceDesktop!.invoke<DebugLogState>('debugLog.configure', { maxBytes });
+      setStatus(current => current ? { ...current, debugLog: next } : current);
+    } catch (reason) {
+      setDebugSettingsError(formatError(reason));
+    } finally {
+      setDebugSettingsBusy(false);
+    }
+  };
+  const openDebugLogDirectory = async () => {
+    if (!desktop || debugSettingsBusy) return;
+    setDebugSettingsError(null);
+    setDebugSettingsNotice(null);
+    try {
+      await window.commerceDesktop!.invoke('debugLog.openDirectory');
+    } catch (reason) {
+      setDebugSettingsError(formatError(reason));
+    }
+  };
+  const revokeDebugLogAccess = async () => {
+    if (!desktop || debugSettingsBusy) return;
+    setDebugSettingsBusy(true);
+    setDebugSettingsError(null);
+    setDebugSettingsNotice(null);
+    try {
+      const result = await window.commerceDesktop!.invoke<{ revoked: boolean }>('debugLog.revokePluginAccess', { pluginId: FIRST_PARTY_DIAGNOSTICS });
+      setDebugSettingsNotice(result.revoked
+        ? '日志访问授权已撤销，查看器下次读取时会重新询问。'
+        : '当前没有需要撤销的日志访问授权。');
+    } catch (reason) {
+      setDebugSettingsError(formatError(reason));
+    } finally {
+      setDebugSettingsBusy(false);
     }
   };
   const updatePreferences = status?.updatePreferences ?? defaultUpdatePreferences;
@@ -306,7 +373,7 @@ export default function Platform() {
         // surface has to report its size again after the native view returns.
         setSurfaceRevision(value => value + 1);
       }
-      setPage(next); setQuery(''); setCategory('all'); setGroupFilter('all'); setPublisherFilter('all');
+      setPage(next); setQuery(''); setCategory('all'); setTierFilter('all');
     } catch (e) { setError(formatError(e)); }
   }
   const openBrowserPane = async () => {
@@ -422,8 +489,9 @@ export default function Platform() {
     const observer = new ResizeObserver(update); observer.observe(element); update();
     return () => observer.disconnect();
   }, [page, surfaceRevision]);
-  const plugins = status?.plugins ?? [];
   const installFor = (id: string): PluginInstallState | undefined => startingPluginId === id ? { id, version: null, status: 'checking', progress: null, transferred: 0, total: 0, error: null } : status?.pluginInstalls?.find(job => job.id === id);
+  const aiInstalling = pluginInstallActive(installFor(FIRST_PARTY_AI_ASSISTANT));
+  const diagnosticsInstalling = pluginInstallActive(installFor(FIRST_PARTY_DIAGNOSTICS));
   const migrationInstall = status?.migration ? installFor(status.migration.id) : undefined;
   const migrationRunning = pluginInstallActive(migrationInstall);
   const migrationProgress = migrationInstall?.status === 'downloading' && migrationInstall.progress !== null ? Math.min(100, Math.max(0, migrationInstall.progress)) : null;
@@ -436,60 +504,56 @@ export default function Platform() {
   const installedById = useMemo(() => new Map(plugins.map(plugin => [plugin.id, plugin])), [plugins]);
   const installedEntries = useMemo(() => plugins.map(plugin => {
     const candidate = marketById.get(plugin.id);
-    return candidate ? { ...candidate, enabled: plugin.enabled, source: plugin.source, local: plugin.local, bundled: plugin.bundled, missing: plugin.missing, settings: plugin.settings, error: plugin.error } as Plugin : plugin;
+    if (!candidate) return plugin;
+    return {
+      ...candidate,
+      ...plugin,
+      version: candidate.version,
+      releaseNotes: candidate.releaseNotes,
+      api: candidate.api,
+      compatible: candidate.compatible,
+      stats: candidate.stats,
+      sourceUnavailable: candidate.sourceUnavailable,
+    } as Plugin;
   }), [plugins, marketById]);
   const bundledCatalogEntries = useMemo(() => plugins.filter(plugin => plugin.source === 'bundled' && !marketById.has(plugin.id)), [plugins, marketById]);
   const catalogEntries = useMemo(() => [...market, ...bundledCatalogEntries], [market, bundledCatalogEntries]);
   const entries = toolTab === 'all' ? catalogEntries : installedEntries;
-  const groupCounts = useMemo(() => {
-    const counts = { all: entries.length, builtin: 0, community: 0 };
-    for (const entry of entries) counts[pluginGroup(entry, installedById.get(entry.id))] += 1;
+  const tierCounts = useMemo(() => {
+    const counts: Record<'all' | PluginTier, number> = { all: entries.length, platform: 0, official: 0, community: 0 };
+    for (const entry of entries) counts[pluginTier(entry, installedById.get(entry.id))] += 1;
     return counts;
   }, [entries, installedById]);
-  const communityEntries = useMemo(() => entries.filter(entry => pluginGroup(entry, installedById.get(entry.id)) === 'community'), [entries, installedById]);
-  const publisherCounts = useMemo(() => {
-    const counts = { official: 0, unofficial: 0 };
-    for (const entry of communityEntries) counts[pluginPublisher(entry)] += 1;
-    return counts;
-  }, [communityEntries]);
   const scopedEntries = useMemo(() => entries.filter(entry => {
-    const group = pluginGroup(entry, installedById.get(entry.id));
-    if (groupFilter !== 'all' && group !== groupFilter) return false;
-    if (groupFilter === 'community' && publisherFilter !== 'all' && pluginPublisher(entry) !== publisherFilter) return false;
-    return true;
-  }), [entries, installedById, groupFilter, publisherFilter]);
+    const tier = pluginTier(entry, installedById.get(entry.id));
+    return tierFilter === 'all' || tier === tierFilter;
+  }), [entries, installedById, tierFilter]);
   const categories = useMemo(() => [...new Set(scopedEntries.map(toolCategory))], [scopedEntries]);
   const results = useMemo(() => scopedEntries.filter(p => (category === 'all' || toolCategory(p) === category) && `${p.title} ${p.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [scopedEntries, category, query]);
-  const filtersActive = Boolean(query.trim()) || category !== 'all' || groupFilter !== 'all' || publisherFilter !== 'all';
-  const title = navigation.find(n => n.id === page)?.title ?? (page === 'ai' ? pageCopy.ai[0] : plugins.find(p => p.id === page)?.title ?? '工具');
+  const filtersActive = Boolean(query.trim()) || category !== 'all' || tierFilter !== 'all';
+  const title = navigation.find(n => n.id === page)?.title ?? plugins.find(p => p.id === page)?.title ?? '工具';
   const shellPage = isShellPage(page);
   const shellTabPage: Page = shellPage ? (page as Page) : lastShellPage;
-  const shellTabTitle = shellPage ? title : (navigation.find(n => n.id === shellTabPage)?.title ?? (shellTabPage === 'ai' ? pageCopy.ai[0] : '工具中心'));
+  const shellTabTitle = shellPage ? title : (navigation.find(n => n.id === shellTabPage)?.title ?? '工具中心');
   const ShellTabIcon = shellIconFor(shellTabPage);
-  const shellTabIconSrc = shellTabPage === 'chat' ? aiChatIcon : undefined;
-  const copy = pageCopy[page as Page];
+  const copy = shellPage ? pageCopy[page as Page] : pageCopy.home;
+  const configuredLogMb = Math.round(debugLogState.maxBytes / 1024 ** 2);
+  const debugLogSizeOptions = LOG_SIZE_OPTIONS.includes(configuredLogMb) ? LOG_SIZE_OPTIONS : [...LOG_SIZE_OPTIONS, configuredLogMb].sort((left, right) => left - right);
   const selectToolTab = (next: ToolTab) => {
     if (next !== 'all') { marketCache.current = null; marketRequest.current++; }
     setToolTab(next);
     setQuery('');
     setCategory('all');
-    setGroupFilter('all');
-    setPublisherFilter('all');
+    setTierFilter('all');
   };
-  const selectGroupFilter = (next: 'all' | PluginGroup) => {
-    setGroupFilter(next);
-    setPublisherFilter('all');
-    setCategory('all');
-  };
-  const selectPublisherFilter = (next: 'all' | PluginPublisher) => {
-    setPublisherFilter(next);
+  const selectTierFilter = (next: 'all' | PluginTier) => {
+    setTierFilter(next);
     setCategory('all');
   };
   const clearToolFilters = () => {
     setQuery('');
     setCategory('all');
-    setGroupFilter('all');
-    setPublisherFilter('all');
+    setTierFilter('all');
   };
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
@@ -498,10 +562,10 @@ export default function Platform() {
   });
   const renderWorkspaceTabs = () => status?.tabs.length ? <div className="commerce-windowbar-tabs" role="tablist" aria-label="已打开的工具">
     {!browserPaneOpen ? <button type="button" role="tab" aria-selected={shellPage} className={cn('commerce-tool-tab', 'commerce-tool-tab-shell', shellPage && 'is-active')} onClick={() => void navigate(shellTabPage)}>
-      {shellTabIconSrc ? <img src={shellTabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <ShellTabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{shellTabTitle}</span>
+      <ShellTabIcon className="commerce-tab-icon" /><span className="commerce-tab-title">{shellTabTitle}</span>
     </button> : null}
     {status.tabs.map(id => {
-      const plugin = plugins.find(p => p.id === id); const marketPlugin = marketById.get(id); const TabIcon = tabIconFor(id); const tabIconSrc = resolvePluginIcon(id, plugin?.icon ?? marketPlugin?.icon); const toolTitle = plugin?.title ?? marketPlugin?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
+      const plugin = plugins.find(p => p.id === id); const marketPlugin = marketById.get(id); const tabPlugin = plugin ?? marketPlugin; const tabTier = tabPlugin ? pluginTier(tabPlugin, plugin) : undefined; const tabSource = plugin?.source ?? 'market'; const trusted = isTrustedPluginTier(tabTier) && isTrustedPluginSource(tabSource); const TabIcon = tabIconFor(id, trusted); const tabIconSrc = resolvePluginIcon(id, plugin ? plugin.icon : marketPlugin?.icon, { tier: tabTier, source: tabSource }); const toolTitle = plugin?.title ?? marketPlugin?.title ?? id; const isInstalling = pluginInstallActive(installFor(id)); const isActive = page === id;
       return <div key={id} role="tab" tabIndex={0} aria-selected={isActive} className={cn('commerce-tool-tab', isActive && 'is-active', isInstalling && 'is-disabled')} onClick={() => { if (!isInstalling) void navigate(id); }} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isInstalling) { e.preventDefault(); void navigate(id); } }}>
         {tabIconSrc ? <img src={tabIconSrc} alt="" className="commerce-tab-icon commerce-tab-icon-image" /> : <TabIcon className="commerce-tab-icon" />}<span className="commerce-tab-title">{toolTitle}</span>
         <button type="button" className="commerce-tab-close" aria-label="关闭工具" title="关闭" disabled={isInstalling} onClick={e => { e.stopPropagation(); void run('view.close', { id }).then(() => { if (page === id) setPage(lastShellPage); }).catch(() => {}); }}><X /></button>
@@ -525,7 +589,7 @@ export default function Platform() {
         <nav aria-label="主导航">{navigation.map(({ id, title: label, icon: Icon }) => <Button key={id} variant={page === id ? 'secondary' : 'ghost'} aria-label={label} aria-current={page === id ? 'page' : undefined} className={cn('commerce-nav', id === 'settings' && 'commerce-nav-bottom')} onClick={() => void navigate(id)}><Icon data-icon="inline-start" /><span>{label}</span></Button>)}</nav>
         <div className="commerce-sidebar-footer"><span className={cn('connection-dot', status?.kernel.ready && 'connected')} /><span>{desktop ? status?.kernel.ready ? '工具服务已就绪' : '正在启动工具服务' : '浏览器界面预览'}</span><small>v{status?.version ?? version}</small></div>
       </aside>
-      <div className={cn('commerce-main', page === 'chat' && 'commerce-chat-main')}>
+      <div className="commerce-main">
       <div className="commerce-main-content">
       {error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{error}</span><Button variant="outline" size="sm" onClick={() => openIssueReport(error, '平台操作')}>反馈此问题</Button></AlertDescription></Alert> : null}
       {status?.migration ? <Alert className="commerce-alert"><Puzzle /><AlertDescription>
@@ -538,7 +602,7 @@ export default function Platform() {
         {migrationInstall?.status === 'error' ? <p className="mt-2 text-destructive">{migrationInstall.error || 'LabelEdit 恢复失败，请重试。'}</p> : null}
       </AlertDescription></Alert> : null}
       {status?.kernel.error ? <Alert variant="destructive" className="commerce-alert"><AlertCircle /><AlertDescription className="flex items-center justify-between gap-3 flex-wrap"><span>{status.kernel.error}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => act('kernel.retry')}>重新启动工具服务</Button><Button variant="outline" size="sm" onClick={() => openIssueReport(status.kernel.error, '工具服务')}>反馈报错</Button></div></AlertDescription></Alert> : null}
-      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : page === 'chat' ? <main className="commerce-chat-content"><Suspense fallback={<Skeleton className="m-6 h-96 flex-1" />}><AIChat onSettings={() => void navigate('ai')} onOpenPlugin={showChatPlugin} /></Suspense></main> : shellPage ? <main className="commerce-content"><div className={cn('commerce-content-inner', page === 'home' && 'commerce-content-inner-tools')}>
+      {!status ? <main className="commerce-content"><Skeleton className="h-12 w-64" /><Skeleton className="h-64 w-full" /></main> : shellPage ? <main className="commerce-content"><div className={cn('commerce-content-inner', page === 'home' && 'commerce-content-inner-tools')}>
         <div className="commerce-heading">
           <div className="commerce-heading-copy"><h1>{copy[0]}</h1><p>{copy[1]}</p></div>
           {page === 'home' ? <div className="commerce-page-actions">
@@ -568,14 +632,10 @@ export default function Platform() {
             {!results.length ? <Empty><EmptyHeader><Boxes /><EmptyTitle>{query ? '没有找到工具' : '还没有安装工具'}</EmptyTitle><EmptyDescription>{query ? '换个关键词试试。' : '从全部工具中挑选，或导入本地插件。'}</EmptyDescription></EmptyHeader>{query ? <Button variant="outline" onClick={() => setQuery('')}>清除筛选</Button> : <Button variant="outline" onClick={() => selectToolTab('all')}>浏览全部工具<ArrowRight data-icon="inline-end" /></Button>}</Empty> : null}
           </div> : <div id="tool-panel-all" role="tabpanel" aria-labelledby="tool-tab-all" className="tool-tab-panel">
             <div className="market-filters" role="group" aria-label="工具筛选">
-              <div className="market-filter-row" role="group" aria-label="按来源筛选">
-                <span className="market-filter-label">来源</span>
-                {([['all', '全部插件'], ['builtin', '内置插件'], ['community', '社区插件']] as const).map(([value, label]) => <Button key={value} variant={groupFilter === value ? 'default' : 'outline'} aria-pressed={groupFilter === value} onClick={() => selectGroupFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{groupCounts[value]}</span></Button>)}
+              <div className="market-filter-row" role="group" aria-label="按信任层筛选">
+                <span className="market-filter-label">信任层</span>
+                {([['all', '全部'], ['platform', '底座内置'], ['official', '官方社区'], ['community', '第三方']] as const).map(([value, label]) => <Button key={value} variant={tierFilter === value ? 'default' : 'outline'} aria-pressed={tierFilter === value} onClick={() => selectTierFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{tierCounts[value]}</span></Button>)}
               </div>
-              {groupFilter === 'community' ? <div className="market-filter-row" role="group" aria-label="按发布者筛选">
-                <span className="market-filter-label">发布者</span>
-                {([['all', '全部'], ['official', '官方插件'], ['unofficial', '非官方插件']] as const).map(([value, label]) => <Button key={value} variant={publisherFilter === value ? 'default' : 'outline'} aria-pressed={publisherFilter === value} onClick={() => selectPublisherFilter(value)}>{label}<span className="market-filter-count" aria-hidden="true">{value === 'all' ? communityEntries.length : publisherCounts[value]}</span></Button>)}
-              </div> : null}
               {categories.length ? <div className="market-filter-row" role="group" aria-label="按功能分类筛选">
                 <span className="market-filter-label">类型</span>
                 {['all', ...categories].map(item => <Button key={item} variant={category === item ? 'default' : 'outline'} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === 'all' ? '全部' : item}</Button>)}
@@ -587,16 +647,20 @@ export default function Platform() {
             </>}
           </div>}
         </> : null}
-        {page === 'ai' ? <AISettings onOpenChat={() => void navigate('chat')} /> : null}
-        {page === 'logs' ? <DebugLogPage state={debugLogState} onStateChange={next => setStatus(current => current ? { ...current, debugLog: next } : current)} /> : null}
         {page === 'settings' ? <div className="commerce-settings">
           <CapabilitySettings desktop={desktop} />
           <Card>
             <CardHeader>
               <CardTitle role="heading" aria-level={2}>AI 助手</CardTitle>
-              <CardDescription>统一管理对话与图像服务。</CardDescription>
+              <CardDescription>{aiPlugin ? '对话与图像服务由 AI 助手插件提供。' : '从市场安装后，即可使用对话与图像服务。'}</CardDescription>
               <CardAction className="self-center">
-                <Button variant="outline" onClick={() => void navigate('ai')}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button>
+                {aiPlugin ? (
+                  aiReady
+                    ? <Button variant="outline" disabled={busy} onClick={() => void navigate(FIRST_PARTY_AI_ASSISTANT, true)}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button>
+                    : !aiPlugin.enabled
+                      ? <Button variant="outline" disabled={busy} onClick={() => act('plugins.enable', { id: FIRST_PARTY_AI_ASSISTANT, enabled: true })}>启用 AI 助手</Button>
+                      : <Button variant="outline" disabled>AI 助手暂不可用</Button>
+                ) : <Button variant="outline" disabled={!desktop || busy || aiInstalling} onClick={() => act('market.install', { id: FIRST_PARTY_AI_ASSISTANT })}>{aiInstalling ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Store data-icon="inline-start" />}{aiInstalling ? '安装中…' : '从市场安装'}</Button>}
               </CardAction>
             </CardHeader>
           </Card>
@@ -633,12 +697,43 @@ export default function Platform() {
                 </button>
               </CardAction>
             </CardHeader>
-            {debugLogState.enabled ? <CardContent>
-              <div className="debug-log-setting-detail">
+            <CardContent>
+              <div className="debug-log-location">
                 <div><span>保存位置</span><strong title={debugLogState.directory}>{debugLogState.directory}</strong></div>
-                <Button type="button" variant="outline" size="sm" onClick={() => void navigate('logs')}><ScrollText data-icon="inline-start" />打开日志调试</Button>
+                <div className="debug-log-location-actions">
+                  <Button type="button" variant="outline" size="sm" disabled={!desktop || debugSettingsBusy} onClick={() => void chooseDebugLogDirectory()}>{debugSettingsBusy ? <LoaderCircle className="animate-spin" /> : null}更改目录</Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={!desktop || debugSettingsBusy} onClick={() => void openDebugLogDirectory()}>打开目录</Button>
+                </div>
               </div>
-            </CardContent> : null}
+              <div className="debug-log-size">
+                <label htmlFor="debug-log-max-size">最大保存大小</label>
+                <select
+                  id="debug-log-max-size"
+                  className="download-source-select"
+                  value={configuredLogMb}
+                  disabled={!desktop || debugSettingsBusy}
+                  onChange={event => void changeDebugLogSize(Number(event.target.value) * 1024 ** 2)}
+                >
+                  {debugLogSizeOptions.map(size => <option key={size} value={size}>{size} MB</option>)}
+                </select>
+                <span>已使用 {formatLogBytes(debugLogState.storedBytes)}</span>
+              </div>
+              {debugLogState.lastError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{debugLogState.lastError}</AlertDescription></Alert> : null}
+              {debugSettingsError ? <Alert variant="destructive"><AlertCircle /><AlertDescription>{debugSettingsError}</AlertDescription></Alert> : null}
+              {debugSettingsNotice ? <p role="status">{debugSettingsNotice}</p> : null}
+              <div className="debug-log-setting-actions">
+                {diagnosticsPlugin ? (
+                  <>
+                    {diagnosticsReady
+                      ? <Button type="button" variant="outline" size="sm" onClick={() => void navigate(FIRST_PARTY_DIAGNOSTICS)}><ScrollText data-icon="inline-start" />打开日志调试</Button>
+                      : !diagnosticsPlugin.enabled
+                        ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => act('plugins.enable', { id: FIRST_PARTY_DIAGNOSTICS, enabled: true })}>启用日志查看器</Button>
+                        : <Button type="button" variant="outline" size="sm" disabled>日志查看器暂不可用</Button>}
+                    <Button type="button" variant="ghost" size="sm" disabled={!desktop || debugSettingsBusy} onClick={() => void revokeDebugLogAccess()}>撤销日志访问</Button>
+                  </>
+                ) : <Button type="button" variant="outline" size="sm" disabled={!desktop || busy || diagnosticsInstalling} onClick={() => act('market.install', { id: FIRST_PARTY_DIAGNOSTICS })}>{diagnosticsInstalling ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Store data-icon="inline-start" />}{diagnosticsInstalling ? '安装中…' : '从市场安装日志查看器'}</Button>}
+              </div>
+            </CardContent>
           </Card>
           <Card className="download-source-card">
             <div className="download-source-row">
