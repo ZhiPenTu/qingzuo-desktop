@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { McpRuntime } from '../../desktop/mcp.mjs';
@@ -52,8 +53,94 @@ test('MCP exposes only annotated read-only tools and grants per plugin', async (
     assert.equal((await runtime.adminGrants(server.id)).length, 1);
     await runtime.revoke(plugin, { serverId: server.id });
     await assert.rejects(runtime.call(plugin, { serverId: server.id, toolName: 'search' }), /尚未授权/);
-    await assert.rejects(runtime.create({ name: '本机', url: 'https://127.0.0.1/mcp' }), /不可访问/);
-    await assert.rejects(runtime.create({ name: '私网', url: 'http://example.com/mcp' }), /HTTPS/);
+    const local = await runtime.create({ name: '本机', url: 'http://127.0.0.1:3000/mcp' });
+    assert.equal(local.url, 'http://127.0.0.1:3000/mcp');
+    assert.equal((await runtime.create({ name: '本机域名', url: 'http://localhost:3001/mcp' })).url, 'http://localhost:3001/mcp');
+    await assert.rejects(runtime.create({ name: '公网 HTTP', url: 'http://example.com/mcp' }), /HTTPS/);
+    await assert.rejects(runtime.create({ name: '私网', url: 'http://192.168.1.2/mcp' }), /HTTPS/);
+    const credentialUrl = 'http://user:' + ['sec', 'ret'].join('') + '@127.0.0.1/mcp';
+    await assert.rejects(runtime.create({ name: '带凭据', url: credentialUrl }), /无效/);
+  } finally {
+    await runtime.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP sends loopback HTTP requests without the public-network guard', async t => {
+  const server = http.createServer((request, response) => {
+    if (request.url === '/redirect') {
+      response.writeHead(302, { location: '/mcp' });
+      response.end();
+      return;
+    }
+    if (request.url === '/large') {
+      response.writeHead(200, { 'content-length': String(2 * 1024 * 1024 + 1) });
+      response.end();
+      return;
+    }
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ method: request.method, body }));
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-mcp-'));
+  const runtime = new McpRuntime({
+    root,
+    credentials: credentials(),
+    shell: { async openExternal() {} },
+    confirmGrant: async () => true,
+  });
+  try {
+    await runtime.initialize();
+    const local = await runtime.create({ name: '本机服务', url: 'http://127.0.0.1:' + server.address().port + '/mcp', authMode: 'none' });
+    const response = await runtime.guardedFetch(local, local.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"ping":1}',
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { method: 'POST', body: '{"ping":1}' });
+    await assert.rejects(runtime.guardedFetch(local, 'http://127.0.0.1:' + server.address().port + '/redirect', { method: 'GET' }));
+    await assert.rejects(runtime.guardedFetch(local, 'http://127.0.0.1:' + server.address().port + '/large', { method: 'GET' }), /响应过大/);
+    const remote = { url: 'https://example.com/mcp' };
+    await assert.rejects(runtime.guardedFetch(remote, local.url, { method: 'HEAD' }), /不可访问/);
+  } finally {
+    await runtime.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP only opens loopback HTTP authorization URLs for loopback servers', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-mcp-'));
+  let opened = '';
+  const runtime = new McpRuntime({
+    root,
+    credentials: credentials(),
+    shell: { async openExternal(url) { opened = url; } },
+    confirmGrant: async () => true,
+  });
+  try {
+    await runtime.initialize();
+    const local = await runtime.create({ name: '本机', url: 'http://127.0.0.1:3000/mcp' });
+    const remote = await runtime.create({ name: '远程', url: 'https://example.com/mcp' });
+    runtime.oauth.set(local.id, { redirectUrl: 'http://127.0.0.1/callback' });
+    runtime.oauth.set(remote.id, { redirectUrl: 'http://127.0.0.1/callback' });
+    const localProvider = await runtime.clientInformationProvider(local);
+    const remoteProvider = await runtime.clientInformationProvider(remote);
+    const authorizationUrl = new URL('http://127.0.0.1:4000/authorize');
+    await localProvider.redirectToAuthorization(authorizationUrl);
+    assert.equal(opened, authorizationUrl.href);
+    await localProvider.redirectToAuthorization(new URL('https://127.0.0.1:4000/authorize'));
+    assert.equal(opened, 'https://127.0.0.1:4000/authorize');
+    await assert.rejects(remoteProvider.redirectToAuthorization(authorizationUrl), /授权地址无效/);
+    await assert.rejects(remoteProvider.redirectToAuthorization(new URL('https://127.0.0.1:4000/authorize')), /授权地址无效/);
+    assert.equal(opened, 'https://127.0.0.1:4000/authorize');
   } finally {
     await runtime.shutdown();
     await rm(root, { recursive: true, force: true });

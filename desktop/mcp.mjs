@@ -27,6 +27,22 @@ function cleanText(value, max, label, { required = true } = {}) {
   return text;
 }
 
+function isLoopbackHostname(value) {
+  const hostname = value.toLowerCase().replace(/\.$/, '');
+  if (hostname === 'localhost') return true;
+  if (hostname === '[::1]' || hostname === '::1') return true;
+  const parts = hostname.split('.');
+  return parts.length === 4 && parts[0] === '127' && parts.every((part, index) => index === 0 || /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+function isAllowedTransportUrl(url) {
+  return url.protocol === 'https:' || url.protocol === 'http:' && isLoopbackHostname(url.hostname);
+}
+
+function isAllowedServiceUrl(url) {
+  return !url.username && !url.password && !url.hash && isAllowedTransportUrl(url);
+}
+
 function validateServerUrl(value) {
   let url;
   try {
@@ -34,9 +50,10 @@ function validateServerUrl(value) {
   } catch {
     throw new Error('MCP 服务地址无效。');
   }
-  if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('MCP 服务地址必须为 HTTPS 地址。');
-  if (url.hostname.length > 253 || url.hostname === 'localhost' || /\.(?:local|localhost|internal)$/i.test(url.hostname)) throw new Error('MCP 服务地址不可访问。');
-  if (isIP(url.hostname) && !publicAddress(url.hostname)) throw new Error('MCP 服务地址不可访问。');
+  if (url.username || url.password || url.hash) throw new Error('MCP 服务地址无效。');
+  if (!isAllowedServiceUrl(url)) throw new Error('MCP 服务地址必须为 HTTPS 地址，本机服务可以使用 HTTP。');
+  if (!isLoopbackHostname(url.hostname) && (url.hostname.length > 253 || /\.(?:local|localhost|internal)$/i.test(url.hostname))) throw new Error('MCP 服务地址不可访问。');
+  if (!isLoopbackHostname(url.hostname) && isIP(url.hostname) && !publicAddress(url.hostname)) throw new Error('MCP 服务地址不可访问。');
   return url.href;
 }
 
@@ -177,6 +194,7 @@ export class McpRuntime {
     credentials,
     shell,
     request = secureRequest,
+    localRequest = (address, options) => globalThis.fetch(address, options),
     clientFactory = () => new Client({ name: 'qingzuo-desktop', version: '1.9.0' }),
     transportFactory = (url, options) => new StreamableHTTPClientTransport(url, options),
     confirmGrant = async () => false,
@@ -187,6 +205,7 @@ export class McpRuntime {
     this.credentials = credentials;
     this.shell = shell;
     this.request = request;
+    this.localRequest = localRequest;
     this.clientFactory = clientFactory;
     this.transportFactory = transportFactory;
     this.confirmGrant = confirmGrant;
@@ -281,23 +300,27 @@ export class McpRuntime {
     return Boolean(await this.oauthCredential(id, 'tokens'));
   }
 
-  async guardedFetch(input, init = {}) {
+  async guardedFetch(server, input, init = {}) {
     const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
     const url = new URL(request.url);
-    if (url.protocol !== 'https:' || url.username || url.password || url.hostname === 'localhost' || isIP(url.hostname) && !publicAddress(url.hostname)) throw new Error('MCP 服务地址不可访问。');
+    const local = isLoopbackHostname(url.hostname);
+    if (local && !isLoopbackHostname(new URL(server.url).hostname)) throw new Error('MCP 服务地址不可访问。');
+    if (url.username || url.password || !isAllowedTransportUrl(url)) throw new Error('MCP 服务地址不可访问。');
+    if (!local && (url.hostname.length > 253 || /\.(?:local|localhost|internal)$/i.test(url.hostname) || isIP(url.hostname) && !publicAddress(url.hostname))) throw new Error('MCP 服务地址不可访问。');
     const signal = request.signal
       ? AbortSignal.any([request.signal, AbortSignal.timeout(REQUEST_TIMEOUT)])
       : AbortSignal.timeout(REQUEST_TIMEOUT);
     const headers = Object.fromEntries(request.headers);
     const body = ['GET', 'HEAD'].includes(request.method) ? undefined : Buffer.from(await request.arrayBuffer());
     let tooLarge = false;
-    const response = await this.request(url.href, {
+    const requestOptions = {
       method: request.method,
       headers,
       body,
       redirect: 'error',
       signal,
-    });
+    };
+    const response = local ? await this.localRequest(url.href, requestOptions) : await this.request(url.href, requestOptions);
     return responseLimit(response, MAX_RESPONSE, () => { tooLarge = true; });
   }
 
@@ -336,7 +359,13 @@ export class McpRuntime {
       redirectToAuthorization: async authorizationUrl => {
         const pending = runtime.oauth.get(server.id);
         if (!pending) throw new Error('MCP 授权流程未开始。');
-        if (!(authorizationUrl instanceof URL) || authorizationUrl.protocol !== 'https:' || authorizationUrl.username || authorizationUrl.password) {
+        const localServer = isLoopbackHostname(new URL(server.url).hostname);
+        const localAuthorization = authorizationUrl instanceof URL && isLoopbackHostname(authorizationUrl.hostname);
+        const allowed = authorizationUrl instanceof URL
+          && !authorizationUrl.username
+          && !authorizationUrl.password
+          && (localAuthorization ? localServer && ['http:', 'https:'].includes(authorizationUrl.protocol) : authorizationUrl.protocol === 'https:');
+        if (!allowed) {
           throw new Error('MCP 授权地址无效。');
         }
         pending.authorizationUrl = authorizationUrl.href;
@@ -366,7 +395,7 @@ export class McpRuntime {
     return this.transportFactory(new URL(server.url), {
       authProvider,
       requestInit: { headers },
-      fetch: this.guardedFetch.bind(this),
+      fetch: (input, init) => this.guardedFetch(server, input, init),
       reconnectionOptions: {
         maxReconnectionDelay: 10_000,
         initialReconnectionDelay: 500,

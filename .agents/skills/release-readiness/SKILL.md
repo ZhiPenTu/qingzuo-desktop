@@ -9,7 +9,7 @@ description: 用于检查轻作分支流向、版本号、发布日志、CI 和�
 
 ## 检查顺序
 
-1. 确认当前分支、基准分支和工作区状态；功能 PR 必须基于最新 `origin/develop`。
+1. 确认当前分支、基准分支和工作区状态；功能 PR 必须基于最新 `origin/develop`，来源分支遵循 `codex/<type>-<name>`。
 2. 对照 `AGENTS.md` 和 `docs/release-guide.md` 判断这是功能 PR、发布 PR 还是阶段交付。
 3. 检查 `package.json`、`package-lock.json`、`docs/release-guide.md` 和 `docs/releases/` 的版本与发布日志是否一致。
 4. 检查相关 GitHub Actions 工作流是否会执行预期验证，是否误跳过构建或把未验证状态标为成功。
@@ -19,6 +19,7 @@ description: 用于检查轻作分支流向、版本号、发布日志、CI 和�
 ## 阻断项
 
 - 分支不是基于 `origin/develop`。
+- 分支名不以 `codex/` 开头，或不符合仓库约定的 `codex/<type>-<name>`。
 - 功能变更误用发布 PR 或直接进入 `main`。
 - 版本号、lockfile、发布指南和发布日志不一致。
 - 必填验证未执行、失败或无法证明覆盖本次改动。

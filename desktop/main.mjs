@@ -5,7 +5,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { PluginManager, boundedDownload, inspectPackage, marketTierMigrationMatches } from './plugin-manager.mjs';
+import { PluginManager, boundedDownload, inspectPackage, marketTierUpdate } from './plugin-manager.mjs';
 import { confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
@@ -34,6 +34,7 @@ import {
   FIRST_PARTY_ASSISTANT,
   FIRST_PARTY_DIAGNOSTICS,
   assertFirstPartyAccess,
+  firstPartyRule,
   isFirstPartyBridgePlugin,
   sanitizeAssistantEvent,
   sanitizeAssistantSession,
@@ -494,26 +495,40 @@ async function catalog(signal, id) {
       ? downloadSources.runWithFallback(url, address => load(address, limit), { signal })
       : load(url, limit),
   });
-  await reconcileInstalledTiers(items);
+  if (await reconcileInstalledTiers(items)) changed();
   return { items, configured: true };
 }
 async function reconcileInstalledTiers(items) {
-  if (!manager || !Array.isArray(items) || !items.length) return;
-  const rank = { community: 0, official: 1, platform: 2 };
+  if (!manager || !Array.isArray(items) || !items.length) return false;
+  let updated = false;
   for (const entry of items) {
-    if (!['platform', 'official', 'community'].includes(entry.tier)) continue;
     const plugin = await manager.get(entry.id).catch(() => null);
-    if (!plugin || plugin.source !== 'market' || plugin.tier === entry.tier) continue;
-    const legacyMigration = marketTierMigrationMatches(plugin, entry, process.platform + '-' + process.arch);
-    const downgrade = rank[entry.tier] < rank[plugin.tier];
-    if (!legacyMigration && !downgrade) continue;
-    await manager.setMarketTier(entry.id, {
-      tier: entry.tier,
-      version: plugin.version,
-      ...(legacyMigration && plugin.artifactSha256 ? { artifactSha256: plugin.artifactSha256 } : {}),
-    }).catch(error => {
+    const update = marketTierUpdate(plugin, entry, process.platform + '-' + process.arch);
+    if (!update) continue;
+    await manager.setMarketTier(entry.id, update).then(() => { updated = true; }).catch(error => {
       debugLog?.record({ scope: 'plugin', source: entry.id, level: 'warn', message: '插件信任层同步失败：' + error.message });
     });
+  }
+  return updated;
+}
+const tierSyncs = new Map();
+function syncInstalledTier(id) {
+  let pending = tierSyncs.get(id);
+  if (!pending) {
+    pending = catalog(undefined, id).catch(() => null).finally(() => tierSyncs.delete(id));
+    tierSyncs.set(id, pending);
+  }
+  return pending;
+}
+// A reviewed catalog can change a plugin's tier after it is installed. When a
+// first-party call arrives with a stale tier, refresh just that entry once.
+async function firstPartyRuleFor(plugin, method) {
+  try {
+    return assertFirstPartyAccess(plugin, method);
+  } catch (error) {
+    if (plugin?.source !== 'market' || !firstPartyRule(plugin.id, method)) throw error;
+    await syncInstalledTier(plugin.id);
+    return assertFirstPartyAccess(await manager.get(plugin.id).catch(() => null), method);
   }
 }
 let credentialDialog = Promise.resolve();
@@ -711,7 +726,7 @@ function diagnosticsStatus(plugin, authorized) {
   };
 }
 async function firstPartyInvoke(plugin, method, rawArgs) {
-  const rule = assertFirstPartyAccess(plugin, method);
+  const rule = await firstPartyRuleFor(plugin, method);
   const args = bridgeArgs(rawArgs);
   if (rule.namespace === 'firstParty.assistant.chat') {
     if (rule.operation === 'list') {
