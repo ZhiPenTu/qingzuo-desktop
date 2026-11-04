@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, KeyRound, Link2, LoaderCircle, PlugZap, Refr
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 
 type McpStatus = 'ready' | 'auth-required' | 'error' | 'disabled';
@@ -160,11 +160,11 @@ export function CapabilitySettings({ desktop }: { desktop: boolean }) {
         {notice ? <p className="capability-notice" role="status"><CheckCircle2 />{notice}</p> : null}
         <section className="capability-section" aria-labelledby="mcp-heading">
           <div className="capability-section-head">
-            <div><h3 id="mcp-heading"><PlugZap />远程 MCP</h3><p>用于搜索资料和读取网页；工具需要单独授权只读调用。</p></div>
+            <div><h3 id="mcp-heading"><PlugZap />MCP 服务</h3><p>用于搜索资料和读取网页；工具需要单独授权只读调用。</p></div>
             <Button type="button" variant="outline" size="sm" disabled={!desktop || Boolean(busy)} onClick={() => void load()}><RefreshCw data-icon="inline-start" />刷新</Button>
           </div>
           {loading ? <p className="capability-loading" role="status"><LoaderCircle className="animate-spin" />正在读取连接…</p> : null}
-          {!loading && !servers.length ? <p className="capability-empty">还没有连接远程 MCP 服务。</p> : null}
+          {!loading && !servers.length ? <p className="capability-empty">还没有连接 MCP 服务。</p> : null}
           {servers.map(server => <article className="capability-row" key={server.id}>
             <div className="capability-row-main"><strong>{server.name}</strong><span title={server.url}>{server.url}</span><small className={server.status === 'ready' ? 'is-ok' : server.status === 'error' ? 'is-error' : ''}>{statusLabel(server.status)}{server.error ? ' · ' + server.error : ''} · {server.toolCount} 个工具</small></div>
             <div className="capability-row-actions">
@@ -179,10 +179,10 @@ export function CapabilitySettings({ desktop }: { desktop: boolean }) {
             {grants[server.id]?.length ? <div className="capability-subsection"><strong>工具授权</strong><ul>{grants[server.id].map(grant => <li key={grant.pluginId + grant.serverId}><span>{grant.pluginId}</span><small>{grant.toolNames.join('、')}</small><Button type="button" variant="ghost" size="icon-xs" aria-label="撤销授权" title="撤销授权" disabled={Boolean(busy)} onClick={() => void run('revoke-' + server.id + grant.pluginId, () => invoke('capabilities.mcp.revokeGrant', { pluginId: grant.pluginId, serverId: server.id }), '工具授权已撤销。')}><Trash2 /></Button></li>)}</ul></div> : null}
           </article>)}
           <form className="capability-form" onSubmit={event => void submitMcp(event)}>
-            <div className="capability-form-head"><strong>{mcpEditing ? '编辑远程 MCP' : '添加远程 MCP'}</strong>{mcpEditing ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMcpEditing(''); setMcpForm(mcpInitial); }}>取消编辑</Button> : null}</div>
+            <div className="capability-form-head"><strong>{mcpEditing ? '编辑 MCP 服务' : '添加 MCP 服务'}</strong>{mcpEditing ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMcpEditing(''); setMcpForm(mcpInitial); }}>取消编辑</Button> : null}</div>
             <FieldGroup>
               <Field><FieldLabel htmlFor="mcp-name">名称</FieldLabel><Input id="mcp-name" value={mcpForm.name} onChange={event => setMcpForm(value => ({ ...value, name: event.target.value }))} placeholder="例如：资料检索" disabled={!desktop || Boolean(busy)} /></Field>
-              <Field><FieldLabel htmlFor="mcp-url">服务地址</FieldLabel><Input id="mcp-url" type="url" value={mcpForm.url} onChange={event => setMcpForm(value => ({ ...value, url: event.target.value }))} placeholder="https://example.com/mcp" disabled={!desktop || Boolean(busy)} /></Field>
+              <Field><FieldLabel htmlFor="mcp-url">服务地址</FieldLabel><Input id="mcp-url" type="url" value={mcpForm.url} onChange={event => setMcpForm(value => ({ ...value, url: event.target.value }))} placeholder="https://example.com/mcp 或 http://127.0.0.1:3000/mcp" disabled={!desktop || Boolean(busy)} /><FieldDescription>本机服务可以使用 HTTP。</FieldDescription></Field>
               <Field><FieldLabel htmlFor="mcp-auth">鉴权</FieldLabel><select id="mcp-auth" className="capability-select" value={mcpForm.authMode} onChange={event => setMcpForm(value => ({ ...value, authMode: event.target.value }))} disabled={!desktop || Boolean(busy)}><option value="none">无鉴权</option><option value="bearer">API Key / Bearer</option><option value="oauth">OAuth 2.1</option></select></Field>
               {mcpForm.authMode === 'bearer' ? <><Field><FieldLabel htmlFor="mcp-header">请求头</FieldLabel><Input id="mcp-header" value={mcpForm.headerName} onChange={event => setMcpForm(value => ({ ...value, headerName: event.target.value }))} disabled={!desktop || Boolean(busy)} /></Field><Field><FieldLabel htmlFor="mcp-secret">密钥{mcpEditing ? '（留空保持不变）' : ''}</FieldLabel><Input id="mcp-secret" type="password" value={mcpForm.secret} onChange={event => setMcpForm(value => ({ ...value, secret: event.target.value }))} disabled={!desktop || Boolean(busy)} /></Field></> : null}
             </FieldGroup>
