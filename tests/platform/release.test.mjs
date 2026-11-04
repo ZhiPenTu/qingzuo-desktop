@@ -135,6 +135,7 @@ test('branch model keeps main as the single trunk every feature branch merges in
  const validate=load(await readFile('.github/workflows/validate.yml','utf8'));
  assert.ok(validate.on.pull_request,'桌面验收工作流必须覆盖所有 PR');
  assert.equal(validate.on.pull_request.branches,undefined,'桌面验收不得限定分支，否则功能分支的 PR 会被跳过');
+ assert.ok(validate.on.pull_request['paths-ignore'].includes('.github/**'),'只改仓库配置的 PR 不应触发桌面验收');
  const pages=load(await readFile('.github/workflows/pages.yml','utf8'));
  assert.deepEqual(pages.on.push.branches,['main'],'官网只随主干部署');
  const guide=await readFile('docs/release-guide.md','utf8');
