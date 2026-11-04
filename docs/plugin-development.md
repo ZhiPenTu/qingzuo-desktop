@@ -156,7 +156,7 @@ AI 助手桥只操作宿主工作台会话，不接受 owner、审批 ID 或任�
 
 发布片段仍只允许版本、展示信息和制品字段。已发布且不可变的旧 Release 如果包含 `manifestVersion`、`ui`、`permissions`、`settings`、`backend` 或 `services`，客户端会校验后剥离这些旧字段，以保持现有插件可用；`tier`、`official`、`source`、`stats`、`verification` 始终拒绝。签名包内的清单仍是权限与入口的权威来源。
 
-### API 1.9 工作区、远程 MCP 与公众号发布
+### API 1.9 工作区、MCP 服务与公众号发布
 
 SDK 1.9.0 为需要本地文章目录、外部只读资料和公众号发布的插件增加三组宿主托管能力。插件仍然不接触真实文件路径、MCP 鉴权信息或微信密钥；所有持久化、网络请求、确认和错误恢复都由主进程完成。
 
@@ -184,11 +184,11 @@ SDK 1.9.0 为需要本地文章目录、外部只读资料和公众号发布的�
 
 `.aws` 预设包通过 `workspace.importBundle({ fileToken | url, dryRun, confirmSecrets })` 导入。宿主校验 ZIP 路径、重复项、符号链接、文件数和大小，只接受公网 HTTPS 地址并拒绝重定向。预览会返回预设替换、`config.yaml` 差异、`writing-spec.md` 动作、公众号账号变化、忽略项和警告。已有 `config.yaml` 永不覆盖；确认后预设子目录整体替换，`writing-spec.md` 覆盖，微信账号写入系统凭据库。包内模型密钥、端点和旧代理地址被剔除，插件继续使用轻作共享 AI。
 
-#### 远程 MCP
+#### MCP 服务
 
-用户在底座「设置 → 能力连接」添加远程 Streamable HTTP MCP 服务，支持无认证、静态 Bearer/API Key 和 OAuth 2.1 + PKCE。插件只通过 `mcp.servers/tools/grant/revoke/call` 查看服务器名称、状态和工具摘要；服务器 URL、鉴权头和令牌不会返回插件。
+用户在底座「设置 → 能力连接」添加 Streamable HTTP MCP 服务，支持无认证、静态 Bearer/API Key 和 OAuth 2.1 + PKCE。插件只通过 `mcp.servers/tools/grant/revoke/call` 查看服务器名称、状态和工具摘要；服务器 URL、鉴权头和令牌不会返回插件。
 
-只有声明 `annotations.readOnlyHint: true` 的工具可被发现和调用，并且需要用户按「服务器 + 工具」单独授权。宿主拒绝本机、私网、HTTP 和重定向地址，默认 60 秒超时；调用参数最多 256 KB，响应最多 2 MB。工具返回内容按不可信数据处理，插件不得据此自动执行本地操作。卸载插件会撤销其 MCP 授权。
+只有声明 `annotations.readOnlyHint: true` 的工具可被发现和调用，并且需要用户按「服务器 + 工具」单独授权。宿主拒绝私网、非本机 HTTP 和重定向地址，本机服务可以使用 HTTP，默认 60 秒超时；调用参数最多 256 KB，响应最多 2 MB。工具返回内容按不可信数据处理，插件不得据此自动执行本地操作。卸载插件会撤销其 MCP 授权。
 
 #### 公众号发布
 
