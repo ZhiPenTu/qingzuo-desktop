@@ -50,6 +50,14 @@
 - [`sdk-v1.10.0`](https://github.com/ZhiPenTu/qingzuo-desktop/releases/tag/sdk-v1.10.0) 已发布，市场仓库已使用该 Release 的固定制品和 integrity；`npm ci --ignore-scripts`、24 个市场测试、目录校验和现有 10 个插件的发布验证通过。
 - 市场 tier 数据、校验规则和 SDK 锁定已合入 `qingzuo-market` 的 `main`。新插件发布必须使用成功的桌面 Release 运行制品完成真实宿主验收；市场只登记已经发布并通过来源校验的版本。
 
+## 第一方信任层目录修正（本地开发验收）
+
+2026-11-04 修正 `official.ai-assistant` 与 `official.diagnostics` 的市场信任层：两个插件此前以 `official` 登记，而 `firstParty.*` 桥与侧栏入口都要求 `platform`，导致已安装插件在 AI 设置页提示「当前桌面版本暂不支持这项操作」。目录与注册表改为 `platform` 后，仍需让已安装的旧记录跟随审核目录升级：
+
+- 市场目录加载时按审核目录同步信任层：版本与两端制品摘要一致时允许升级，降级（吊销）始终生效；摘要缺失或发布清单不可用时失败关闭，不升级。
+- 第一方桥接在授权失败时按单个插件 ID 重新拉取目录并重试一次，避免用户必须打开市场「全部」页签才触发同步；同步成功会通知渲染端刷新状态。
+- 仅复核过 `qingzuo-market` 目录与注册表、`marketTierUpdate` 单测、平台与前端测试；尚未在真实打包版本上复验升级与侧栏入口。
+
 ## v0.2.9 准备与发布
 
 针对应用内更新时出现的 `ENOTDIR: not a directory, open .../app.asar/desktop/mac-install.sh` 报错完成彻底修复与版本发布：

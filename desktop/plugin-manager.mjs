@@ -23,6 +23,19 @@ export function marketTierMigrationMatches(plugin, entry, platform) {
     && plugin.artifactSha256 === artifact.sha256,
   );
 }
+// The reviewed catalog decides the trust tier. Elevations only apply to the exact
+// artifact it describes, while revocations always apply so a pulled tier cannot linger.
+export function marketTierUpdate(plugin, entry, platform) {
+  const tier = entry?.tier;
+  if (!plugin || plugin.source !== 'market' || !PLUGIN_TIERS.has(tier) || plugin.tier === tier) return null;
+  if (marketTierMigrationMatches(plugin, entry, platform)) {
+    return { tier, version: plugin.version, artifactSha256: plugin.artifactSha256 };
+  }
+  if (TIER_RANK[tier] < TIER_RANK[plugin.tier]) return { tier, version: plugin.version };
+  const reviewed = entry?.artifacts?.[platform]?.sha256;
+  if (plugin.version !== entry?.version || !/^[a-f0-9]{64}$/.test(reviewed || '') || plugin.artifactSha256 !== reviewed) return null;
+  return { tier, version: plugin.version, artifactSha256: reviewed };
+}
 export function verifyArtifact(bytes, record, publicKey) {
   if (!record?.sha256 || record.platform !== TARGET) throw new Error('市场制品缺少摘要或平台信息。');
   if (createHash('sha256').update(bytes).digest('hex') !== record.sha256) throw new Error('插件包校验失败。');
