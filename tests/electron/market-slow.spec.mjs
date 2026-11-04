@@ -112,7 +112,7 @@ test('signed plugin download outlives 30s RPC, keeps navigation locks, syncs wit
     expect((await status(page)).pluginInstalls.find(job => job.id === id).status).toBe('downloading');
     await expect(marketCard.getByRole('button', { name: '更新插件', exact: true })).toBeDisabled();
     await expect(marketCard.getByRole('status')).toContainText('安装完成 · v0.2.0', { timeout: 30000 });
-    await expect(marketCard.getByRole('button', { name: '已安装', exact: true })).toBeVisible();
+    await expect(marketCard.getByText('已安装', { exact: true })).toBeVisible();
     const completed = await status(page); expect(completed.plugins.find(plugin => plugin.id === id).version).toBe('0.2.0'); expect(completed.kernel.ready).toBe(true);
     const elapsed = await app.evaluate(() => { const download = globalThis.__marketSlow.downloads.find(download => download.version === '0.2.0'); return download.finished - download.started; });
     expect(elapsed).toBeGreaterThanOrEqual(33000);
