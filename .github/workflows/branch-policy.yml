@@ -35,13 +35,14 @@ jobs:
           case "${BASE}" in
             develop)
               if [[ "${HEAD}" == "main" || "${HEAD}" == "develop" ]] || ! printf '%s' "${HEAD}" | grep -Eq '^codex/[a-z0-9][a-z0-9._/-]*$'; then
-                echo "::error::合入 develop 的来源分支必须以 codex/ 开头；请基于 origin/develop 创建并遵循 codex/<type>-<name>；当前来源分支: ${HEAD}"
+                echo "::error::合入 develop 的来源分支必须以 codex/ 开头；请基于 origin/main 创建并遵循 codex/<type>-<name>；当前来源分支: ${HEAD}"
                 exit 1
               fi
               ;;
             main)
-              if [[ "${HEAD}" != "develop" ]] && ! printf '%s' "${HEAD}" | grep -Eq '^codex/hotfix-[a-z0-9._/-]+$'; then
-                echo "::error::main 只接受来自 develop 的合并 PR，或来自 codex/hotfix-* 的紧急修复分支；当前来源分支: ${HEAD}"
+              # develop 是迁移期保留的历史集成分支来源，develop 下线后只有 codex/ 分支可以合入 main。
+              if [[ "${HEAD}" != "develop" ]] && ! printf '%s' "${HEAD}" | grep -Eq '^codex/[a-z0-9][a-z0-9._/-]*$'; then
+                echo "::error::main 只接受 codex/<type>-<name> 分支的 PR；当前来源分支: ${HEAD}"
                 exit 1
               fi
               ;;

@@ -4,17 +4,19 @@
 
 ## 分支与合入流程
 
-底座使用 `main` 与 `develop` 双分支。`develop` 是集成分支，功能、修复和发版准备都先合入这里；`main` 是生产主干，只接受来自 `develop` 的合并 PR。两条分支都启用了 GitHub 分支保护，禁止直接推送，必须经 PR 合并并通过 `Branch policy` 检查。
+底座采用单主干：`main` 是唯一常驻分支，也是生产主干。功能、修复和发布准备都从最新的 `origin/main` 切出 `codex/<type>-<name>` 分支，经 PR 合入 `main`。`main` 启用 GitHub 分支保护，禁止直接推送与强制推送，必须经 PR 合并并通过 `Branch policy` 检查。`develop` 已下线，不再接收合入。
 
-功能分支基于 `origin/develop` 创建，命名为 `codex/<type>-<name>`，PR 合入 `develop`。发版时在 `codex/release-vX.Y.Z` 上更新版本号与发布日志并合入 `develop`，随后由 `develop` 合入 `main`，再在 `main` 上打版本标签触发自动发版。紧急修复从 `main` 切出 `codex/hotfix-*` 分支，合入 `main` 后必须同步回合入 `develop`。
+官网 `site/` 随 `main` 部署。
 
-官网 `site/` 随 `main` 部署，`develop` 上的站点改动不会单独上线。
+## 版本号与发布
 
-## 自动版本更新
+版本号只在发版时变化，不随日常合入递增。需要发版时运行 `Auto version` 工作流，指定目标版本号与发布日志要点：
 
-合并入 `develop` 会触发 `Auto version` 工作流，把底座补丁号 +1，并同步 `package.json`、`package-lock.json` 与本文件首行的底座版本；更新以 `codex/auto-version-vX.Y.Z` 分支自动提交并合回 `develop`。主干部版本由 `develop` 合入 `main` 时一并带入，主干版本号因此始终与主干内容一致，发布时按主干当前版本打标签即可。
+```sh
+gh workflow run auto-version.yml -f target=X.Y.Z -f notes=$'要点一\n要点二'
+```
 
-发版 PR（`codex/release-*`）自行指定正式版本号与 `docs/releases/vX.Y.Z.md`，自动递增不会覆盖它。版本号必须是 X.Y.Z 正式版本，递增逻辑见 `scripts/auto-version.mjs`。
+工作流会同步 `package.json`、`package-lock.json` 与本文件首行的底座版本，写入 `docs/releases/vX.Y.Z.md`，以 `codex/auto-version-vX.Y.Z` 分支提交，并在 `Branch policy` 通过后合入 `main`。版本号必须是 X.Y.Z 正式版本，递增逻辑见 `scripts/auto-version.mjs`。版本 PR 合入后在主干打 `vX.Y.Z` 标签触发自动发版。
 
 ## 底座
 
