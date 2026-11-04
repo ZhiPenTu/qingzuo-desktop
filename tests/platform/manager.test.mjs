@@ -6,8 +6,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
-import { PluginManager, inspectPackage, marketTierMigrationMatches, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
+import { PluginManager, inspectPackage, marketTierMigrationMatches, marketTierUpdate, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
 import { validateManifest, TARGET } from '../../desktop/security.mjs';
+import { expectedReleaseArtifactUrl, resolveMarketEntries } from '../../desktop/catalog.mjs';
 function archive(version = '0.1.0', overrides = {}) {
   const zip = new AdmZip(); zip.addFile('package.json', Buffer.from(JSON.stringify({ name: 'fixture', version, commerce: { manifestVersion: 1, id: 'local.fixture', title: 'Fixture', description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {}, ...overrides } }))); zip.addFile('ui/index.html', Buffer.from('<h1>Fixture</h1>')); return zip.toBuffer();
 }
@@ -260,6 +261,59 @@ test('legacy tier migration requires matching version, artifact digest and catal
   assert.equal(marketTierMigrationMatches({ ...plugin, artifactSha256: undefined }, entry, TARGET), false);
   assert.equal(marketTierMigrationMatches(plugin, { ...entry, artifacts: {} }, TARGET), false);
   assert.equal(marketTierMigrationMatches(plugin, { ...entry, artifacts: { [TARGET]: { sha256: 'b'.repeat(64) } } }, TARGET), false);
+});
+test('reviewed tier changes elevate the matching artifact and always apply revocations', () => {
+  const sha256 = 'a'.repeat(64);
+  const market = { source: 'market', tierKnown: true, tier: 'official', version: '1.0.0', artifactSha256: sha256 };
+  const entry = { tier: 'platform', version: '1.0.0', artifacts: { [TARGET]: { sha256 } } };
+  assert.deepEqual(marketTierUpdate(market, entry, TARGET), { tier: 'platform', version: '1.0.0', artifactSha256: sha256 });
+  assert.equal(marketTierUpdate({ ...market, version: '1.0.1' }, entry, TARGET), null);
+  assert.equal(marketTierUpdate({ ...market, artifactSha256: 'b'.repeat(64) }, entry, TARGET), null);
+  assert.equal(marketTierUpdate(market, { ...entry, artifacts: {} }, TARGET), null);
+  assert.equal(marketTierUpdate({ ...market, tier: 'platform' }, entry, TARGET), null);
+  assert.equal(marketTierUpdate({ ...market, source: 'local' }, entry, TARGET), null);
+  assert.deepEqual(
+    marketTierUpdate({ ...market, tier: 'platform', artifactSha256: undefined }, { tier: 'community', version: '1.0.0', artifacts: {} }, TARGET),
+    { tier: 'community', version: '1.0.0' },
+  );
+  assert.deepEqual(
+    marketTierUpdate({ ...market, tierKnown: false, tier: 'community' }, entry, TARGET),
+    { tier: 'platform', version: '1.0.0', artifactSha256: sha256 },
+  );
+  assert.equal(marketTierUpdate({ ...market, tierKnown: false, tier: 'community' }, { ...entry, version: '1.0.1' }, TARGET), null);
+});
+test('an installed official plugin upgrades to platform from a reviewed catalog entry', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-reviewed-tier-')), bundled = path.join(root, 'bundled'), plugins = path.join(root, 'plugins');
+  const id = 'official.fixture', version = '0.1.0', sha256 = 'c'.repeat(64);
+  const folder = path.join(plugins, 'installed', id, 'fixture');
+  await mkdir(folder, { recursive: true });
+  await mkdir(bundled);
+  await writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: 'fixture', version, commerce: { manifestVersion: 1, id, title: id, description: 'test', api: '^1.0.0', ui: 'ui/index.html', permissions: {} } }));
+  await writeFile(path.join(plugins, 'state.json'), JSON.stringify({ plugins: {
+    [id]: { folder: 'installed/' + id + '/fixture', enabled: true, source: 'market', tier: 'official', tierKnown: true, artifactSha256: sha256 },
+  } }));
+  const repository = 'ZhiPenTu/fixture';
+  const fragment = { schemaVersion: 1, plugins: [{
+    id, version, title: id, description: 'test', api: '^1.0.0',
+    artifacts: { [TARGET]: { url: expectedReleaseArtifactUrl(repository, id, version, TARGET), size: 1024, sha256 } },
+  }] };
+  const entries = await resolveMarketEntries({ schemaVersion: 1, plugins: [{
+    id, tier: 'platform', official: true, title: id, description: 'test', version, api: '^1.0.0',
+    source: { type: 'github-release', repository },
+  }] }, { platform: TARGET, load: async () => Buffer.from(JSON.stringify(fragment)) });
+  const manager = new PluginManager(plugins, bundled);
+  try {
+    await manager.initialize();
+    assert.equal((await manager.get(id)).tier, 'official');
+    const update = marketTierUpdate(await manager.get(id), entries[0], TARGET);
+    assert.deepEqual(update, { tier: 'platform', version, artifactSha256: sha256 });
+    await manager.setMarketTier(id, update);
+    const reloaded = new PluginManager(plugins, bundled);
+    await reloaded.initialize();
+    assert.equal((await reloaded.get(id)).tier, 'platform');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 test('path traversal and symlink package entries are rejected before extraction', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-malicious-'));
