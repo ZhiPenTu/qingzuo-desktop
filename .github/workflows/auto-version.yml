@@ -1,13 +1,14 @@
 name: Auto version
 on:
-  pull_request:
-    types: [closed]
-    branches: [develop]
   workflow_dispatch:
     inputs:
       target:
-        description: '目标版本号（留空则在当前补丁号上 +1）'
-        required: false
+        description: '目标版本号（X.Y.Z 正式版本）'
+        required: true
+        type: string
+      notes:
+        description: '发布日志要点，一行一条'
+        required: true
         type: string
 
 concurrency:
@@ -25,16 +26,11 @@ defaults:
 
 jobs:
   bump:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.merged == true &&
-      !startsWith(github.event.pull_request.head.ref, 'codex/release-') &&
-      !startsWith(github.event.pull_request.head.ref, 'codex/auto-version-'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.ref || 'develop' }}
+          ref: main
           fetch-depth: 0
 
       - name: 递增版本号
@@ -45,6 +41,30 @@ jobs:
           echo "$result"
           echo "next=$(echo "$result" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).next")" >> "$GITHUB_OUTPUT"
 
+      - name: 写入发布日志
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          file="docs/releases/v${NEXT}.md"
+          if [[ -e "${file}" ]]; then
+            echo "::error::发布日志已存在：${file}"
+            exit 1
+          fi
+          if [[ -z "$(printf '%s' "${NOTES}" | tr -d '[:space:]')" ]]; then
+            echo "::error::发布日志要点不能为空"
+            exit 1
+          fi
+          mkdir -p docs/releases
+          {
+            echo "# 轻作 Qingzuo v${NEXT}"
+            echo
+            printf '%s\n' "${NOTES}" | awk 'NF { sub(/^[[:space:]]*[-*][[:space:]]*/, ""); print "- " $0 }'
+            echo
+            echo "支持 macOS 15+ Apple Silicon、Windows 10+ x64。"
+          } > "${file}"
+
       - name: 提交版本更新
         id: push
         env:
@@ -54,7 +74,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "codex/auto-version-v${NEXT}"
-          git add package.json package-lock.json docs/release-guide.md
+          git add package.json package-lock.json docs/release-guide.md "docs/releases/v${NEXT}.md"
           git commit -m "chore: 版本更新至 v${NEXT}"
           git push -u origin "codex/auto-version-v${NEXT}"
           echo "branch=codex/auto-version-v${NEXT}" >> "$GITHUB_OUTPUT"
@@ -67,7 +87,7 @@ jobs:
           BRANCH: ${{ steps.push.outputs.branch }}
         run: |
           set -euo pipefail
-          url=$(gh pr create --base develop --head "$BRANCH" --title "chore: 版本更新至 v${NEXT}" --body "合并入 develop 后由自动版本更新流程递增补丁号至 v${NEXT}，同步 package.json、package-lock.json 与 docs/release-guide.md。")
+          url=$(gh pr create --base main --head "$BRANCH" --title "chore: 发布轻作 v${NEXT}" --body "由 Auto version 准备的正式版本 v${NEXT}：同步 package.json、package-lock.json 与 docs/release-guide.md，并写入 docs/releases/v${NEXT}.md。合并后在 main 打 v${NEXT} 标签触发发版。")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "number=$(echo "$url" | grep -oE '[0-9]+$')" >> "$GITHUB_OUTPUT"
 
@@ -97,3 +117,13 @@ jobs:
             exit 1
           fi
           gh pr merge "$NUMBER" --merge --delete-branch
+
+      - name: 输出发版提示
+        if: success()
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          echo "版本 PR 已合入 main。打标签发版：" >> "$GITHUB_STEP_SUMMARY"
+          echo '```sh' >> "$GITHUB_STEP_SUMMARY"
+          echo "git fetch origin && git tag -a v${NEXT} -m \"轻作 Qingzuo v${NEXT}\" origin/main && git push origin v${NEXT}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
