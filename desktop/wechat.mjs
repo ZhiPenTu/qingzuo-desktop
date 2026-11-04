@@ -360,6 +360,18 @@ function wechatError(payload, fallback) {
   return error;
 }
 
+function wechatBodyImageUrl(value) {
+  if (typeof value !== 'string' || !value) return '';
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+    url.protocol = 'https:';
+    return url.href;
+  } catch {
+    return '';
+  }
+}
+
 async function boundedJson(response, limit = 4 * 1024 * 1024) {
   const chunks = [];
   let size = 0;
@@ -601,8 +613,9 @@ export class WechatRuntime {
       const uploaded = new Map();
       for (const [id, image] of bodyImages) {
         const result = await this.upload(token, '/cgi-bin/media/uploadimg', image.filename, image.mime, image.bytes);
-        if (typeof result.url !== 'string' || !/^https:\/\//.test(result.url)) throw new Error('微信正文图片上传失败。');
-        uploaded.set(id, result.url);
+        const imageUrl = wechatBodyImageUrl(result.url);
+        if (!imageUrl) throw new Error('微信正文图片上传失败：微信未返回可用的图片地址。');
+        uploaded.set(id, imageUrl);
       }
       let content = sanitized.html;
       for (const [id, url] of uploaded) content = content.split('qingzuo-asset:' + id).join(url);
