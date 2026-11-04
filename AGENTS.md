@@ -30,7 +30,7 @@
 
 Codex Desktop 采用多任务工作树机制，每个任务应在独立的 Git Worktree 中进行，保持主干纯净与上下文隔离：
 
-- **分支规范**：仓库采用 `main`（生产主干）与 `develop`（开发集成）双分支，禁止在 `main` 或 `develop` 上直接提交或推送代码，禁止在处于 detached HEAD 状态时盲目提交。所有开发与发布任务必须基于最新的 `origin/develop` 创建独立分支，分支命名统一遵循 `codex/<type>-<name>` 或 `codex/<feature-name>`（例如 `codex/optimize-settings-ui`、`codex/release-v0.3.16`）；`Branch policy` 会校验来源分支的 `codex/` 前缀，完整命名仍需遵守本约定。
+- **分支规范**：仓库采用单主干，`main` 是唯一常驻分支，也是生产主干；禁止在 `main` 上直接提交或推送代码，禁止在处于 detached HEAD 状态时盲目提交。所有开发与发布任务必须基于最新的 `origin/main` 创建独立分支，分支命名统一遵循 `codex/<type>-<name>` 或 `codex/<feature-name>`（例如 `codex/optimize-settings-ui`、`codex/release-v0.3.16`）；`Branch policy` 会校验来源分支的 `codex/` 前缀，完整命名仍需遵守本约定。
 - **依赖快速复用**：新建 Worktree 默认不包含忽略的目录。为避免每次重复下载巨大依赖或重复编译 Rust 沙箱，可软链接主工作区的依赖与产物：
 
   ```sh
@@ -40,7 +40,7 @@ Codex Desktop 采用多任务工作树机制，每个任务应在独立的 Git W
 
 - **工作区洁净度**：提交前核对 `git status`，严禁将未跟踪的临时文件、构建产物（`output/`、`release/`）或凭据打入提交。
 - **生命周期维护**：PR 成功合并后，应及时清理对应的工作树或调用应用工具进行归档，释放磁盘与分支空间。
-- **分支流向**：功能与修复分支合入 `develop`；`develop` 整体合入 `main`；`main` 仅接受来自 `develop` 的合并 PR，或来自 `codex/hotfix-*` 的紧急修复分支。`main` 与 `develop` 均受 GitHub 分支保护，必须经 PR 合并并通过 `Branch policy` 检查。
+- **分支流向**：功能、修复与发布准备分支统一合入 `main`；`main` 受 GitHub 分支保护，必须经 PR 合并并通过 `Branch policy` 检查。`develop` 已下线，不再接收合入。
 
 ## 常用验证
 
@@ -96,8 +96,8 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 - **状态流转与合并**：
   - 未完成验证或处于讨论阶段的变更应创建为 Draft PR；
   - 验证充分且准备就绪后标记为 Ready for review，等待 GitHub Actions `Validate commerce desktop` 自动化检查全部通过；
-  - 审查确认后合并入 `develop`，并清理对应的远端分支。纯文档或网站变更会自动跳过桌面构建耗时步骤以加速合流。
-- **合入 main**：功能分支合入 `develop` 后不立即进入生产主干。发布或阶段交付时，从 `develop` 创建 PR 合入 `main`，通过 `Branch policy` 检查后再合并；官网 `site/` 变更也在此时随主干部署。
+  - 审查确认后合并入 `main`，并清理对应的远端分支。只改文档、官网或仓库配置（`docs/**`、`site/**`、`*.md`、`.github/**`）的 PR 不会触发桌面验收，按改动范围本地验证即可合入。
+- **单主干合入**：功能与修复进入 `main` 即进入生产主干，因此合入前必须完成本地验证与审查；官网 `site/` 变更随 `main` 部署。
 
 ## 上游与版本发布流程
 
@@ -110,9 +110,9 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 
 底座的正式发布遵循统一闭环机制：
 
-1. **发布准备 PR**：在基于 `origin/develop` 的 `codex/release-vX.Y.Z` 分支上指定正式版本号，同步更新 `package.json`、`package-lock.json` 与 `docs/release-guide.md`，并在 `docs/releases/vX.Y.Z.md` 中编写发布日志。发版 PR 的版本号不会被自动递增覆盖。完成本地验证后提交发布 PR，合入 `develop`。
-2. **流水线验收**：PR 触发 `Validate commerce desktop` 工作流，验证双平台契约与打包能力。
-3. **主干合并**：发布 PR 合入 `develop` 且验收通过后，从 `develop` 创建 PR 合入 `main`。`Branch policy` 会校验版本号一致且不允许回退。
+1. **发布准备**：运行 `Auto version` 工作流指定正式版本号与发布日志要点，工作流会更新 `package.json`、`package-lock.json`、`docs/release-guide.md` 与 `docs/releases/vX.Y.Z.md`，并以 `codex/auto-version-vX.Y.Z` 分支发起 PR。
+2. **流水线验收**：该 PR 触发 `Validate commerce desktop` 工作流，验证双平台契约与打包能力；`Branch policy` 会校验版本号一致。
+3. **主干合并**：PR 通过检查后合入 `main`，发版内容与版本号一并进入主干。
 4. **推送版本 Tag**：在最新的 `main` 提交上创建带注释的 Git 标签并推送到 GitHub：
 
    ```sh
@@ -126,20 +126,19 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 
 ### 分支模型
 
-仓库使用 `main` 与 `develop` 双分支：`develop` 是日常集成分支，功能、修复、发版准备都先合入这里；`main` 是生产主干，只接受来自 `develop` 的合并 PR。紧急修复从 `main` 切出 `codex/hotfix-*` 分支，合入 `main` 后必须同步回合入 `develop`，避免两条分支漂移。
+仓库采用单主干：`main` 是唯一的长期分支，功能、修复与发布准备都通过 `codex/<type>-<name>` 分支的 PR 合入。`develop` 已下线，不再维护第二条集成线，也就不存在需要回合的分支漂移。
 
 ```text
-codex/<type>-<name> ──PR──> develop ──PR──> main ──tag──> Release
-codex/hotfix-* ─────PR──> main ──PR(回合)──> develop
+codex/<type>-<name> ──PR──> main ──tag──> Release
 ```
 
-`main` 与 `develop` 均启用 GitHub 分支保护：禁止直接推送与强制推送，必须经 PR 合并，且 `Branch policy` 检查为必需项。校验逻辑见 `.github/workflows/branch-policy.yml`。
+`main` 启用 GitHub 分支保护：禁止直接推送与强制推送，必须经 PR 合并，且 `Branch policy` 检查为必需项。校验逻辑见 `.github/workflows/branch-policy.yml`。
 
-### 自动版本更新
+### 版本号与 Auto version
 
-合并入 `develop` 会触发 `Auto version` 工作流：补丁号 +1，同步 `package.json`、`package-lock.json` 与 `docs/release-guide.md` 的底座版本，再以 `codex/auto-version-vX.Y.Z` 分支自动提交并合回 `develop`。主干部版本由 `develop` → `main` 的 PR 一并带入，因此主干版本号始终与其内容一致，打标签发布时不再需要手工补版本号。版本递增逻辑见 `scripts/auto-version.mjs`。
+版本号只在发版时变化，日常合入不递增，避免版本号被合并次数推着走。需要发版时手动触发 `Auto version` 工作流（`gh workflow run auto-version.yml`），指定目标版本号与发布日志要点：工作流同步 `package.json`、`package-lock.json`、`docs/release-guide.md` 的底座版本，写入 `docs/releases/vX.Y.Z.md`，以 `codex/auto-version-vX.Y.Z` 分支自动提交、通过 `Branch policy` 后合入 `main`。版本递增逻辑见 `scripts/auto-version.mjs`。
 
-发版 PR（`codex/release-*`）不参与自动递增：它自行指定正式版本号并编写 `docs/releases/vX.Y.Z.md`，自动流程既不覆盖也不回退该版本号。
+版本号必须是 X.Y.Z 正式版本；标签与版本号不一致时，`Release commerce desktop` 会在发布前校验中失败。
 
 ## 用户可见文案
 
@@ -153,9 +152,9 @@ codex/hotfix-* ─────PR──> main ──PR(回合)──> develop
 ## 变更流程
 
 1. 先阅读受影响模块及对应文档、测试和工作流，确认数据流与安全边界。
-2. 在 Codex Desktop 中基于最新的 `origin/develop` 切出独立的 `codex/<type>-<name>` 分支，必要时软链接依赖以快速就绪。
+2. 在 Codex Desktop 中基于最新的 `origin/main` 切出独立的 `codex/<type>-<name>` 分支，必要时软链接依赖以快速就绪。
 3. 让改动保持局部，沿用现有命名、错误处理和用户可见文案风格；不要顺手重构无关代码。
 4. 先运行与改动直接相关的测试，再按改动范围运行 `npm test`、`npm run build` 和 `npm run test:platform`，记录实际测试结果与通过用例数。
 5. 检查 `git diff`、`git status` 和生成物，确认没有凭据、临时文件或不相关的本地改动。
 6. 提交语义化 Commit，发起 GitHub PR（包含变更说明与本地实测证据），并使用 `attach_artifact` 挂载 PR 链接。
-7. 等待 GitHub Actions 自动化检查通过，完成审查并合并入 `develop`；若涉及版本发布或阶段交付，再由 `develop` 合入 `main` 并在主干创建与推送版本 Tag 触发自动发版。
+7. 等待 GitHub Actions 自动化检查通过，完成审查并合并入 `main`；若涉及版本发布，再运行 `Auto version` 准备版本 PR，并在主干创建与推送版本 Tag 触发自动发版。
