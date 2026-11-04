@@ -16,7 +16,7 @@ function credentials() {
   };
 }
 
-async function fixture() {
+async function fixture({ uploadUrl = 'https://mmbiz.qpic.cn/body.png' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-wechat-'));
   const workspaceRoot = path.join(root, 'workspace');
   const articleDir = 'drafts/20261103-demo';
@@ -43,7 +43,7 @@ async function fixture() {
       return new Response(JSON.stringify({ access_token: 'token-' + tokenCalls, expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/cgi-bin/material/add_material') return new Response(JSON.stringify({ media_id: 'thumb-1' }), { status: 200 });
-    if (url.pathname === '/cgi-bin/media/uploadimg') return new Response(JSON.stringify({ url: 'https://mmbiz.qpic.cn/body.png' }), { status: 200 });
+    if (url.pathname === '/cgi-bin/media/uploadimg') return new Response(JSON.stringify({ url: uploadUrl }), { status: 200 });
     if (url.pathname === '/cgi-bin/draft/add') return new Response(JSON.stringify({ media_id: 'draft-1' }), { status: 200 });
     if (url.pathname === '/cgi-bin/freepublish/submit') return new Response(JSON.stringify({ publish_id: 'publish-1' }), { status: 200 });
     if (url.pathname === '/cgi-bin/freepublish/get') return new Response(JSON.stringify({ publish_status: 0, article_detail: { item: [{ article_url: 'https://mp.weixin.qq.com/s/demo' }] } }), { status: 200 });
@@ -93,6 +93,48 @@ test('WeChat draft uploads cover and body assets, then publishes with confirmati
     assert.equal(status.articleUrl, 'https://mp.weixin.qq.com/s/demo');
     const list = await f.runtime.list(plugin, { accountId: f.account.id, type: 'draft' });
     assert.deepEqual(list, { total: 0, items: [] });
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('WeChat draft accepts the http body image URL returned by uploadimg and upgrades it to https', async () => {
+  const f = await fixture({ uploadUrl: 'http://mmbiz.qpic.cn/mmbiz_jpg/demo/0?wx_fmt=jpeg' });
+  try {
+    const article = {
+      articleDir: f.articleDir,
+      title: '测试文章',
+      author: '轻作',
+      digest: '摘要',
+      html: '<p>正文</p><img src="qingzuo-asset:body" alt="">',
+      cover: { placeholder: 'cover', path: f.articleDir + '/cover.png' },
+      assets: [{ placeholder: 'body', path: f.articleDir + '/body.png' }],
+    };
+    const draft = await f.runtime.createDraft(plugin, { accountId: f.account.id, article });
+    assert.equal(draft.mediaId, 'draft-1');
+    const draftCall = f.calls.find(call => call.url.pathname === '/cgi-bin/draft/add');
+    const body = JSON.parse(draftCall.options.body);
+    assert.match(body.articles[0].content, /https:\/\/mmbiz\.qpic\.cn\/mmbiz_jpg\/demo\/0\?wx_fmt=jpeg/);
+    assert.doesNotMatch(body.articles[0].content, /http:\/\//);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('WeChat draft rejects a body image upload without a usable http(s) URL', async () => {
+  const f = await fixture({ uploadUrl: 'javascript:alert(1)' });
+  try {
+    const article = {
+      articleDir: f.articleDir,
+      title: '测试文章',
+      author: '轻作',
+      digest: '摘要',
+      html: '<p>正文</p><img src="qingzuo-asset:body" alt="">',
+      cover: { placeholder: 'cover', path: f.articleDir + '/cover.png' },
+      assets: [{ placeholder: 'body', path: f.articleDir + '/body.png' }],
+    };
+    await assert.rejects(f.runtime.createDraft(plugin, { accountId: f.account.id, article }), /微信正文图片上传失败/);
+    assert.equal(f.calls.filter(call => call.url.pathname === '/cgi-bin/draft/add').length, 0);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
