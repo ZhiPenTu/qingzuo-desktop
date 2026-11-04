@@ -97,6 +97,8 @@ it('merges installed tools and the catalog into one page with two tabs', async (
   expect(screen.getByRole('tab', { name: '全部' }).getAttribute('aria-selected')).toBe('true');
   expect(await screen.findByRole('button', { name: '导入插件' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'LabelEdit' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '打开' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '已安装' })).toBeNull();
 
   await openToolTab('已安装');
   expect(screen.getByRole('tab', { name: '已安装' }).getAttribute('aria-selected')).toBe('true');
@@ -109,24 +111,40 @@ it('filters the catalog with one platform, official and community trust group', 
   await screen.findByRole('heading', { name: '内置工具' });
   await openToolTab('全部');
 
-  const tierFilters = await screen.findByRole('group', { name: '按信任层筛选' });
-  expect(within(tierFilters).getByRole('button', { name: '全部' })).toBeTruthy();
-  expect(within(tierFilters).getByRole('button', { name: '底座内置' })).toBeTruthy();
-  expect(within(tierFilters).getByRole('button', { name: '官方社区' })).toBeTruthy();
-  expect(within(tierFilters).getByRole('button', { name: '第三方' })).toBeTruthy();
+  const tierFilter = await screen.findByRole('combobox', { name: '按来源筛选' });
+  expect(within(tierFilter).getAllByRole('option').map(option => option.textContent)).toEqual(['全部（3）', '底座内置（1）', '官方社区（1）', '第三方（1）']);
   expect(screen.queryByRole('group', { name: '按发布者筛选' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '底座内置' }));
+  fireEvent.change(tierFilter, { target: { value: 'platform' } });
   await screen.findByRole('heading', { name: '内置工具' });
   expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '第三方' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '按来源筛选' }), { target: { value: 'community' } });
   await screen.findByRole('heading', { name: '社区工具' });
   expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '官方社区' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '按来源筛选' }), { target: { value: 'official' } });
   await screen.findByRole('heading', { name: 'LabelEdit' });
   expect(screen.queryByRole('heading', { name: '社区工具' })).toBeNull();
+});
+
+it('filters the catalog by type and clears the filter', async () => {
+  fixture(undefined, false, false, [], undefined, { marketItems: [entry, communityEntry], plugins: [installed] });
+  render(<Platform />);
+  await openToolTab('全部');
+
+  const typeFilter = await screen.findByRole('combobox', { name: '按功能分类筛选' });
+  expect(within(typeFilter).getAllByRole('option').map(option => option.textContent)).toEqual(['全部', '标签与文档', '效率工具']);
+
+  fireEvent.change(typeFilter, { target: { value: '效率工具' } });
+  await screen.findByRole('heading', { name: '社区工具' });
+  expect(screen.queryByRole('heading', { name: 'LabelEdit' })).toBeNull();
+  expect(screen.getByText('找到 1 个')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+  await screen.findByRole('heading', { name: 'LabelEdit' });
+  expect(screen.queryByText(/找到 \d+ 个/)).toBeNull();
+  expect((screen.getByRole('combobox', { name: '按功能分类筛选' }) as HTMLSelectElement).value).toBe('all');
 });
 
 it('labels bundled installations separately from their platform trust tier', async () => {
@@ -151,6 +169,9 @@ it('keeps installed identity and source separate from the same-id market catalog
 
   await openToolTab('全部');
   await screen.findByRole('heading', { name: '市场标题' });
+  expect(screen.getByText('本地已安装')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '打开' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新插件' })).toBeNull();
   await openToolTab('已安装');
   await screen.findByRole('heading', { name: '安装标题' });
   expect(screen.getByText('本地导入')).toBeTruthy();
@@ -178,7 +199,8 @@ it('keeps backend progress after acknowledgment, restores it across tabs, and co
   await screen.findByText('正在刷新工具…');
   emit(job('installed', { progress: 100 }), [{ ...installed, version: entry.version }]);
   await screen.findByText('安装完成 · v0.2.0');
-  expect(screen.getByRole('button', { name: '已安装' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: '已安装' })).toBeNull();
+  expect(screen.getByRole('button', { name: '打开' }).hasAttribute('disabled')).toBe(false);
   expect(screen.queryByRole('progressbar')).toBeNull();
   await openToolTab('已安装');
   await screen.findByText('v0.2.0');
@@ -393,7 +415,7 @@ it('checks plugin versions on demand and offers the update from installed tools'
   render(<Platform />);
   await screen.findByRole('heading', { name: 'LabelEdit' });
   await screen.findByRole('heading', { name: '工具中心' });
-  expect(screen.getByText('检查插件是否有新版本')).toBeTruthy();
+  expect(screen.queryByText('检查插件是否有新版本')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '检查插件更新' }));
   await screen.findByText('发现 1 个插件更新');
   expect(document.querySelector('.plugin-state .is-update')?.textContent).toBe('可更新到 v0.2.0');
