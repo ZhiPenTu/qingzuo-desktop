@@ -166,7 +166,7 @@ export function CapabilitySettings({ desktop }: { desktop: boolean }) {
         {notice ? <p className="capability-notice" role="status"><CheckCircle2 />{notice}</p> : null}
         <section className="capability-section" aria-labelledby="mcp-heading">
           <div className="capability-section-head">
-            <div><h3 id="mcp-heading"><PlugZap />MCP 服务</h3><p>用于搜索资料和读取网页；工具需要单独授权只读调用。</p></div>
+            <div><h3 id="mcp-heading"><PlugZap />MCP 服务</h3><p>用于搜索、读取网页或调用其他外部工具；每个工具都需要单独授权，会执行操作的工具会明确提示副作用。</p></div>
             <Button type="button" variant="outline" size="sm" disabled={!desktop || Boolean(busy)} onClick={() => void load()}><RefreshCw data-icon="inline-start" />刷新</Button>
           </div>
           {loading ? <p className="capability-loading" role="status"><LoaderCircle className="animate-spin" />正在读取连接…</p> : null}
@@ -181,7 +181,7 @@ export function CapabilitySettings({ desktop }: { desktop: boolean }) {
               <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => editMcp(server)}>编辑</Button>
               <Button type="button" variant="ghost" size="icon-sm" aria-label={'删除 ' + server.name} title="删除" disabled={Boolean(busy)} onClick={() => void run('remove-' + server.id, () => invoke('capabilities.mcp.remove', { id: server.id }), 'MCP 服务已删除。')}><Trash2 /></Button>
             </div>
-            {tools[server.id]?.length ? <div className="capability-subsection"><strong>可用工具</strong><ul>{tools[server.id].map(tool => <li key={tool.name}><span>{tool.title || tool.name}</span><small>{tool.readOnly ? '只读' : '不可调用'}{tool.description ? ' · ' + tool.description : ''}</small></li>)}</ul></div> : null}
+            {tools[server.id]?.length ? <div className="capability-subsection"><strong>可用工具</strong><ul>{tools[server.id].map(tool => <li key={tool.name}><span>{tool.title || tool.name}</span><small>{tool.readOnly ? '服务声明只读（未验证）' : '会执行操作，需单独授权'}{tool.description ? ' · ' + tool.description : ''}</small></li>)}</ul></div> : null}
             {grants[server.id]?.length ? <div className="capability-subsection"><strong>工具授权</strong><ul>{grants[server.id].map(grant => <li key={grant.pluginId + grant.serverId}><span>{grant.pluginId}</span><small>{grant.toolNames.join('、')}</small><Button type="button" variant="ghost" size="icon-xs" aria-label="撤销授权" title="撤销授权" disabled={Boolean(busy)} onClick={() => void run('revoke-' + server.id + grant.pluginId, () => invoke('capabilities.mcp.revokeGrant', { pluginId: grant.pluginId, serverId: server.id }), '工具授权已撤销。')}><Trash2 /></Button></li>)}</ul></div> : null}
           </article>)}
           <form className="capability-form" onSubmit={event => void submitMcp(event)}>

@@ -76,6 +76,7 @@ let firstPartyGrants, secretPrompt;
 const pendingDebugLogs = [];
 let debugLogEventTimer = null;
 const approvalDialogs = new Set();
+const stoppingPlugins = new Map();
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
 function changed() { if (window && !window.isDestroyed()) window.webContents.send('commerce:changed'); }
@@ -257,13 +258,21 @@ async function presentApprovals(owner) {
   }
 }
 async function stopPlugin(id) {
-  approvals?.cancelPlugin(id);
-  const plugin = await manager.get(id).catch(() => null);
-  if (plugin && batches) await batches.stopPlugin(plugin);
-  await downloads?.stopOwner(id).catch(() => {});
-  if (host && systems.length === 7) await kernelRequest({ type: 'call', kind: 'ai', method: 'assistant.dispose', caller: id }).catch(() => {});
-  for (const [token, directory] of files?.directories || []) if (directory.owner === id) files.directories.delete(token);
-  await closeView(id);
+  stoppingPlugins.set(id, (stoppingPlugins.get(id) ?? 0) + 1);
+  try {
+    approvals?.cancelPlugin(id);
+    mcpRuntime?.abortPlugin(id);
+    const plugin = await manager.get(id).catch(() => null);
+    if (plugin && batches) await batches.stopPlugin(plugin);
+    await downloads?.stopOwner(id).catch(() => {});
+    if (host && systems.length === 7) await kernelRequest({ type: 'call', kind: 'ai', method: 'assistant.dispose', caller: id }).catch(() => {});
+    for (const [token, directory] of files?.directories || []) if (directory.owner === id) files.directories.delete(token);
+    await closeView(id);
+  } finally {
+    const remaining = (stoppingPlugins.get(id) ?? 1) - 1;
+    if (remaining > 0) stoppingPlugins.set(id, remaining);
+    else stoppingPlugins.delete(id);
+  }
 }
 function sanitizePlugin(p) {
   const { folder, backend, artifactSha256, previous, tierKnown, ...publicValue } = p;
@@ -586,7 +595,7 @@ function confirmAwsImport(plugin, preview) {
       + '\n\nAppSecret 将写入本机系统凭据库，不会显示给插件或写入配置文件。',
   }).then(result => result.response === 1);
 }
-function confirmMcpGrant(plugin, server, toolNames) {
+function confirmMcpGrant(plugin, server, toolNames, tools = []) {
   if (!window || window.isDestroyed()) return Promise.reject(new Error('请先打开轻作窗口。'));
   return dialog.showMessageBox(window, {
     type: 'warning',
@@ -594,9 +603,13 @@ function confirmMcpGrant(plugin, server, toolNames) {
     defaultId: 0,
     cancelId: 0,
     title: '确认 MCP 工具授权',
-    message: '「' + plugin.title + '」请求使用 ' + toolNames.length + ' 个只读工具',
-    detail: '服务器：' + server.name + '\n地址：' + server.url + '\n\n' + toolNames.join('\n')
-      + '\n\n只允许本次列出的只读工具；你可以随时在能力连接中撤销。',
+    message: '「' + plugin.title + '」请求使用 ' + toolNames.length + ' 个 MCP 工具',
+    detail: '服务器：' + server.name + '\n地址：' + server.url + '\n\n'
+      + toolNames.map(name => {
+        const tool = tools.find(item => item.name === name);
+    return name + (tool?.readOnly === true ? '（服务声明只读，未验证）' : '（会执行操作）');
+      }).join('\n')
+      + '\n\n“服务声明只读”来自服务自身的提示，不能被当作安全保证；标记为“会执行操作”的工具可能修改外部数据、调用付费服务或产生其他副作用。只允许本次列出的工具；你可以随时在能力连接中撤销。',
   }).then(result => result.response === 1);
 }
 function confirmVaultGrant(plugin, record) {
@@ -864,7 +877,7 @@ async function performPlatform(method, args) {
     if ((manifest.permissions.browser ?? []).includes('detect')) browserAccess.push('识别页面中的媒体');
     if ((manifest.permissions.browser ?? []).includes('download')) browserAccess.push('下载媒体');
     if ((manifest.permissions.browser ?? []).includes('automate')) browserAccess.push('读取并操作指定网站页面');
-    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n工作区：' + (manifest.permissions.workspace ? '申请授权一个文件夹，仅访问 .aws-article、drafts、posts、series' : '未申请') + '\n远程 MCP：' + ((manifest.permissions.mcp ?? []).join('、') || '无') + '\n公众号能力：' + ((manifest.permissions.wechat ?? []).join('、') || '无') + '\n下载能力：' + (manifest.permissions.downloads === 'manage' ? '申请管理（仅市场签名插件生效）' : manifest.permissions.downloads === 'use' ? '创建并管理自己的下载任务' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\n共享凭证：' + (manifest.permissions.credentialVault === 'manage' ? '管理（仅市场插件可用）' : manifest.permissions.credentialVault === 'use' ? '引用' : '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
+    const confirm = await dialog.showMessageBox(window, { type: 'question', buttons: ['取消', '安装'], defaultId: 0, title: '安装本地插件', message: '此插件的作者尚未经过市场签名验证。', detail: manifest.title + ' (' + manifest.id + ') v' + manifest.version + '\n文件选择与保存：' + (manifest.permissions.files ? '申请' : '未申请') + '\n本地数据：' + (manifest.permissions.storage ? '申请长期保存' : '未申请') + '\n工作区：' + (manifest.permissions.workspace ? '申请授权一个文件夹，仅访问 .aws-article、drafts、posts、series' : '未申请') + '\n远程 MCP：' + ((manifest.permissions.mcp ?? []).includes('read') ? '连接并调用你逐项授权的工具' : '无') + '\n公众号能力：' + ((manifest.permissions.wechat ?? []).join('、') || '无') + '\n下载能力：' + (manifest.permissions.downloads === 'manage' ? '申请管理（仅市场签名插件生效）' : manifest.permissions.downloads === 'use' ? '创建并管理自己的下载任务' : '未申请') + '\n网络来源：' + ((manifest.permissions.network ?? []).join('、') || '无') + '\n可操作的网站：' + ((manifest.permissions.browserOrigins ?? []).join('、') || '无') + '\n自定义请求头：' + ((manifest.permissions.networkHeaders ?? []).join('、') || '无') + '\n浏览器能力：' + (browserAccess.join('、') || '无') + '\n凭据名称：' + ((manifest.permissions.credentials ?? []).join('、') || '无') + '\n共享凭证：' + (manifest.permissions.credentialVault === 'manage' ? '管理（仅市场插件可用）' : manifest.permissions.credentialVault === 'use' ? '引用' : '无') + '\nAI 能力：' + ((manifest.permissions.ai ?? []).join('、') || '无') + '\n插件将在隔离环境中运行，可随时停用或卸载。' }); if (confirm.response !== 1) return;
     pluginInstallService.assertAvailable(manifest.id);
     await manager.install(bytes); return;
   }
@@ -1025,6 +1038,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
 });
 ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
   const id = assertFrame(event); validateCall(method, args); const plugin = await manager.get(id);
+  if (stoppingPlugins.has(id)) throw new Error('插件正在停止。');
   if (!plugin.enabled || plugin.missing.length) throw new Error('插件不可用。');
   if (method.startsWith('firstParty.')) return firstPartyInvoke(plugin, method, args);
   if (method.startsWith('workspace.')) {
@@ -1237,6 +1251,10 @@ mcpRuntime = new McpRuntime({
   credentials,
   shell,
   confirmGrant: confirmMcpGrant,
+  isPluginActive: async pluginId => {
+    const current = await manager.get(pluginId).catch(() => null);
+    return Boolean(current?.enabled && !current.missing?.length);
+  },
   request: secureRequest,
   log: message => debugLog?.record({ scope: 'mcp', source: 'mcp', level: 'info', message }),
 });
