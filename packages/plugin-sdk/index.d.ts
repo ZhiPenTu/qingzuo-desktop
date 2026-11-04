@@ -97,7 +97,7 @@ export function createPluginClient(bridge?: PluginBridge): {
     tools(options: { serverId: string }): Promise<McpToolSummary[]>;
     grant(options: { serverId: string; toolNames: string[] }): Promise<void>;
     revoke(options?: { serverId?: string; toolNames?: string[] }): Promise<void>;
-    call(options: { serverId: string; toolName: string; args?: unknown }): Promise<McpCallResult>;
+    call(options: { serverId: string; toolName: string; args?: unknown; inlineImages?: boolean }): Promise<McpCallResult>;
   };
   wechat: {
     accounts(): Promise<WechatAccountSummary[]>;
@@ -138,7 +138,7 @@ export interface WorkspaceBundleResult { applied: true; preview: WorkspaceBundle
 export type McpServerStatus = 'ready' | 'auth-required' | 'error' | 'disabled';
 export interface McpServerSummary { id: string; name: string; status: McpServerStatus; toolCount: number }
 export interface McpToolSummary { name: string; title: string; description: string; readOnly: boolean }
-export interface McpCallResult { content: unknown; isError?: boolean }
+export interface McpCallResult { content: unknown; structuredContent?: unknown; isError?: boolean }
 export interface WechatAccountSummary { id: string; name: string; appIdMasked: string; verified: boolean }
 export interface WechatArticleAsset { placeholder: string; path: string }
 export interface WechatArticleInput {

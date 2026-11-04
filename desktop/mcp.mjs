@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http';
 import { isIP } from 'node:net';
 import path from 'node:path';
+import semver from 'semver';
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -17,9 +18,21 @@ const MAX_TOOLS = 500;
 const MAX_ARGUMENTS = 256 * 1024;
 const MAX_RESPONSE = 2 * 1024 * 1024;
 const MAX_CATALOG_RESPONSE = 8 * 1024 * 1024;
+const MAX_TOOL_RESPONSE = 16 * 1024 * 1024;
+const MAX_INLINE_IMAGE = 12 * 1024 * 1024;
+const MAX_INLINE_IMAGES = 4;
+const MAX_INLINE_CANDIDATES = 8;
+const MAX_INLINE_TOTAL = 24 * 1024 * 1024;
+const MAX_INLINE_RESPONSE = 36 * 1024 * 1024;
+const INLINE_IMAGE_TIMEOUT = 30_000;
+const INLINE_TOTAL_TIMEOUT = 45_000;
+const MAX_ACTIVE_CALLS = 16;
+const MAX_ACTIVE_CALLS_PER_PLUGIN = 4;
 const REQUEST_TIMEOUT = 60_000;
 const OAUTH_TIMEOUT = 5 * 60_000;
 const CREDENTIAL_NAMESPACE = 'mcp-servers';
+
+class McpPolicyError extends Error {}
 
 function cleanText(value, max, label, { required = true } = {}) {
   if (typeof value !== 'string') throw new Error(label + '无效。');
@@ -66,7 +79,7 @@ function validateHeaderName(value) {
 }
 
 function emptyState() {
-  return { schemaVersion: 1, servers: [], grants: {} };
+  return { schemaVersion: 1, servers: [], grants: {}, sideEffects: {} };
 }
 
 function normalizeState(value) {
@@ -113,7 +126,19 @@ function normalizeState(value) {
     }
     if (Object.keys(next).length) grants[pluginId] = next;
   }
-  return { schemaVersion: 1, servers, grants };
+  const sideEffects = {};
+  const effectSource = value.sideEffects && typeof value.sideEffects === 'object' && !Array.isArray(value.sideEffects) ? value.sideEffects : {};
+  for (const [pluginId, valueByServer] of Object.entries(effectSource)) {
+    if (!/^[a-z][a-z0-9.-]{1,95}$/.test(pluginId) || !valueByServer || typeof valueByServer !== 'object' || Array.isArray(valueByServer)) continue;
+    const next = {};
+    for (const [serverId, names] of Object.entries(valueByServer)) {
+      if (!ids.has(serverId) || !Array.isArray(names)) continue;
+      const tools = [...new Set(names.filter(name => typeof name === 'string' && /^[a-zA-Z0-9_.:/-]{1,128}$/.test(name)))].slice(0, MAX_TOOLS);
+      if (tools.length) next[serverId] = tools;
+    }
+    if (Object.keys(next).length) sideEffects[pluginId] = next;
+  }
+  return { schemaVersion: 1, servers, grants, sideEffects };
 }
 
 async function atomicJson(filename, value) {
@@ -178,7 +203,9 @@ function responseLimitFor(body) {
   if (!body?.length) return MAX_RESPONSE;
   try {
     const message = JSON.parse(body.toString('utf8'));
-    return message?.method === 'tools/list' ? MAX_CATALOG_RESPONSE : MAX_RESPONSE;
+    if (message?.method === 'tools/list') return MAX_CATALOG_RESPONSE;
+    if (message?.method === 'tools/call') return MAX_TOOL_RESPONSE;
+    return MAX_RESPONSE;
   } catch {
     return MAX_RESPONSE;
   }
@@ -193,8 +220,36 @@ function publicTool(tool) {
   };
 }
 
-function toolAllowed(tool) {
-  return tool?.annotations?.readOnlyHint === true;
+function supportsToolInvocation(plugin) {
+  const minimum = semver.minVersion(plugin.api ?? '^1.0.0');
+  return Boolean(minimum && semver.gte(minimum, '1.11.0'));
+}
+
+function stripUrlPunctuation(value) {
+  return String(value).replace(/[.,;:!?，。；：！？、）)】\]}>'"]+$/g, '');
+}
+
+function imageUrls(content, limit = MAX_INLINE_CANDIDATES) {
+  const urls = [];
+  for (const item of Array.isArray(content) ? content : []) {
+    if (urls.length >= limit) break;
+    if (!item || typeof item !== 'object') continue;
+    if (item.type === 'resource_link' && typeof item.uri === 'string') urls.push(item.uri);
+    if (item.type === 'resource' && typeof item.resource?.uri === 'string' && String(item.resource.mimeType || '').startsWith('image/')) {
+      urls.push(item.resource.uri);
+    }
+    if (item.type === 'image_url') {
+      const value = typeof item.image_url === 'string' ? item.image_url : item.image_url?.url;
+      if (typeof value === 'string' && /^https?:\/\//i.test(value)) urls.push(value);
+    }
+    if (item.type === 'text' && typeof item.text === 'string') {
+      for (const match of item.text.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
+        urls.push(stripUrlPunctuation(match[0]));
+        if (urls.length >= limit) break;
+      }
+    }
+  }
+  return [...new Set(urls)].slice(0, limit);
 }
 
 export class McpRuntime {
@@ -204,9 +259,10 @@ export class McpRuntime {
     shell,
     request = secureRequest,
     localRequest = (address, options) => globalThis.fetch(address, options),
-    clientFactory = () => new Client({ name: 'qingzuo-desktop', version: '1.9.0' }),
+    clientFactory = () => new Client({ name: 'qingzuo-desktop', version: '1.9.0', listMaxPages: 8 }),
     transportFactory = (url, options) => new StreamableHTTPClientTransport(url, options),
     confirmGrant = async () => false,
+    isPluginActive = async () => true,
     log = () => {},
     now = () => Date.now(),
   }) {
@@ -218,6 +274,7 @@ export class McpRuntime {
     this.clientFactory = clientFactory;
     this.transportFactory = transportFactory;
     this.confirmGrant = confirmGrant;
+    this.isPluginActive = isPluginActive;
     this.log = log;
     this.now = now;
     this.file = path.join(root, 'mcp-servers.json');
@@ -229,6 +286,7 @@ export class McpRuntime {
     this.errors = new Map();
     this.oauth = new Map();
     this.callbackServers = new Set();
+    this.activeCalls = new Set();
   }
 
   async initialize() {
@@ -436,13 +494,16 @@ export class McpRuntime {
     }
   }
 
-  async withTimeout(promise, milliseconds, message) {
+  async withTimeout(promise, milliseconds, message, controller) {
     let timer;
     try {
       return await Promise.race([
         promise,
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(message)), milliseconds);
+          timer = setTimeout(() => {
+            controller?.abort(new Error(message));
+            reject(new Error(message));
+          }, milliseconds);
           timer.unref?.();
         }),
       ]);
@@ -460,12 +521,16 @@ export class McpRuntime {
     return 'MCP 服务连接失败，请检查服务配置。';
   }
 
-  async listTools(server) {
+  async listTools(server, { fresh = false } = {}) {
     const cached = this.toolCache.get(server.id);
-    if (cached?.updatedAt === server.updatedAt) return cached.tools;
+    if (!fresh && cached?.updatedAt === server.updatedAt) return cached.tools;
     const { client } = await this.connect(server);
     try {
-      const result = await this.withTimeout(client.listTools(), REQUEST_TIMEOUT, 'MCP 工具列表读取超时。');
+      const result = await this.withTimeout(
+        client.listTools(undefined, fresh ? { cacheMode: 'refresh' } : undefined),
+        REQUEST_TIMEOUT,
+        'MCP 工具列表读取超时。',
+      );
       const tools = (result.tools ?? []).slice(0, MAX_TOOLS).map(publicTool);
       this.toolCache.set(server.id, { updatedAt: server.updatedAt, tools });
       return tools;
@@ -473,6 +538,33 @@ export class McpRuntime {
       this.status.set(server.id, 'error');
       this.errors.set(server.id, this.safeError(error));
       throw new Error(this.safeError(error));
+    }
+  }
+
+  abortActiveCalls(predicate) {
+    for (const call of this.activeCalls) {
+      if (predicate(call)) call.controller.abort();
+    }
+  }
+
+  abortPlugin(pluginId) {
+    this.abortActiveCalls(call => call.pluginId === pluginId);
+  }
+
+  async abortable(promise, signal, message) {
+    if (!signal) return promise;
+    if (signal.aborted) throw new Error(message);
+    let listener;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          listener = () => reject(new Error(message));
+          signal.addEventListener('abort', listener, { once: true });
+        }),
+      ]);
+    } finally {
+      signal.removeEventListener('abort', listener);
     }
   }
 
@@ -512,6 +604,7 @@ export class McpRuntime {
 
   async pluginServers(plugin) {
     if (!(plugin.permissions.mcp ?? []).includes('read')) throw new Error('MCP 能力未授权。');
+    const allTools = supportsToolInvocation(plugin);
     const result = [];
     for (const server of this.state.servers) {
       if (!server.enabled) continue;
@@ -521,7 +614,7 @@ export class McpRuntime {
         id: server.id,
         name: server.name,
         status,
-        toolCount: this.toolCache.get(server.id)?.tools.filter(toolAllowed).length ?? 0,
+        toolCount: this.toolCache.get(server.id)?.tools.filter(tool => allTools || tool.readOnly).length ?? 0,
       });
     }
     return result.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
@@ -548,11 +641,19 @@ export class McpRuntime {
     if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9.-]{1,95}$/.test(pluginId)) throw new Error('插件标识无效。');
     if (serverId !== undefined) this.find(serverId);
     await this.mutate(draft => {
-      if (!draft.grants[pluginId]) return;
-      if (serverId === undefined) delete draft.grants[pluginId];
-      else delete draft.grants[pluginId][serverId];
-      if (!Object.keys(draft.grants[pluginId]).length) delete draft.grants[pluginId];
+      if (!draft.grants[pluginId] && !draft.sideEffects[pluginId]) return;
+      if (serverId === undefined) {
+        delete draft.grants[pluginId];
+        delete draft.sideEffects[pluginId];
+        return;
+      } else {
+        if (draft.grants[pluginId]) delete draft.grants[pluginId][serverId];
+        if (draft.sideEffects[pluginId]) delete draft.sideEffects[pluginId][serverId];
+      }
+      if (draft.grants[pluginId] && !Object.keys(draft.grants[pluginId]).length) delete draft.grants[pluginId];
+      if (draft.sideEffects[pluginId] && !Object.keys(draft.sideEffects[pluginId]).length) delete draft.sideEffects[pluginId];
     });
+    this.abortActiveCalls(call => call.pluginId === pluginId && (serverId === undefined || call.serverId === serverId));
   }
 
   async pluginTools(plugin, { serverId } = {}) {
@@ -560,7 +661,7 @@ export class McpRuntime {
     const server = this.find(serverId);
     if (!server.enabled) throw new Error('MCP 服务已停用。');
     const tools = await this.listTools(server);
-    return tools.filter(tool => tool.readOnly);
+    return supportsToolInvocation(plugin) ? tools : tools.filter(tool => tool.readOnly);
   }
 
   async grant(plugin, { serverId, toolNames } = {}) {
@@ -569,16 +670,44 @@ export class McpRuntime {
     if (!server.enabled) throw new Error('MCP 服务已停用。');
     if (!Array.isArray(toolNames) || !toolNames.length || toolNames.length > MAX_TOOLS || new Set(toolNames).size !== toolNames.length || toolNames.some(name => typeof name !== 'string' || !/^[a-zA-Z0-9_.:/-]{1,128}$/.test(name))) throw new Error('MCP 工具授权无效。');
     const tools = await this.listTools(server);
-    const allowed = new Set(tools.filter(tool => tool.readOnly).map(tool => tool.name));
-    if (toolNames.some(name => !allowed.has(name))) throw new Error('只能授权只读 MCP 工具。');
-    const approved = await this.confirmGrant(plugin, server, toolNames);
+    const allowed = new Map(tools.map(tool => [tool.name, tool]));
+    if (allowed.size !== tools.length) throw new Error('MCP 工具目录存在重复项。');
+    if (toolNames.some(name => !allowed.has(name))) throw new Error('MCP 工具不存在。');
+    if (!supportsToolInvocation(plugin) && toolNames.some(name => allowed.get(name).readOnly !== true)) {
+      throw new Error('当前插件 API 版本只能授权只读 MCP 工具。');
+    }
+    const approved = await this.confirmGrant(plugin, server, toolNames, toolNames.map(name => allowed.get(name)));
     if (!approved) throw new Error('MCP 工具授权已取消。');
+    if (!await this.isPluginActive(plugin.id)) throw new Error('插件已停用或卸载，授权未保存。');
+    const current = this.find(serverId);
+    if (!current.enabled || current.updatedAt !== server.updatedAt) throw new Error('MCP 服务在授权期间已变化，请重新确认。');
+    const confirmedTools = await this.listTools(server, { fresh: true });
+    const confirmed = new Map(confirmedTools.map(tool => [tool.name, tool]));
+    for (const name of toolNames) {
+      const tool = confirmed.get(name);
+      if (!tool || tool.readOnly !== allowed.get(name).readOnly) throw new Error('MCP 工具权限已变化，请重新授权。');
+    }
+    if (!await this.isPluginActive(plugin.id)) throw new Error('插件已停用或卸载，授权未保存。');
     await this.mutate(draft => {
+      const target = draft.servers.find(item => item.id === serverId);
+      if (!target || !target.enabled || target.updatedAt !== server.updatedAt) {
+        throw new Error('MCP 服务在授权期间已变化，请重新确认。');
+      }
       const grants = draft.grants[plugin.id] ?? {};
       grants[serverId] = [...new Set([...(grants[serverId] ?? []), ...toolNames])].slice(0, MAX_TOOLS);
       draft.grants[plugin.id] = grants;
+      const sideEffects = draft.sideEffects[plugin.id] ?? {};
+      const effects = new Set(sideEffects[serverId] ?? []);
+      for (const name of toolNames) {
+        if (allowed.get(name).readOnly === true) effects.delete(name);
+        else effects.add(name);
+      }
+      if (effects.size) sideEffects[serverId] = [...effects].slice(0, MAX_TOOLS);
+      else delete sideEffects[serverId];
+      if (Object.keys(sideEffects).length) draft.sideEffects[plugin.id] = sideEffects;
+      else delete draft.sideEffects[plugin.id];
     });
-    this.log('已授权只读 MCP 工具：' + toolNames.length + ' 个。');
+    this.log('已授权 MCP 工具：' + toolNames.length + ' 个。');
   }
 
   async revoke(plugin, { serverId, toolNames } = {}) {
@@ -589,37 +718,178 @@ export class McpRuntime {
       if (!draft.grants[plugin.id]) return;
       if (serverId === undefined) {
         delete draft.grants[plugin.id];
+        delete draft.sideEffects[plugin.id];
         return;
       }
       if (toolNames === undefined) {
         delete draft.grants[plugin.id][serverId];
+        if (draft.sideEffects[plugin.id]) delete draft.sideEffects[plugin.id][serverId];
       } else {
         draft.grants[plugin.id][serverId] = (draft.grants[plugin.id][serverId] ?? []).filter(name => !toolNames.includes(name));
+        if (draft.sideEffects[plugin.id]?.[serverId]) {
+          draft.sideEffects[plugin.id][serverId] = draft.sideEffects[plugin.id][serverId].filter(name => !toolNames.includes(name));
+          if (!draft.sideEffects[plugin.id][serverId].length) delete draft.sideEffects[plugin.id][serverId];
+        }
       }
       if (!Object.keys(draft.grants[plugin.id]).length) delete draft.grants[plugin.id];
+      if (draft.sideEffects[plugin.id] && !Object.keys(draft.sideEffects[plugin.id]).length) delete draft.sideEffects[plugin.id];
     });
+    this.abortActiveCalls(call => call.pluginId === plugin.id
+      && (serverId === undefined || call.serverId === serverId)
+      && (toolNames === undefined || toolNames.includes(call.toolName)));
   }
 
-  async call(plugin, { serverId, toolName, args } = {}) {
-    if (!(plugin.permissions.mcp ?? []).includes('read')) throw new Error('MCP 能力未授权。');
+  async inlineImageUrls(content, server, signal) {
+    if (signal?.aborted) throw new Error('MCP 工具调用已撤销。');
+    const accepted = Array.isArray(content) ? [...content] : [];
+    let total = 0;
+    let count = 0;
+    for (const item of accepted) {
+      if (item?.type !== 'image' || !item.data) continue;
+      const size = Buffer.byteLength(String(item.data), 'base64');
+      if (size > MAX_INLINE_IMAGE) throw new Error('MCP 服务响应过大。');
+      total += size;
+      count += 1;
+    }
+    if (count > MAX_INLINE_IMAGES || total > MAX_INLINE_TOTAL) throw new Error('MCP 服务响应过大。');
+    if (count > 0) return accepted;
+    const serverLocal = isLoopbackHostname(new URL(server.url).hostname);
+    const deadline = this.now() + INLINE_TOTAL_TIMEOUT;
+    let candidates = 0;
+    const warnings = new Set();
+    for (const raw of imageUrls(accepted)) {
+      if (signal?.aborted) break;
+      candidates += 1;
+      if (candidates > MAX_INLINE_CANDIDATES || count >= MAX_INLINE_IMAGES || total >= MAX_INLINE_TOTAL || this.now() >= deadline) break;
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        continue;
+      }
+      const local = isLoopbackHostname(url.hostname);
+      if (local && !serverLocal) {
+        warnings.add('部分图片地址被安全策略拒绝。');
+        continue;
+      }
+      if (url.username || url.password || url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+        warnings.add('部分图片地址被安全策略拒绝。');
+        continue;
+      }
+      try {
+        const timeout = Math.min(INLINE_IMAGE_TIMEOUT, Math.max(1, deadline - this.now()));
+        const requestSignal = signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+          : AbortSignal.timeout(timeout);
+        const response = local
+          ? await this.localRequest(url.href, { redirect: 'error', signal: requestSignal })
+          : await this.request(url.href, { redirect: 'error', signal: requestSignal });
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => {});
+          warnings.add('部分图片地址无法访问。');
+          continue;
+        }
+        const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(mimeType)) {
+          await response.body?.cancel().catch(() => {});
+          warnings.add('部分链接不是支持的图片格式。');
+          continue;
+        }
+        const declared = Number(response.headers.get('content-length') || 0);
+        if (declared > MAX_INLINE_IMAGE || total + declared > MAX_INLINE_TOTAL) {
+          await response.body?.cancel().catch(() => {});
+          warnings.add('部分图片超过大小限制。');
+          continue;
+        }
+        const chunks = [];
+        let size = 0;
+        let tooLarge = false;
+        for await (const chunk of response.body ?? []) {
+          size += chunk.length;
+          if (size > MAX_INLINE_IMAGE || total + size > MAX_INLINE_TOTAL) {
+            tooLarge = true;
+            break;
+          }
+          chunks.push(chunk);
+        }
+        const body = Buffer.concat(chunks);
+        if (tooLarge || !body.length || body.length > MAX_INLINE_IMAGE || total + body.length > MAX_INLINE_TOTAL) {
+          if (tooLarge || body.length > MAX_INLINE_IMAGE || total + body.length > MAX_INLINE_TOTAL) warnings.add('部分图片超过大小限制。');
+          continue;
+        }
+        accepted.push({ type: 'image', data: body.toString('base64'), mimeType });
+        total += body.length;
+        count += 1;
+      } catch {
+        if (signal?.aborted) break;
+        warnings.add('部分图片下载失败或超时。');
+        // A broken preview link must not hide otherwise usable text or image content.
+      }
+    }
+    if (signal?.aborted) throw new Error('MCP 工具调用已撤销。');
+    if (warnings.size) accepted.push({ type: 'text', text: [...warnings].join('') });
+    return accepted;
+  }
+
+  async call(plugin, { serverId, toolName, args, inlineImages = false } = {}) {
+    if (!(plugin.permissions.mcp ?? []).includes('read')) throw new McpPolicyError('MCP 能力未授权。');
     const server = this.find(serverId);
-    if (!server.enabled) throw new Error('MCP 服务已停用。');
-    if (typeof toolName !== 'string' || !/^[a-zA-Z0-9_.:/-]{1,128}$/.test(toolName)) throw new Error('MCP 工具无效。');
+    if (!server.enabled) throw new McpPolicyError('MCP 服务已停用。');
+    if (typeof toolName !== 'string' || !/^[a-zA-Z0-9_.:/-]{1,128}$/.test(toolName)) throw new McpPolicyError('MCP 工具无效。');
     const grants = this.state.grants[plugin.id]?.[serverId] ?? [];
-    if (!grants.includes(toolName)) throw new Error('MCP 工具尚未授权。');
-    const tools = await this.listTools(server);
-    const tool = tools.find(item => item.name === toolName && item.readOnly);
-    if (!tool) throw new Error('MCP 工具不可调用。');
+    if (!grants.includes(toolName)) throw new McpPolicyError('MCP 工具尚未授权。');
+    const sideEffects = this.state.sideEffects[plugin.id]?.[serverId] ?? [];
+    const approvedSideEffect = sideEffects.includes(toolName);
     const payload = args ?? {};
-    if ((JSON.stringify(payload) ?? '').length > MAX_ARGUMENTS) throw new Error('MCP 调用参数过大。');
-    const { client } = await this.connect(server);
+    if (Buffer.byteLength(JSON.stringify(payload) ?? '', 'utf8') > MAX_ARGUMENTS) throw new Error('MCP 调用参数过大。');
+    const active = [...this.activeCalls];
+    if (active.length >= MAX_ACTIVE_CALLS) throw new McpPolicyError('同时进行的 MCP 调用过多，请稍后重试。');
+    if (active.filter(item => item.pluginId === plugin.id).length >= MAX_ACTIVE_CALLS_PER_PLUGIN) {
+      throw new McpPolicyError('该插件同时进行的 MCP 调用过多，请稍后重试。');
+    }
+    const call = { pluginId: plugin.id, serverId, toolName, controller: new AbortController() };
+    this.activeCalls.add(call);
     try {
-      const result = await this.withTimeout(client.callTool({ name: toolName, arguments: payload }, { timeout: REQUEST_TIMEOUT }), REQUEST_TIMEOUT, 'MCP 工具调用超时。');
-      const text = JSON.stringify(result);
-      if (Buffer.byteLength(text) > MAX_RESPONSE) throw new Error('MCP 服务响应过大。');
-      return { content: result.content ?? [], ...(result.isError ? { isError: true } : {}) };
+      const tools = await this.abortable(this.listTools(server), call.controller.signal, 'MCP 工具调用已撤销。');
+      const tool = tools.find(item => item.name === toolName);
+      if (!tool) throw new McpPolicyError('MCP 工具不可调用。');
+      if (!supportsToolInvocation(plugin) && tool.readOnly !== true) {
+        throw new McpPolicyError('当前插件 API 版本只能调用只读 MCP 工具。');
+      }
+      if (tool.readOnly !== true && !approvedSideEffect) {
+        throw new McpPolicyError('MCP 工具权限已变化，请重新授权。');
+      }
+      const { client } = await this.abortable(this.connect(server), call.controller.signal, 'MCP 工具调用已撤销。');
+      const current = this.find(serverId);
+      if (!current.enabled || current.updatedAt !== server.updatedAt) throw new McpPolicyError('MCP 服务已变化，请重新授权。');
+      if (!(this.state.grants[plugin.id]?.[serverId] ?? []).includes(toolName)) throw new McpPolicyError('MCP 工具授权已撤销。');
+      if (!approvedSideEffect) {
+        const liveTools = await this.abortable(this.listTools(server, { fresh: true }), call.controller.signal, 'MCP 工具调用已撤销。');
+        const liveTool = liveTools.find(item => item.name === toolName);
+        if (!liveTool || liveTool.readOnly !== true) throw new McpPolicyError('MCP 工具权限已变化，请重新授权。');
+      }
+      const result = await this.withTimeout(
+        client.callTool({ name: toolName, arguments: payload }, { timeout: REQUEST_TIMEOUT, signal: call.controller.signal }),
+        REQUEST_TIMEOUT,
+        'MCP 工具调用超时。',
+        call.controller,
+      );
+      if (call.controller.signal.aborted) throw new Error('MCP 工具调用已撤销。');
+      const content = inlineImages ? await this.inlineImageUrls(result.content ?? [], server, call.controller.signal) : result.content ?? [];
+      const structuredContent = result.structuredContent;
+      const text = JSON.stringify({ content, ...(structuredContent !== undefined ? { structuredContent } : {}) });
+      if (Buffer.byteLength(text) > (inlineImages ? MAX_INLINE_RESPONSE : MAX_TOOL_RESPONSE)) throw new Error('MCP 服务响应过大。');
+      return { content, ...(structuredContent !== undefined ? { structuredContent } : {}), ...(result.isError ? { isError: true } : {}) };
     } catch (error) {
+      if (call.controller.signal.aborted) {
+        const reason = call.controller.signal.reason;
+        if (reason instanceof Error && /超时/.test(reason.message)) throw new Error(this.safeError(reason));
+        throw new Error('MCP 工具调用已撤销。');
+      }
+      if (error instanceof McpPolicyError) throw error;
       throw new Error(this.safeError(error));
+    } finally {
+      this.activeCalls.delete(call);
     }
   }
 
@@ -650,6 +920,14 @@ export class McpRuntime {
     const current = this.find(id);
     const nextUrl = patch.url !== undefined ? validateServerUrl(patch.url) : current.url;
     const urlChanged = nextUrl !== current.url;
+    const nextAuthMode = patch.authMode !== undefined ? patch.authMode : current.authMode;
+    const nextHeaderName = patch.authMode !== undefined
+      ? (nextAuthMode === 'bearer' ? (patch.headerName ?? current.headerName ?? 'Authorization') : null)
+      : (current.authMode === 'bearer' && patch.headerName !== undefined ? patch.headerName : current.headerName);
+    const trustChanged = urlChanged
+      || nextAuthMode !== current.authMode
+      || nextHeaderName !== current.headerName
+      || patch.secret !== undefined;
     let updated;
     await this.mutate(draft => {
       const server = draft.servers.find(item => item.id === id);
@@ -669,13 +947,15 @@ export class McpRuntime {
         server.headerName = validateHeaderName(patch.headerName);
       }
       if (patch.enabled !== undefined) server.enabled = Boolean(patch.enabled);
-      if (urlChanged) {
+      if (trustChanged || patch.enabled === false) {
         for (const grants of Object.values(draft.grants)) delete grants[id];
+        for (const effects of Object.values(draft.sideEffects)) delete effects[id];
         for (const [pluginId, grants] of Object.entries(draft.grants)) {
           if (!Object.keys(grants).length) delete draft.grants[pluginId];
         }
+        for (const [pluginId, effects] of Object.entries(draft.sideEffects)) if (!Object.keys(effects).length) delete draft.sideEffects[pluginId];
       }
-      server.updatedAt = this.now();
+      server.updatedAt = Math.max(this.now(), server.updatedAt + 1);
       updated = { ...server };
     });
     if (urlChanged || current.authMode !== updated.authMode) {
@@ -686,6 +966,7 @@ export class McpRuntime {
       if (updated.authMode !== 'bearer' || typeof patch.secret !== 'string' || !patch.secret.trim() || patch.secret.length > 4096) throw new Error('MCP 鉴权密钥无效。');
       await this.credentials.set(CREDENTIAL_NAMESPACE, this.secretName(id), patch.secret.trim());
     }
+    if (trustChanged || patch.enabled === false) this.abortActiveCalls(call => call.serverId === id);
     await this.closeServer(id);
     this.toolCache.delete(id);
     this.status.delete(id);
@@ -695,11 +976,14 @@ export class McpRuntime {
 
   async remove(id) {
     this.find(id);
+    this.abortActiveCalls(call => call.serverId === id);
     await this.closeServer(id);
     await this.mutate(draft => {
       draft.servers = draft.servers.filter(server => server.id !== id);
       for (const grants of Object.values(draft.grants)) delete grants[id];
+      for (const effects of Object.values(draft.sideEffects)) delete effects[id];
       for (const [pluginId, grants] of Object.entries(draft.grants)) if (!Object.keys(grants).length) delete draft.grants[pluginId];
+      for (const [pluginId, effects] of Object.entries(draft.sideEffects)) if (!Object.keys(effects).length) delete draft.sideEffects[pluginId];
     });
     await this.credentials.clear(CREDENTIAL_NAMESPACE, this.secretName(id)).catch(() => {});
     for (const suffix of ['client', 'tokens', 'verifier', 'state']) await this.setOAuthCredential(id, suffix, null);
@@ -799,8 +1083,8 @@ export class McpRuntime {
       this.status.delete(id);
       this.errors.delete(id);
       const result = await this.test(id);
-      this.log('MCP 服务授权完成，只读工具 ' + result.readOnlyToolCount + ' 个。');
-      return { ok: true, toolCount: result.readOnlyToolCount };
+      this.log('MCP 服务授权完成，工具 ' + result.toolCount + ' 个。');
+      return { ok: true, toolCount: result.toolCount, readOnlyToolCount: result.readOnlyToolCount };
     } catch (error) {
       await client?.close().catch(() => {});
       await transport?.close().catch(() => {});
@@ -816,13 +1100,16 @@ export class McpRuntime {
   }
 
   async revokePlugin(pluginId) {
-    if (!this.state.grants[pluginId]) return;
+    if (!this.state.grants[pluginId] && !this.state.sideEffects[pluginId]) return;
     await this.mutate(draft => {
       delete draft.grants[pluginId];
+      delete draft.sideEffects[pluginId];
     });
+    this.abortActiveCalls(call => call.pluginId === pluginId);
   }
 
   async shutdown() {
+    this.abortActiveCalls(() => true);
     await Promise.allSettled([...this.clients.keys()].map(id => this.closeServer(id)));
     for (const socket of this.oauth.values()) socket.transport?.close?.().catch?.(() => {});
     this.oauth.clear();

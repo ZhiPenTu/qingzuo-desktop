@@ -13,10 +13,18 @@ export function routedAddress(address,hostname) {
   // still verifies the declared host; literal IP/local names never get this exception.
   return publicAddress(address) || /^198\.(18|19)\./.test(address) && !isIP(hostname) && hostname.includes('.') && !/\.(local|localhost|internal)$/.test(hostname);
 }
+async function abortable(promise, signal) {
+ if(!signal)return promise;
+ signal.throwIfAborted();
+ let onAbort;
+ const aborted=new Promise((_,reject)=>{onAbort=()=>reject(signal.reason??new Error('请求已取消。'));signal.addEventListener('abort',onAbort,{once:true});});
+ try{return await Promise.race([promise,aborted]);}finally{signal.removeEventListener('abort',onAbort);}
+}
 export async function secureRequest(address, options = {}) {
  const {allowRedirectResponses=false,...requestOptions}=options;
  const url=new URL(address);if(url.protocol!=='https:'||url.username||url.password)throw new Error('网络请求地址无效。');
- const resolved=await lookup(url.hostname,{all:true});if(!resolved.length||resolved.some(row=>!routedAddress(row.address,url.hostname)))throw new Error('插件网络代理禁止访问本机和私有网络。');
+ options.signal?.throwIfAborted();
+ const resolved=await abortable(lookup(url.hostname,{all:true}),options.signal);if(!resolved.length||resolved.some(row=>!routedAddress(row.address,url.hostname)))throw new Error('插件网络代理禁止访问本机和私有网络。');
  options.signal?.throwIfAborted();const selected=resolved[0],request=new Request(address,requestOptions),body=request.body?Buffer.from(await request.arrayBuffer()):null;
  return new Promise((resolve,reject)=>{
   const headers=Object.fromEntries(request.headers);if(body)headers['content-length']=String(body.length);
