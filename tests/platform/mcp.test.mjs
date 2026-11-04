@@ -116,6 +116,77 @@ test('MCP sends loopback HTTP requests without the public-network guard', async 
   }
 });
 
+test('MCP accepts large tool catalogs but still bounds ordinary responses', async t => {
+  const catalog = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] }, padding: 'x'.repeat(3 * 1024 * 1024) });
+  const server = http.createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      const method = JSON.parse(body).method;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(method === 'tools/list' ? catalog : 'x'.repeat(3 * 1024 * 1024));
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-mcp-'));
+  const runtime = new McpRuntime({ root, credentials: credentials(), shell: { async openExternal() {} } });
+  try {
+    await runtime.initialize();
+    const local = await runtime.create({ name: '本机目录', url: 'http://127.0.0.1:' + server.address().port + '/mcp' });
+    const listed = await runtime.guardedFetch(local, local.url, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    assert.equal((await listed.text()).length, catalog.length);
+    const call = await runtime.guardedFetch(local, local.url, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call' }),
+    });
+    await assert.rejects(call.text(), /响应过大/);
+  } finally {
+    await runtime.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP keeps aggregated hub tool catalogs intact', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-mcp-'));
+  const tools = Array.from({ length: 346 }, (_, index) => ({
+    name: 'hub__tool-' + index,
+    description: '聚合工具 ' + index,
+    annotations: { readOnlyHint: index % 2 === 0 },
+  }));
+  const runtime = new McpRuntime({
+    root,
+    credentials: credentials(),
+    shell: { async openExternal() {} },
+    clientFactory: () => ({
+      async connect() {},
+      async listTools() { return { tools }; },
+      async callTool() { return { content: [] }; },
+      async close() {},
+    }),
+    transportFactory: () => ({ async close() {} }),
+  });
+  try {
+    await runtime.initialize();
+    const server = await runtime.create({ name: '聚合枢纽', url: 'http://127.0.0.1:3425/mcp/hub' });
+    assert.equal((await runtime.adminList())[0].checked, false);
+    const result = await runtime.test(server.id);
+    assert.equal(result.toolCount, tools.length);
+    assert.equal(result.readOnlyToolCount, 173);
+    const listed = (await runtime.adminList())[0];
+    assert.equal(listed.checked, true);
+    assert.equal(listed.toolCount, tools.length);
+  } finally {
+    await runtime.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('MCP only opens loopback HTTP authorization URLs for loopback servers', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-mcp-'));
   let opened = '';

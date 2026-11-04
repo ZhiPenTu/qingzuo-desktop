@@ -16,6 +16,7 @@ interface McpServer {
   enabled: boolean;
   hasSecret: boolean;
   status: McpStatus;
+  checked: boolean;
   error: string | null;
   toolCount: number;
 }
@@ -32,6 +33,11 @@ function messageOf(error: unknown) {
 
 function statusLabel(status: McpStatus) {
   return status === 'ready' ? '连接正常' : status === 'auth-required' ? '等待授权' : status === 'disabled' ? '已停用' : '连接异常';
+}
+
+function serverStatusLabel(server: McpServer) {
+  if (server.status === 'disabled' || server.status === 'auth-required' || server.status === 'error') return statusLabel(server.status);
+  return server.checked ? statusLabel(server.status) : '尚未测试';
 }
 
 export function CapabilitySettings({ desktop }: { desktop: boolean }) {
@@ -166,7 +172,7 @@ export function CapabilitySettings({ desktop }: { desktop: boolean }) {
           {loading ? <p className="capability-loading" role="status"><LoaderCircle className="animate-spin" />正在读取连接…</p> : null}
           {!loading && !servers.length ? <p className="capability-empty">还没有连接 MCP 服务。</p> : null}
           {servers.map(server => <article className="capability-row" key={server.id}>
-            <div className="capability-row-main"><strong>{server.name}</strong><span title={server.url}>{server.url}</span><small className={server.status === 'ready' ? 'is-ok' : server.status === 'error' ? 'is-error' : ''}>{statusLabel(server.status)}{server.error ? ' · ' + server.error : ''} · {server.toolCount} 个工具</small></div>
+            <div className="capability-row-main"><strong>{server.name}</strong><span title={server.url}>{server.url}</span><small className={server.checked && server.status === 'ready' ? 'is-ok' : server.status === 'error' ? 'is-error' : ''}>{serverStatusLabel(server)}{server.error ? ' · ' + server.error : ''}{server.checked ? ' · ' + server.toolCount + ' 个工具' : ''}</small></div>
             <div className="capability-row-actions">
               {server.authMode === 'oauth' ? <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void run('auth-' + server.id, () => invoke('capabilities.mcp.authorize', { id: server.id }), 'MCP 授权已完成。')}><KeyRound data-icon="inline-start" />授权</Button> : null}
               <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void run('test-' + server.id, () => invoke('capabilities.mcp.test', { id: server.id }), 'MCP 连接正常。')}>测试</Button>

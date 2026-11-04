@@ -13,9 +13,10 @@ import { publicAddress, secureRequest } from './network-transport.mjs';
 const SERVER_ID = /^mcp-[a-f0-9]{12}$/;
 const AUTH_MODES = new Set(['none', 'bearer', 'oauth']);
 const MAX_SERVERS = 24;
-const MAX_TOOLS = 200;
+const MAX_TOOLS = 500;
 const MAX_ARGUMENTS = 256 * 1024;
 const MAX_RESPONSE = 2 * 1024 * 1024;
+const MAX_CATALOG_RESPONSE = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT = 60_000;
 const OAUTH_TIMEOUT = 5 * 60_000;
 const CREDENTIAL_NAMESPACE = 'mcp-servers';
@@ -135,10 +136,9 @@ function parseCredential(value) {
   }
 }
 
-function responseLimit(response, limit, onExceeded) {
+function responseLimit(response, limit) {
   const length = Number(response.headers.get('content-length'));
   if (Number.isFinite(length) && length > limit) {
-    onExceeded();
     throw new Error('MCP 服务响应过大。');
   }
   if (!response.body) return response;
@@ -154,7 +154,6 @@ function responseLimit(response, limit, onExceeded) {
         }
         total += value.byteLength;
         if (total > limit) {
-          onExceeded();
           await reader.cancel().catch(() => {});
           controller.error(new Error('MCP 服务响应过大。'));
           return;
@@ -173,6 +172,16 @@ function responseLimit(response, limit, onExceeded) {
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+function responseLimitFor(body) {
+  if (!body?.length) return MAX_RESPONSE;
+  try {
+    const message = JSON.parse(body.toString('utf8'));
+    return message?.method === 'tools/list' ? MAX_CATALOG_RESPONSE : MAX_RESPONSE;
+  } catch {
+    return MAX_RESPONSE;
+  }
 }
 
 function publicTool(tool) {
@@ -312,7 +321,7 @@ export class McpRuntime {
       : AbortSignal.timeout(REQUEST_TIMEOUT);
     const headers = Object.fromEntries(request.headers);
     const body = ['GET', 'HEAD'].includes(request.method) ? undefined : Buffer.from(await request.arrayBuffer());
-    let tooLarge = false;
+    const limit = responseLimitFor(body);
     const requestOptions = {
       method: request.method,
       headers,
@@ -321,7 +330,7 @@ export class McpRuntime {
       signal,
     };
     const response = local ? await this.localRequest(url.href, requestOptions) : await this.request(url.href, requestOptions);
-    return responseLimit(response, MAX_RESPONSE, () => { tooLarge = true; });
+    return responseLimit(response, limit);
   }
 
   async clientInformationProvider(server) {
@@ -491,6 +500,7 @@ export class McpRuntime {
         enabled: server.enabled,
         hasSecret,
         status,
+        checked: this.status.has(server.id),
         error: this.errors.get(server.id) ?? null,
         toolCount: this.toolCache.get(server.id)?.tools.length ?? 0,
         createdAt: server.createdAt,
