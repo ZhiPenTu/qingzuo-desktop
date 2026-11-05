@@ -3,6 +3,7 @@ const normalizeError = error => new Error((error instanceof Error ? error.messag
 contextBridge.exposeInMainWorld('commerceDesktop', Object.freeze({
   invoke: (method, args = {}) => ipcRenderer.invoke('commerce:platform', method, args).catch(error => { throw normalizeError(error); }),
   onChanged: callback => { const listener = () => callback(); ipcRenderer.on('commerce:changed', listener); return () => ipcRenderer.removeListener('commerce:changed', listener); },
+  onMarket: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:market', listener); return () => ipcRenderer.removeListener('commerce:market', listener); },
   onBrowserResize: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser-resize', listener); return () => ipcRenderer.removeListener('commerce:browser-resize', listener); },
   onBrowserPane: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser-pane', listener); return () => ipcRenderer.removeListener('commerce:browser-pane', listener); },
   onAI: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:ai', listener); return () => ipcRenderer.removeListener('commerce:ai', listener); },

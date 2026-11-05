@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { PluginManager, boundedDownload, inspectPackage, marketTierUpdate } from './plugin-manager.mjs';
-import { confinedPath } from './security.mjs';
+import { API_VERSION, confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
 import { Credentials } from './credentials.mjs';
@@ -28,6 +28,8 @@ import { BatchRuntime } from './ai-batches.mjs';
 import { ProxyRuntime } from './ai-proxy.mjs';
 import { TextRuntime } from './ai-text.mjs';
 import { DownloadSourceService } from './download-sources.mjs';
+import { MarketCatalogCache } from './market-cache.mjs';
+import { MarketCatalogStore } from './market-store.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
 import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 import {
@@ -72,6 +74,7 @@ let automaticUpdateTimer = null, automaticUpdateInterval = null, automaticUpdate
 let localPreview = false;
 let migration;
 let batches, proxy, imageEditor, textRuntime, approvals, downloadSources, workspace, wechatStore, wechatRuntime, mcpRuntime, awsImporter;
+let marketCache, marketStore;
 let firstPartyGrants, secretPrompt;
 const pendingDebugLogs = [];
 let debugLogEventTimer = null;
@@ -885,7 +888,7 @@ async function performPlatform(method, args) {
   if (method === 'plugins.enable') { await manager.setEnabled(args.id, args.enabled); return; }
   if (method === 'plugins.uninstall') { await manager.uninstall(args.id); return; }
   if (method === 'plugins.rollback') { await manager.rollback(args.id); return; }
-  if (method === 'market.list') return catalog();
+  if (method === 'market.list') return marketStore.list(args);
   if (method === 'market.install') {
     return pluginInstallService.start(args.id);
   }
@@ -1029,7 +1032,7 @@ ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   if (!['plugins','market','updates'].includes(service)) throw new Error('平台操作不受支持。');
   // The catalogue is native HTTP work, not a short kernel request. Installation
   // still enters the registered market service and only acknowledges a job.
-  const result = method === 'market.list' ? await catalog() : await kernelRequest({type:'call',kind:'system',service,method,args}, method === 'plugins.import' ? 0 : 30000);
+  const result = method === 'market.list' ? await marketStore.list(args) : await kernelRequest({type:'call',kind:'system',service,method,args}, method === 'plugins.import' ? 0 : 30000);
   if (service === 'plugins') {
     await syncTools();
     changed();
@@ -1307,6 +1310,18 @@ approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner 
 workers = new Workers(path.join(app.getPath('userData'), 'jobs'), launcher, process.execPath, { log: runtimeLog('plugin') });
 await workers.recover().catch(error => { workers.recoveryError = error.message; console.error('沙箱任务恢复失败：',error.message); });
 const marketConfig = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));
+marketCache = new MarketCatalogCache({
+  root: path.join(app.getPath('userData'), 'market-cache'),
+  catalog: marketConfig.url,
+  apiVersion: API_VERSION,
+  platform: process.platform + '-' + process.arch,
+});
+marketStore = new MarketCatalogStore({
+  cache: marketCache,
+  load: () => catalog(),
+  publish: payload => { if (window && !window.isDestroyed()) window.webContents.send('commerce:market', payload); },
+  report: message => debugLog?.record({ scope: 'app', source: 'market', level: 'warn', message }),
+});
 const distribution = JSON.parse(await readFile(path.join(generated, 'distribution.json'), 'utf8'));
 localPreview = app.isPackaged && distribution.preview === true;
 const signed = desktopSigningMode({ COMMERCE_DESKTOP_SIGNING: distribution.signing }) === 'signed';
