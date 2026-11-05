@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { PluginCard, isTrustedPluginSource, isTrustedPluginTier, pluginInstallActive, pluginTier, toolCategory, type Plugin, type PluginTier, type ToolEntry } from './PluginCard';
 import gt from 'semver/functions/gt';
-import type { DebugLogState, DownloadSourceState, PluginInstallState, SystemDiagnostics } from './commerce';
+import type { DebugLogState, DownloadSourceState, MarketCatalogResult, PluginInstallState, SystemDiagnostics } from './commerce';
 import type { BrowserStatus } from './commerce';
 import { BrowserTabStrip, BrowserWorkspace } from './BrowserWorkspace';
 import { IssueReportDialog } from './IssueReportDialog';
@@ -141,7 +141,9 @@ export default function Platform() {
   const [marketMessage, setMarketMessage] = useState('');
   const [marketRevision, setMarketRevision] = useState(0);
   const [marketCheckedAt, setMarketCheckedAt] = useState<number | null>(null);
-  const marketCache = useRef<{ items: ToolEntry[]; checkedAt: number; source: string } | null>(null);
+  const marketCache = useRef<{ items: ToolEntry[]; checkedAt: number } | null>(null);
+  const marketItemsRef = useRef<ToolEntry[]>([]);
+  const marketSourceRef = useRef(status?.downloadSource?.source ?? 'github');
   const marketRequest = useRef(0);
   const [pluginCheckBusy, setPluginCheckBusy] = useState(false);
   const [pluginCheckError, setPluginCheckError] = useState<string | null>(null);
@@ -446,21 +448,45 @@ export default function Platform() {
       setMarketState('unavailable'); setMarketMessage('在轻作桌面应用中浏览并安装更多工具。');
       return [];
     }
-    const source = status?.downloadSource?.source ?? 'github';
     const cached = marketCache.current;
-    if (!force && cached && cached.source === source && Date.now() - cached.checkedAt < 60_000) {
+    if (!force && cached && Date.now() - cached.checkedAt < 60_000) {
       setMarket(cached.items); setMarketCheckedAt(cached.checkedAt); setMarketMessage(''); setMarketState('ready');
       return cached.items;
     }
-    setMarketState('loading'); setMarketMessage('');
+    // Keep the last catalogue on screen while a newer one is fetched.
+    if (!cached && !marketItemsRef.current.length) setMarketState('loading');
+    setMarketMessage('');
     const requestId = ++marketRequest.current;
-    const value = await window.commerceDesktop.invoke<{ items: ToolEntry[]; message?: string }>('market.list');
+    let value: MarketCatalogResult;
+    try {
+      value = await window.commerceDesktop.invoke<MarketCatalogResult>('market.list', force ? { refresh: true } : { background: true });
+    } catch (reason) {
+      if (requestId !== marketRequest.current) return [];
+      if (!force && (cached || marketItemsRef.current.length)) { setMarketState('ready'); return cached?.items ?? marketItemsRef.current; }
+      throw reason;
+    }
     if (requestId !== marketRequest.current) return [];
     const items = Array.isArray(value.items) ? value.items : [];
-    const checkedAt = Date.now();
-    marketCache.current = { items, checkedAt, source };
+    const checkedAt = Number.isFinite(value.fetchedAt) ? value.fetchedAt! : Date.now();
+    marketCache.current = { items, checkedAt };
+    marketItemsRef.current = items;
     setMarket(items); setMarketCheckedAt(checkedAt); setMarketMessage(value.message || ''); setMarketState(value.message ? 'unavailable' : 'ready');
     return items;
+  }, [status?.downloadSource?.source]);
+  useEffect(() => window.commerceDesktop?.onMarket?.(value => {
+    if (!Array.isArray(value?.items)) return;
+    const checkedAt = Number.isFinite(value.fetchedAt) ? value.fetchedAt! : Date.now();
+    if (marketCache.current && checkedAt < marketCache.current.checkedAt) return;
+    marketCache.current = { items: value.items, checkedAt };
+    marketItemsRef.current = value.items;
+    setMarket(value.items); setMarketCheckedAt(checkedAt); setMarketMessage(''); setMarketState('ready');
+  }), []);
+  useEffect(() => {
+    const source = status?.downloadSource?.source ?? 'github';
+    if (marketSourceRef.current === source) return;
+    marketSourceRef.current = source;
+    marketCache.current = null;
+    setMarketRevision(value => value + 1);
   }, [status?.downloadSource?.source]);
   useEffect(() => {
     if (page !== 'home' || toolTab !== 'all') return;
