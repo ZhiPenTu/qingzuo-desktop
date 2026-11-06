@@ -1,6 +1,6 @@
 # 插件开发
 
-底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.11.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
+底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.12.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
 
 ## 快速创建
 
@@ -156,6 +156,32 @@ AI 助手桥只操作宿主工作台会话，不接受 owner、审批 ID 或任�
 
 发布片段仍只允许版本、展示信息和制品字段。已发布且不可变的旧 Release 如果包含 `manifestVersion`、`ui`、`permissions`、`settings`、`backend` 或 `services`，客户端会校验后剥离这些旧字段，以保持现有插件可用；`tier`、`official`、`source`、`stats`、`verification` 始终拒绝。签名包内的清单仍是权限与入口的权威来源。
 
+### API 1.12 公众号图片消息草稿
+
+SDK 1.12.0 为 `wechat.createDraft` 增加原生图片消息。省略 `type` 或传入 `type: 'news'` 时继续使用普通图文请求，原有字段、图片上传方式和请求体保持不变；需要图片消息时显式传入 `type: 'image'` 和 `images`。
+
+```ts
+await client.wechat.createDraft({
+  accountId,
+  article: {
+    type: 'image',
+    articleDir: 'drafts/20261106-demo',
+    title: '今日上新',
+    digest: '图片消息说明',
+    images: [
+      { placeholder: 'cover', path: 'drafts/20261106-demo/cover.png' },
+      { placeholder: 'detail', path: 'drafts/20261106-demo/detail.jpg' },
+    ],
+    needOpenComment: true,
+    onlyFansCanComment: false,
+  },
+});
+```
+
+图片消息接受 1–20 张当前文章目录内的 PNG/JPEG，单张不超过 10 MB，第一张作为封面。宿主逐张调用 `material/add_material?type=image` 上传永久素材，再以 `article_type: 'newspic'`、`image_info.image_list` 和相同顺序的永久 `media_id` 创建草稿；不会再调用 `media/uploadimg`，也不会设置 `thumb_media_id`。图片消息标题最多 32 字，普通图文标题规则保持不变。
+
+声明较旧 API 范围的插件继续使用原图文接口；需要图片消息的插件必须声明 `api: "^1.12.0"`。
+
 ### API 1.11 通用 MCP 工具与图片回填
 
 SDK 1.11.0 将 MCP 权限从只读工具扩展为“发现全部工具、按服务器与工具逐项授权”。`annotations.readOnlyHint: true` 仅显示为「服务声明只读（未验证）」，不能作为安全保证；未声明的工具会标注「会执行操作」，授权确认框会明确提示其可能修改外部数据、调用付费服务或产生其他副作用。
@@ -202,7 +228,7 @@ SDK 1.9.0 为需要本地文章目录、外部只读资料和公众号发布的�
 
 公众号账号在底座设置中录入，AppSecret 保存在系统凭据库，access token 只驻留主进程内存。固定访问 `https://api.weixin.qq.com`，不使用第三方代理。`wechat.accounts/verify/createDraft/publish/publishStatus/list` 分别读取掩码账号、验证连接、创建草稿、提交发布、查询状态和读取草稿/已发表列表。
 
-`createDraft` 的 HTML 正文必须用 `qingzuo-asset:<placeholder>` 引用当前文章目录内的 PNG/JPEG，封面和正文图片分别由宿主上传到 `material/add_material` 与 `media/uploadimg`，再替换为微信 CDN 地址。宿主拒绝脚本、表单、事件属性、外部图片和越出文章目录的素材。
+`createDraft` 默认创建普通图文，HTML 正文必须用 `qingzuo-asset:<placeholder>` 引用当前文章目录内的 PNG/JPEG，封面和正文图片分别由宿主上传到 `material/add_material` 与 `media/uploadimg`，再替换为微信 CDN 地址。传入 `type: 'image'` 时改为原生图片消息，详见 API 1.12。两种模式都会拒绝脚本、表单、事件属性、外部图片和越出文章目录的素材。
 
 `publish` 每次显示原生确认框，列出公众号、文章标题和发布方式。Token 失效会刷新并只重试一次；发布回执持久化，结果未知时先查询，不重复提交。草稿 `mediaId` 由插件保存，便于在确认后重试发布。日志只记录阶段、数量、域名、微信错误码和结果，不记录 AppSecret、token、完整 HTML 或正文。
 

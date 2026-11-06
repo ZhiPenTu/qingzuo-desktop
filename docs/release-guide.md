@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.8.0，插件 API / SDK 1.11.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.8.0，插件 API / SDK 1.12.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -45,6 +45,8 @@ sdk-v1.9.0 增加持久工作区、远程 MCP 与公众号发布：`workspace` �
 sdk-v1.10.0 增加三档信任层和第一方插件受控桥。市场注册表升级为 schema v2，目录保持 schema v1 并显式审核 `tier`；本地插件始终为 `community`，市场安装必须携带目录 `tier`，旧安装先按 `community` 处理。`official.ai-assistant` 与 `official.diagnostics` 只能通过精确 ID、市场来源、`platform` 层、启用状态和无缺失依赖校验调用内部 `firstParty.*`；API 密钥由原生输入框直接交给宿主，诊断日志授权绑定版本、制品摘要、API 范围和能力。SDK 新增 `onDebugLog` 类型，仍不公开 `firstParty.*`。设置 latest=false。
 
 sdk-v1.11.0 将 MCP 调用从只读工具扩展为通用工具逐项授权，支持会执行外部操作或产生费用的工具。`readOnlyHint` 只作为服务声明展示，不再作为安全边界；授权、撤销、停用和卸载会取消在途调用。`mcp.call` 新增可选 `inlineImages`，由宿主安全下载图片并转为 MCP image 内容，同时返回 `structuredContent`。SDK 设置 latest=false。
+
+sdk-v1.12.0 为 `wechat.createDraft` 增加原生图片消息草稿。显式传入 `type: 'image'` 时，宿主按顺序上传 1–20 张 PNG/JPEG 为永久素材，再以 `newspic` 请求创建草稿；普通图文在省略 `type` 时保持原有请求与上传方式。SDK 设置 latest=false。
 
 市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
 

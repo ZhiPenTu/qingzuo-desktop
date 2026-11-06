@@ -10,6 +10,8 @@ const API_ROOT = 'https://api.weixin.qq.com';
 const ACCOUNT_ID = /^wx-[a-f0-9]{12}$/;
 const MAX_BODY_IMAGE = 1024 * 1024;
 const MAX_COVER_IMAGE = 10 * 1024 * 1024;
+const MAX_IMAGE_MESSAGE_IMAGES = 20;
+const MAX_IMAGE_MESSAGE_TITLE = 32;
 const MAX_HTML = 4 * 1024 * 1024;
 const TOKEN_EARLY_MS = 5 * 60 * 1000;
 const RENEW_CODES = new Set([40001, 40014, 42001]);
@@ -38,11 +40,27 @@ const ALLOWED_ATTRS = new Set([
   'class', 'leaf', 'nodeleaf', 'textvalue', 'linktype',
 ]);
 
-function cleanText(value, max, label) {
+function cleanText(value, max, label, { countCodePoints = false } = {}) {
   if (typeof value !== 'string') throw new Error(label + '无效。');
   const text = value.trim();
-  if (!text || text.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error(label + '无效。');
+  const length = countCodePoints ? [...text].length : text.length;
+  if (!text || length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error(label + '无效。');
   return text;
+}
+
+function assertSafeArticlePath(value) {
+  if (typeof value !== 'string' || value.includes('\\') || value.includes(':') || value.includes('\0') || path.posix.isAbsolute(value)) {
+    throw new Error('公众号图片必须位于当前文章目录。');
+  }
+  const parts = value.split('/');
+  if (parts.some(part => !part || part === '.' || part === '..')) throw new Error('公众号图片必须位于当前文章目录。');
+}
+
+function imageMime(filename, bytes) {
+  const extension = path.extname(filename).toLowerCase();
+  if (extension === '.png' && bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (['.jpg', '.jpeg'].includes(extension) && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  throw new Error('公众号图片仅支持 PNG 或 JPEG。');
 }
 
 function emptyState() {
@@ -556,42 +574,102 @@ export class WechatRuntime {
   }
 
   assertArticlePath(articleDir, assetPath) {
-    if (typeof assetPath !== 'string' || !assetPath.startsWith(articleDir + '/')) throw new Error('公众号图片必须位于当前文章目录。');
+    assertSafeArticlePath(articleDir);
+    assertSafeArticlePath(assetPath);
+    if (!assetPath.startsWith(articleDir + '/')) throw new Error('公众号图片必须位于当前文章目录。');
   }
 
-  async imageFile(plugin, articleDir, assetPath, maxBytes) {
+  async imageFile(plugin, articleDir, assetPath, maxBytes, { verifySignature = false } = {}) {
     this.assertArticlePath(articleDir, assetPath);
     try {
       const item = await this.workspace.resolveExisting(plugin, assetPath);
       if (!item.info.isFile() || item.info.size > maxBytes) throw new Error('公众号图片过大或不存在。');
-      const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(item.filename).toLowerCase()];
+      const bytes = await readFile(item.filename);
+      if (bytes.length > maxBytes) throw new Error('公众号图片过大或不存在。');
+      const mime = verifySignature
+        ? imageMime(item.filename, bytes)
+        : { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(item.filename).toLowerCase()];
       if (!mime) throw new Error('公众号图片仅支持 PNG 或 JPEG。');
-      return { filename: path.basename(item.filename), mime, bytes: await readFile(item.filename) };
+      return { filename: path.basename(item.filename), mime, bytes };
     } catch (error) {
       throw publicWorkspaceError(error);
     }
+  }
+
+  async rememberDraft(accountId, title, mediaId) {
+    if (typeof mediaId !== 'string' || !mediaId) throw new Error('微信草稿创建失败。');
+    this.drafts.set(mediaId, { mediaId, accountId, title, createdAt: this.now() });
+    await this.persistDrafts().catch(() => {
+      throw new Error('草稿已创建，但宿主无法保存草稿回执。请在公众号后台核对，不要重复创建。');
+    });
+    return { mediaId };
+  }
+
+  async createImageDraft(plugin, { accountId, articleDir, title, digest, article }) {
+    if (!Array.isArray(article.images) || article.images.length < 1 || article.images.length > MAX_IMAGE_MESSAGE_IMAGES) {
+      throw new Error('公众号图片消息需要 1–20 张图片。');
+    }
+    const images = [];
+    for (const image of article.images) {
+      if (!image || typeof image.path !== 'string') throw new Error('公众号图片消息图片无效。');
+      images.push(await this.imageFile(plugin, articleDir, image.path, MAX_COVER_IMAGE, { verifySignature: true }));
+    }
+    const payload = await this.withToken(accountId, async token => {
+      const imageList = [];
+      for (const image of images) {
+        const uploaded = await this.upload(token, '/cgi-bin/material/add_material', image.filename, image.mime, image.bytes, { type: 'image' });
+        if (typeof uploaded.media_id !== 'string' || !uploaded.media_id) throw new Error('微信图片消息素材上传失败。');
+        imageList.push({ image_media_id: uploaded.media_id });
+      }
+      return await this.requestJson('/cgi-bin/draft/add', {
+        query: { access_token: token },
+        body: {
+          articles: [{
+            article_type: 'newspic',
+            title,
+            content: digest,
+            image_info: { image_list: imageList },
+            need_open_comment: article.needOpenComment ? 1 : 0,
+            only_fans_can_comment: article.onlyFansCanComment ? 1 : 0,
+          }],
+        },
+      });
+    });
+    const result = await this.rememberDraft(accountId, title, payload.media_id);
+    this.log('公众号图片消息草稿已创建：' + title + '，图片 ' + images.length + ' 张。');
+    return result;
   }
 
   async createDraft(plugin, { accountId, article } = {}) {
     this.permitted(plugin, 'draft');
     if (!article || typeof article !== 'object') throw new Error('文章内容无效。');
+    const articleType = article.type ?? 'news';
+    if (!['news', 'image'].includes(articleType)) throw new Error('文章类型无效。');
     const articleDir = cleanText(article.articleDir, 512, '文章目录');
     if (!articleDir.startsWith('drafts/')) throw new Error('文章目录无效。');
-    const title = cleanText(article.title, 64, '文章标题');
-    const author = typeof article.author === 'string' ? article.author.trim() : '';
-    if (author.length > 32) throw new Error('作者名称过长。');
+    assertSafeArticlePath(articleDir);
+    const title = cleanText(
+      article.title,
+      articleType === 'image' ? MAX_IMAGE_MESSAGE_TITLE : 64,
+      '文章标题',
+      { countCodePoints: articleType === 'image' },
+    );
     const digest = typeof article.digest === 'string' ? article.digest.trim() : '';
     if (digest.length > 120) throw new Error('摘要不能超过 120 字。');
-    if (!article.cover || typeof article.cover !== 'object') throw new Error('文章封面无效。');
-    if (!Array.isArray(article.assets) || article.assets.length > 20) throw new Error('正文图片数量无效。');
+    if (articleType === 'image' && !digest) throw new Error('图片消息说明不能为空。');
 
-    let directory;
     try {
-      directory = await this.workspace.resolveExisting(plugin, articleDir);
+      const directory = await this.workspace.resolveExisting(plugin, articleDir);
       if (!directory.info.isDirectory()) throw new Error('文章目录不存在。');
     } catch (error) {
       throw publicWorkspaceError(error);
     }
+    if (articleType === 'image') return await this.createImageDraft(plugin, { accountId, articleDir, title, digest, article });
+
+    const author = typeof article.author === 'string' ? article.author.trim() : '';
+    if (author.length > 32) throw new Error('作者名称过长。');
+    if (!article.cover || typeof article.cover !== 'object') throw new Error('文章封面无效。');
+    if (!Array.isArray(article.assets) || article.assets.length > 20) throw new Error('正文图片数量无效。');
     const placeholderMap = new Map();
     for (const asset of article.assets) {
       if (!asset || typeof asset.placeholder !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(asset.placeholder)) throw new Error('正文图片占位符无效。');
@@ -637,13 +715,9 @@ export class WechatRuntime {
       });
       return { result, uploadedCount: uploaded.size };
     });
-    if (typeof payload.result.media_id !== 'string' || !payload.result.media_id) throw new Error('微信草稿创建失败。');
-    this.drafts.set(payload.result.media_id, { mediaId: payload.result.media_id, accountId, title, createdAt: this.now() });
-    await this.persistDrafts().catch(() => {
-      throw new Error('草稿已创建，但宿主无法保存草稿回执。请在公众号后台核对，不要重复创建。');
-    });
+    const result = await this.rememberDraft(accountId, title, payload.result.media_id);
     this.log('公众号草稿已创建：' + title + '，正文图片 ' + payload.uploadedCount + ' 张。');
-    return { mediaId: payload.result.media_id };
+    return result;
   }
 
   async withPublishLock(key, operation) {
