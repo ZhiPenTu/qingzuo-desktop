@@ -40,10 +40,11 @@ const ALLOWED_ATTRS = new Set([
   'class', 'leaf', 'nodeleaf', 'textvalue', 'linktype',
 ]);
 
-function cleanText(value, max, label) {
+function cleanText(value, max, label, { countCodePoints = false } = {}) {
   if (typeof value !== 'string') throw new Error(label + '无效。');
   const text = value.trim();
-  if (!text || [...text].length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error(label + '无效。');
+  const length = countCodePoints ? [...text].length : text.length;
+  if (!text || length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error(label + '无效。');
   return text;
 }
 
@@ -647,7 +648,12 @@ export class WechatRuntime {
     const articleDir = cleanText(article.articleDir, 512, '文章目录');
     if (!articleDir.startsWith('drafts/')) throw new Error('文章目录无效。');
     assertSafeArticlePath(articleDir);
-    const title = cleanText(article.title, articleType === 'image' ? MAX_IMAGE_MESSAGE_TITLE : 64, '文章标题');
+    const title = cleanText(
+      article.title,
+      articleType === 'image' ? MAX_IMAGE_MESSAGE_TITLE : 64,
+      '文章标题',
+      { countCodePoints: articleType === 'image' },
+    );
     const digest = typeof article.digest === 'string' ? article.digest.trim() : '';
     if (digest.length > 120) throw new Error('摘要不能超过 120 字。');
     if (articleType === 'image' && !digest) throw new Error('图片消息说明不能为空。');
