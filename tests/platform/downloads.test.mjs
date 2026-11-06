@@ -766,7 +766,7 @@ test('symlinked partial files and replaced directories never redirect writes', a
 });
 
 test('manifest and SDK expose the downloads contract at API 1.9', async () => {
-  assert.equal(API_VERSION, '1.11.0');
+  assert.equal(API_VERSION, '1.12.0');
   const base = {
     name: 'fixture',
     version: '0.1.0',

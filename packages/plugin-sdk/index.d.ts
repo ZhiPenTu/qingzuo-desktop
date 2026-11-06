@@ -102,7 +102,7 @@ export function createPluginClient(bridge?: PluginBridge): {
   wechat: {
     accounts(): Promise<WechatAccountSummary[]>;
     verify(options: { accountId: string }): Promise<{ ok: true }>;
-    createDraft(options: { accountId: string; article: WechatArticleInput }): Promise<{ mediaId: string }>;
+    createDraft(options: { accountId: string; article: WechatDraftArticleInput }): Promise<{ mediaId: string }>;
     publish(options: { accountId: string; mediaId: string }): Promise<{ publishId: string }>;
     publishStatus(options: { accountId: string; publishId?: string; mediaId?: string }): Promise<WechatPublishStatus>;
     list(options: { accountId: string; type: 'draft' | 'published'; offset?: number; count?: number }): Promise<WechatListResult>;
@@ -142,10 +142,18 @@ export interface McpCallResult { content: unknown; structuredContent?: unknown; 
 export interface WechatAccountSummary { id: string; name: string; appIdMasked: string; verified: boolean }
 export interface WechatArticleAsset { placeholder: string; path: string }
 export interface WechatArticleInput {
+  type?: 'news';
   articleDir: string; title: string; author: string; digest: string; html: string;
   cover: WechatArticleAsset; assets: WechatArticleAsset[];
   needOpenComment?: boolean; onlyFansCanComment?: boolean; contentSourceUrl?: string;
 }
+export interface WechatImageArticleInput {
+  type: 'image';
+  articleDir: string; title: string; digest: string;
+  images: WechatArticleAsset[];
+  needOpenComment?: boolean; onlyFansCanComment?: boolean;
+}
+export type WechatDraftArticleInput = WechatArticleInput | WechatImageArticleInput;
 export interface WechatPublishStatus { publishId?: string | null; status: 'pending' | 'success' | 'failed' | 'unknown'; failIdx?: number; articleUrl?: string; error?: string }
 export interface WechatListItem { mediaId: string; title: string; status: 'draft' | 'published' | 'failed' | 'unknown'; updatedAt?: number; articleUrl?: string }
 export interface WechatListResult { items: WechatListItem[]; total: number }
