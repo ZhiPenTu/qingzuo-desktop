@@ -36,6 +36,21 @@ export function marketTierUpdate(plugin, entry, platform) {
   if (plugin.version !== entry?.version || !/^[a-f0-9]{64}$/.test(reviewed || '') || plugin.artifactSha256 !== reviewed) return null;
   return { tier, version: plugin.version, artifactSha256: reviewed };
 }
+// Installs from before artifact digests were recorded cannot be matched by
+// marketTierUpdate. They may only be re-bound after the reviewed package has
+// been downloaded and its contents compared with the installed files.
+export function marketTierRebindNeeded(plugin, entry, platform) {
+  const reviewed = entry?.artifacts?.[platform]?.sha256;
+  return Boolean(
+    plugin?.source === 'market'
+    && plugin.tierKnown === false
+    && !plugin.artifactSha256
+    && PLUGIN_TIERS.has(entry?.tier)
+    && TIER_RANK[entry.tier] > TIER_RANK[plugin.tier]
+    && plugin.version === entry?.version
+    && /^[a-f0-9]{64}$/.test(reviewed || ''),
+  );
+}
 export function verifyArtifact(bytes, record, publicKey) {
   if (!record?.sha256 || record.platform !== TARGET) throw new Error('市场制品缺少摘要或平台信息。');
   if (createHash('sha256').update(bytes).digest('hex') !== record.sha256) throw new Error('插件包校验失败。');
@@ -120,6 +135,20 @@ export async function unpackPackage(bytes, destination) {
   if (manifest.backend) await confinedPath(destination, manifest.backend.entry[TARGET]);
   return manifest;
 }
+async function packageFingerprint(directory) {
+  const rows = [];
+  const walk = async (current, relative) => {
+    for (const item of await readdir(current, { withFileTypes: true })) {
+      const name = relative ? relative + '/' + item.name : item.name;
+      const file = path.join(current, item.name);
+      if (item.isDirectory()) { rows.push('d:' + name); await walk(file, name); }
+      else if (item.isFile()) rows.push('f:' + name + ':' + createHash('sha256').update(await readFile(file)).digest('hex'));
+      else throw new Error('插件包含不支持的文件类型。');
+    }
+  };
+  await walk(directory, '');
+  return rows.sort().join('\n');
+}
 export class PluginManager {
   constructor(root, bundled, { publicKey, stop = async () => {}, probe = async () => {}, forget = async () => {} } = {}) {
     this.root = root; this.bundled = bundled; this.publicKey = publicKey; this.stop = stop; this.probe = probe; this.forget = forget;
@@ -177,9 +206,12 @@ export class PluginManager {
         if (record && (record.id !== m.id || record.version !== m.version)) throw new Error('市场清单与插件包不一致。');
         if (record?.api && record.api !== m.api) throw new Error('市场 API 声明与插件包不一致。');
         if (record?.verification === 'github-release') {
-          for (const field of ['title', 'description', 'category', 'releaseNotes', 'icon']) {
+          for (const field of ['title', 'description', 'category', 'releaseNotes']) {
             if (record[field] !== undefined && (record[field] ?? '') !== (m[field] ?? '')) throw new Error('市场展示信息与插件包不一致。');
           }
+          // A reviewed catalog may supply the display icon for a package that
+          // does not embed one; an embedded icon still has to match exactly.
+          if (record.icon !== undefined && m.icon !== undefined && record.icon !== m.icon) throw new Error('市场展示信息与插件包不一致。');
         }
         const installed = (await this.list()).find(p => p.id === m.id);
         if (source === 'market' && installed && !semver.gt(m.version, installed.version)) throw new Error('市场版本必须高于已安装版本。');
@@ -243,6 +275,32 @@ export class PluginManager {
       try { await this.persist(); }
       catch (error) { this.state.plugins[id] = previous; throw error; }
       return { ...item, tier: options.tier, official: options.tier !== 'community' };
+    });
+  }
+  async bindMarketArtifact(id, bytes, { version, tier, artifact } = {}) {
+    return this.transaction(async () => {
+      if (!PLUGIN_TIERS.has(tier)) throw new Error('插件信任层无效。');
+      const row = this.state.plugins[id];
+      if (!row || row.removed || row.source !== 'market' || !row.folder) throw new Error('只有市场安装的插件可以绑定制品。');
+      const item = await this.get(id);
+      if (item.version !== version) throw new Error('插件版本与审核制品不匹配。');
+      if (row.tier === tier && row.artifactSha256) return { ...item, tier, tierKnown: true, official: tier !== 'community' };
+      if (row.tier || row.artifactSha256) throw new Error('插件已记录信任层或制品摘要。');
+      verifyArtifact(bytes, artifact, this.publicKey);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const staged = path.join(this.root, '.staging', randomUUID());
+      try {
+        const manifest = await unpackPackage(bytes, staged);
+        if (manifest.id !== id || manifest.version !== version) throw new Error('审核制品与已安装插件不一致。');
+        if (await packageFingerprint(staged) !== await packageFingerprint(item.folder)) throw new Error('已安装内容与审核制品不一致。');
+        const previous = row;
+        this.state.plugins[id] = { ...row, tier, tierKnown: true, artifactSha256: digest };
+        try { await this.persist(); }
+        catch (error) { this.state.plugins[id] = previous; throw error; }
+        return { ...item, tier, tierKnown: true, official: tier !== 'community' };
+      } finally {
+        await rm(staged, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+      }
     });
   }
   async rollback(id) { return this.transaction(async () => { const row = this.state.plugins[id]; if (!row?.previous && !this.defaults.has(id)) throw new Error('没有可恢复的版本。'); await this.stop(id); if (row?.previous) { const currentTier = installedTier(row), previousTier = installedTier(row.previous); const tier = TIER_RANK[previousTier] < TIER_RANK[currentTier] ? previousTier : currentTier; this.state.plugins[id] = { ...row.previous, tier, tierKnown: tierRecorded(row) && tierRecorded(row.previous), official: tier !== 'community' }; } else delete this.state.plugins[id];
