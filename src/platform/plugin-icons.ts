@@ -1,5 +1,7 @@
 import aiChatIcon from '@/assets/ai-chat.svg';
+import aiAssistantIcon from '@/assets/plugin-icons/official.ai-assistant.svg';
 import aiImageIcon from '@/assets/plugin-icons/official.ai-image.svg';
+import diagnosticsIcon from '@/assets/plugin-icons/official.diagnostics.svg';
 import labelEditIcon from '@/assets/plugin-icons/official.labeledit.svg';
 import removeBgIcon from '@/assets/plugin-icons/official.removebg.svg';
 import seedAudioIcon from '@/assets/plugin-icons/official.seed-audio.svg';
@@ -13,7 +15,9 @@ export { aiChatIcon };
 type PluginTier = 'platform' | 'official' | 'community';
 
 const officialPluginIcons: Record<string, string> = {
+  'official.ai-assistant': aiAssistantIcon,
   'official.ai-image': aiImageIcon,
+  'official.diagnostics': diagnosticsIcon,
   'official.labeledit': labelEditIcon,
   'official.removebg': removeBgIcon,
   'official.seed-audio': seedAudioIcon,
