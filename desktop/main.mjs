@@ -5,7 +5,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { PluginManager, boundedDownload, inspectPackage, marketTierUpdate } from './plugin-manager.mjs';
+import { PluginManager, boundedDownload, inspectPackage, marketTierRebindNeeded, marketTierUpdate } from './plugin-manager.mjs';
 import { API_VERSION, confinedPath } from './security.mjs';
 import { Workers } from './workers.mjs';
 import { FileBroker, NetworkBroker, resolveSaveExtension, ensureSaveExtension, resolveSaveFilters } from './brokers.mjs';
@@ -507,19 +507,52 @@ async function catalog(signal, id) {
       ? downloadSources.runWithFallback(url, address => load(address, limit), { signal })
       : load(url, limit),
   });
-  if (await reconcileInstalledTiers(items)) changed();
+  if (await reconcileInstalledTiers(items, signal)) changed();
   return { items, configured: true };
 }
-async function reconcileInstalledTiers(items) {
+async function downloadMarketArtifact(url, signal, size) {
+  const limit = Number.isSafeInteger(size) && size > 0 ? size : undefined;
+  const fetchBytes = target => boundedDownload(target, limit, signal);
+  return downloadSources ? downloadSources.runWithFallback(url, fetchBytes, { signal }) : fetchBytes(url);
+}
+const REBIND_COOLDOWN_MS = 10 * 60_000;
+const rebindAttempts = new Set();
+const rebindCooldowns = new Map();
+async function reconcileInstalledTiers(items, signal) {
   if (!manager || !Array.isArray(items) || !items.length) return false;
+  const platform = process.platform + '-' + process.arch;
   let updated = false;
   for (const entry of items) {
     const plugin = await manager.get(entry.id).catch(() => null);
-    const update = marketTierUpdate(plugin, entry, process.platform + '-' + process.arch);
-    if (!update) continue;
-    await manager.setMarketTier(entry.id, update).then(() => { updated = true; }).catch(error => {
-      debugLog?.record({ scope: 'plugin', source: entry.id, level: 'warn', message: '插件信任层同步失败：' + error.message });
-    });
+    const update = marketTierUpdate(plugin, entry, platform);
+    if (update) {
+      await manager.setMarketTier(entry.id, update).then(() => { updated = true; }).catch(error => {
+        debugLog?.record({ scope: 'plugin', source: entry.id, level: 'warn', message: '插件信任层同步失败：' + error.message });
+      });
+      continue;
+    }
+    if (!marketTierRebindNeeded(plugin, entry, platform)) continue;
+    if (signal?.aborted) break;
+    const artifact = entry.artifacts[platform];
+    const key = entry.id + ':' + entry.version + ':' + artifact.sha256;
+    if (rebindAttempts.has(key) || (rebindCooldowns.get(key) ?? 0) > Date.now()) continue;
+    rebindAttempts.add(key);
+    try {
+      const bytes = await downloadMarketArtifact(artifact.url, signal, artifact.size);
+      signal?.throwIfAborted();
+      await manager.bindMarketArtifact(entry.id, bytes, {
+        version: entry.version,
+        tier: entry.tier,
+        artifact: { ...artifact, platform, verification: entry.verification },
+      });
+      updated = true;
+      rebindCooldowns.delete(key);
+    } catch (error) {
+      if (!signal?.aborted) rebindCooldowns.set(key, Date.now() + REBIND_COOLDOWN_MS);
+      debugLog?.record({ scope: 'plugin', source: entry.id, level: 'warn', message: '插件内置状态同步失败：' + error.message });
+    } finally {
+      rebindAttempts.delete(key);
+    }
   }
   return updated;
 }
@@ -1353,6 +1386,13 @@ await downloads.resumePending(async id => {
   const plugin = await manager.get(id).catch(() => null);
   return Boolean(plugin?.enabled && !plugin.missing.length);
 });
+// Legacy installs predate the artifact digest used for tier migration. Repair
+// them from a freshly reviewed catalog instead of a cached copy, then verify
+// the downloaded package before persisting any elevation.
+void manager.list()
+  .then(plugins => plugins.some(plugin => plugin.source === 'market' && plugin.tierKnown === false && !plugin.artifactSha256))
+  .then(needsRepair => needsRepair ? marketStore.refresh() : null)
+  .catch(error => debugLog?.record({ scope: 'app', source: 'market', level: 'warn', message: '插件内置状态同步失败：' + error.message }));
 const pluginFinalizations = new Map();
 async function finalizePlugin(id, notify) {
   const { version, restoring } = pluginFinalizations.get(id);

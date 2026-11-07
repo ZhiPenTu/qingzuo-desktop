@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
-import { PluginManager, inspectPackage, marketTierMigrationMatches, marketTierUpdate, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
+import { PluginManager, inspectPackage, marketTierMigrationMatches, marketTierRebindNeeded, marketTierUpdate, unpackPackage, verifyArtifact } from '../../desktop/plugin-manager.mjs';
 import { validateManifest, TARGET } from '../../desktop/security.mjs';
 import { expectedReleaseArtifactUrl, resolveMarketEntries } from '../../desktop/catalog.mjs';
 function archive(version = '0.1.0', overrides = {}) {
@@ -311,6 +311,111 @@ test('an installed official plugin upgrades to platform from a reviewed catalog 
     const reloaded = new PluginManager(plugins, bundled);
     await reloaded.initialize();
     assert.equal((await reloaded.get(id)).tier, 'platform');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('legacy installs without a recorded digest only rebind to a higher tier', () => {
+  const sha256 = 'd'.repeat(64);
+  const plugin = { source: 'market', tier: 'community', tierKnown: false, version: '0.1.0' };
+  const entry = { tier: 'platform', version: '0.1.0', artifacts: { [TARGET]: { sha256 } } };
+  assert.equal(marketTierRebindNeeded(plugin, entry, TARGET), true);
+  assert.equal(marketTierRebindNeeded(plugin, { ...entry, tier: 'official' }, TARGET), true);
+  assert.equal(marketTierRebindNeeded(plugin, { ...entry, tier: 'community' }, TARGET), false);
+  assert.equal(marketTierRebindNeeded(plugin, { ...entry, version: '0.1.1' }, TARGET), false);
+  assert.equal(marketTierRebindNeeded({ ...plugin, source: 'local' }, entry, TARGET), false);
+  assert.equal(marketTierRebindNeeded({ ...plugin, tierKnown: true }, entry, TARGET), false);
+  assert.equal(marketTierRebindNeeded({ ...plugin, artifactSha256: sha256 }, entry, TARGET), false);
+  assert.equal(marketTierRebindNeeded(plugin, { ...entry, artifacts: {} }, TARGET), false);
+  assert.equal(marketTierRebindNeeded(plugin, { ...entry, artifacts: { [TARGET]: { sha256: 'x' } } }, TARGET), false);
+});
+test('a legacy install rebinds after the reviewed package matches every installed file', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-rebind-')), bundled = path.join(root, 'bundled');
+  const id = 'local.fixture', bytes = archive(), digest = createHash('sha256').update(bytes).digest('hex');
+  await mkdir(bundled);
+  try {
+    const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+    await manager.initialize();
+    await manager.install(bytes, { source: 'market', tier: 'community', record: releaseRecord(bytes) });
+    const row = manager.state.plugins[id];
+    delete row.tier; delete row.tierKnown; delete row.artifactSha256;
+    await manager.persist();
+
+    const reloaded = new PluginManager(path.join(root, 'plugins'), bundled);
+    await reloaded.initialize();
+    const legacy = await reloaded.get(id);
+    assert.equal(legacy.tier, 'community');
+    assert.equal(legacy.tierKnown, false);
+    assert.equal(marketTierRebindNeeded(legacy, { tier: 'platform', version: '0.1.0', artifacts: { [TARGET]: { sha256: digest } } }, TARGET), true);
+
+    await reloaded.bindMarketArtifact(id, bytes, { version: '0.1.0', tier: 'platform', artifact: releaseRecord(bytes) });
+    const bound = await reloaded.get(id);
+    assert.equal(bound.tier, 'platform');
+    assert.equal(bound.tierKnown, true);
+    assert.equal(reloaded.state.plugins[id].artifactSha256, digest);
+    assert.equal((await reloaded.bindMarketArtifact(id, bytes, { version: '0.1.0', tier: 'platform', artifact: releaseRecord(bytes) })).tier, 'platform');
+    await assert.rejects(reloaded.bindMarketArtifact(id, bytes, { version: '0.1.0', tier: 'official', artifact: releaseRecord(bytes) }), /已记录/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('rebinding rejects packages that differ from the installed files or identity', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-rebind-mismatch-')), bundled = path.join(root, 'bundled');
+  await mkdir(bundled);
+  const installLegacy = async () => {
+    const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+    await manager.initialize();
+    const bytes = archive();
+    await manager.install(bytes, { source: 'market', tier: 'community', record: releaseRecord(bytes) });
+    const row = manager.state.plugins['local.fixture'];
+    delete row.tier; delete row.tierKnown; delete row.artifactSha256;
+    await manager.persist();
+    return { manager, bytes };
+  };
+  try {
+    const first = await installLegacy();
+    await assert.rejects(
+      first.manager.bindMarketArtifact('local.fixture', first.bytes, { version: '0.1.0', tier: 'platform', artifact: { ...releaseRecord(first.bytes), sha256: 'e'.repeat(64) } }),
+      /校验失败/,
+    );
+    const installedFolder = path.join(root, 'plugins', first.manager.state.plugins['local.fixture'].folder);
+    await writeFile(path.join(installedFolder, 'ui/index.html'), '<h1>Changed</h1>');
+    await assert.rejects(first.manager.bindMarketArtifact('local.fixture', first.bytes, { version: '0.1.0', tier: 'platform', artifact: releaseRecord(first.bytes) }), /已安装内容/);
+    assert.equal((await first.manager.get('local.fixture')).tier, 'community');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  const secondRoot = await mkdtemp(path.join(os.tmpdir(), 'commerce-rebind-version-'));
+  try {
+    const manager = new PluginManager(path.join(secondRoot, 'plugins'), path.join(secondRoot, 'bundled'));
+    await mkdir(path.join(secondRoot, 'bundled'));
+    await manager.initialize();
+    const bytes = archive();
+    await manager.install(bytes, { source: 'market', tier: 'community', record: releaseRecord(bytes) });
+    const row = manager.state.plugins['local.fixture'];
+    delete row.tier; delete row.tierKnown; delete row.artifactSha256;
+    await manager.persist();
+    const next = archive('0.2.0');
+    await assert.rejects(manager.bindMarketArtifact('local.fixture', next, { version: '0.2.0', tier: 'platform', artifact: releaseRecord(next, '0.2.0') }), /版本/);
+  } finally {
+    await rm(secondRoot, { recursive: true, force: true });
+  }
+});
+test('a reviewed catalog icon may fill in a package without one, but embedded icons must match', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'commerce-catalog-icon-')), bundled = path.join(root, 'bundled');
+  const first = archive(), second = archive('0.2.0', { icon: 'data:image/png;base64,iVBORw0KGgo=' });
+  const catalogIcon = 'data:image/png;base64,iVBORw0KGgoAAA==';
+  await mkdir(bundled);
+  try {
+    const manager = new PluginManager(path.join(root, 'plugins'), bundled);
+    await manager.initialize();
+    await manager.install(first, { source: 'market', tier: 'community', record: { ...releaseRecord(first), icon: catalogIcon } });
+    assert.equal((await manager.get('local.fixture')).version, '0.1.0');
+    await assert.rejects(
+      manager.install(second, { source: 'market', tier: 'community', record: { ...releaseRecord(second, '0.2.0'), icon: catalogIcon } }),
+      /市场展示信息/,
+    );
+    assert.equal((await manager.get('local.fixture')).version, '0.1.0');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -139,7 +139,7 @@ SDK 提供文件选择/读取/保存、插件私密凭据设置/状态/清除、
 
 SDK 1.10.0 增加三档信任层与第一方插件的受控宿主桥。市场注册表使用 `schemaVersion: 2`，每个 GitHub 仓库显式绑定 `{ id, tier }`；市场目录继续保持 `schemaVersion: 1`，条目显式提供 `tier`，并提供兼容投影 `official = tier !== 'community'`。`platform` 只能由审核后的市场目录声明，不能从插件清单、ID 前缀或旧 `official` 字段推断。
 
-桌面将安装来源与信任层分开保存：来源仍为 `bundled / market / local`，信任层为 `platform / official / community`。本地导入固定为 `community`；随应用内置的旧插件默认为 `platform`；市场安装必须携带目录显式审核的 `tier`。市场安装记录同时保存不可变制品摘要 `artifactSha256`，该摘要不会返回渲染端。旧安装缺少 `tier` 时先按 `community` 处理，只有成功加载新目录并匹配版本、制品摘要后才能持久化更新。
+桌面将安装来源与信任层分开保存：来源仍为 `bundled / market / local`，信任层为 `platform / official / community`。本地导入固定为 `community`；随应用内置的旧插件默认为 `platform`；市场安装必须携带目录显式审核的 `tier`。市场安装记录同时保存不可变制品摘要 `artifactSha256`，该摘要不会返回渲染端。旧安装缺少 `tier` 时先按 `community` 处理，只有成功加载新目录并匹配版本、制品摘要后才能持久化更新。更早的安装没有记录制品摘要，且审核目录只提升其信任层时，桌面会重新获取审核目录、下载其中的当前版本并逐文件比对已安装内容，完全一致后才补记摘要并升级；版本、摘要或文件内容任一不匹配都保持原信任层。降级始终按审核目录生效，不依赖该比对。
 
 `firstParty.*` 是宿主内部命名空间，不加入公开 `createPluginClient()`。插件清单不能自行声明平台身份。调用同时要求精确插件 ID、市场来源、`platform` 信任层、已启用状态、无缺失依赖，并且方法在宿主白名单内。当前仅允许：
 
@@ -437,7 +437,7 @@ API 1.1 增加 files.url(token) 与 files.release(token)。URL 只在插件自�
 
 目录维护位于 ZhiPenTu/qingzuo-market。市场条目只收录插件身份、展示信息和固定的 GitHub Release 来源。桌面端读取插件自己的 `releases/latest/download/catalog-<平台>.json` 获取最新版本、变更日志、API 范围和制品信息；插件发版不需要等待市场目录更新。市场目录保留最后一次审核的版本和签名制品，供旧客户端兼容使用。
 
-插件目录使用三档信任层：`platform`（底座内置）、`official`（官方社区）与 `community`（第三方）。市场目录的 `schemaVersion` 仍为 1；有 `tier` 时以审核后的 `tier` 为准，`official` 只作为投影并必须与之一致（`platform`、`official` 投影为 `true`，`community` 为 `false`）。旧目录没有 `tier` 时，显式 `official: true` / `false` 分别迁移为 `official` / `community`；两者都没有时，`official.` 前缀仅作为旧目录兼容回退，绝不据此推断 `platform`。发布清单不能覆盖目录审核后的信任层、发布者、来源、统计或校验状态。
+插件目录使用三档信任层：`platform`（底座内置）、`official`（官方社区）与 `community`（第三方）。市场目录的 `schemaVersion` 仍为 1；有 `tier` 时以审核后的 `tier` 为准，`official` 只作为投影并必须与之一致（`platform`、`official` 投影为 `true`，`community` 为 `false`）。旧目录没有 `tier` 时，显式 `official: true` / `false` 分别迁移为 `official` / `community`；两者都没有时，`official.` 前缀仅作为旧目录兼容回退，绝不据此推断 `platform`。发布清单不能覆盖目录审核后的信任层、发布者、来源、统计或校验状态。目录可以为未在插件包内声明 `icon` 的插件提供审核后的展示图标；插件包已声明图标时，市场条目与包内图标必须完全一致。
 
 新客户端从收录来源读取发布清单后，会校验插件身份、版本、平台、制品 URL、大小和 SHA-256，再解包校验清单与权限。市场安装必须使用目录中显式审核的信任层；本地导入固定为 `community`，随应用内置的插件固定为 `platform`。旧目录条目继续校验市场 Ed25519 签名；市场私钥不要写入插件仓库。官方插件仍应发布双平台 `.ecplugin` 和 `catalog-<平台>.json`。
 

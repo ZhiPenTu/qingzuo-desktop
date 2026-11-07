@@ -67,7 +67,7 @@ export async function prepareMarketFixture(definitions, { configFile = defaultCo
   };
 }
 
-export async function installMarketFixture(application, page, fixture, ids) {
+export async function injectMarketFixture(application, fixture) {
   await application.evaluate((_, value) => {
     globalThis.__marketFixtureNativeFetch ??= globalThis.fetch.bind(globalThis);
     globalThis.fetch = async (address, options) => {
@@ -78,6 +78,9 @@ export async function installMarketFixture(application, page, fixture, ids) {
       return globalThis.__marketFixtureNativeFetch(address, options);
     };
   }, { catalog: fixture.catalog, artifacts: fixture.artifacts });
+}
+export async function installMarketFixture(application, page, fixture, ids) {
+  await injectMarketFixture(application, fixture);
   return page.evaluate(pluginIds => (
     Promise.all(pluginIds.map(id => window.commerceDesktop.invoke('market.install', { id })))
   ), ids);
