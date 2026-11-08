@@ -15,7 +15,7 @@ await writeFile(path.join(generated, 'market.json'), JSON.stringify({
   updatePublicKey: process.env.COMMERCE_PLUGIN_PUBLIC_KEY || previousMarket.updatePublicKey || '',
 }));
 await writeFile(path.join(generated, 'distribution.json'), JSON.stringify({ signing: desktopSigningMode(), preview: process.env.QINGZUO_LOCAL_PREVIEW === '1' }));
-await cp(path.join(root, 'node_modules/@deepseek-ai/dsh/LICENSE'), path.join(generated, 'DeepSeek-Harness-LICENSE')).catch(async () => {
+await cp(path.join(root, 'node_modules/@deepseek-ai/dsh-app-boot/LICENSE'), path.join(generated, 'DeepSeek-Harness-LICENSE')).catch(async () => {
   const response = await fetch('https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/5badb15009ae1756c3afe0ae0cef1faafc290ccc/LICENSE');
   if (!response.ok) throw new Error('无法取得上游许可证。');
   await writeFile(path.join(generated, 'DeepSeek-Harness-LICENSE'), await response.text());

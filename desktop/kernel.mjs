@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { runProfile } from '@deepseek-ai/dsh/profile-boot';
 import { loadProfileDirectory } from '@deepseek-ai/dsh-app-boot';
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment';
+import { bootCommerceProfile } from './kernel-boot.mjs';
 export async function bootCommerceKernel({ home, installAnchor, invoke = async () => null, enableAI = false }) {
   const dir = path.join(home, 'profiles', 'commerce-desktop'); await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'commerce-desktop-profile', private: true, dsh: { profile: { bundles: ['@commerce/platform-bundle'] } } }));
@@ -23,7 +23,8 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
   }
   await writeFile(path.join(dir, 'cordis.patch.yml'), patch);
   const loaded = loadProfileDirectory('commerce-desktop', dir, installAnchor);
-  const runtime = await runProfile({ environment: createLaunchEnvironmentSnapshot([{ source: 'process', values: process.env }]), profile: 'commerce-desktop', resolvedProfile: { profile: loaded, installAnchor }, args: [], patchFiles: [] });
+  const ctx = await bootCommerceProfile({ name: 'commerce-desktop', home, profile: loaded, installAnchor, environment: createLaunchEnvironmentSnapshot([{ source: 'process', values: process.env }]) });
+  const runtime = { ctx };
   if (systems.size !== 7) { await runtime.ctx.fiber.dispose(); throw new Error('平台系统插件未能全部加载。'); }
   let assistant;
   if (enableAI && ['llm', 'sessions', 'sessionProjections', 'systemPrompt', 'tools', 'agents', 'agentLoop', 'jobs', 'sessionPersistence'].some(service => !runtime.ctx.get(service))) { await runtime.ctx.fiber.dispose(); throw new Error('AI Harness 依赖未能完整加载，请重新构建安装包。'); }

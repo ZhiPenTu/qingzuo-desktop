@@ -11,8 +11,8 @@ node scripts/harness-upstream.mjs check --report output/upstream/harness-current
 node scripts/harness-upstream.mjs check-upstream --report output/upstream/harness-check.json
 ```
 
-`check` 不访问网络，检查所有直接和间接 `@deepseek-ai/dsh` / `dsh-*` 包的固定版本、
-根 lockfile、platform-bundle 的 peer、npm tarball 地址与 SHA-512 SRI、Cordis 实际解析范围、
+`check` 不访问网络，检查所有直接和间接 `@deepseek-ai/dsh-*` 包的固定版本、
+根 lockfile、platform-bundle 不反向依赖完整 CLI 元包、npm tarball 地址与 SHA-512 SRI、Cordis 实际解析范围、
 原生加载器 override、源代码 commit / SHA-256，以及 Electron 固定版本。
 运行脚本只需要已有项目依赖中的 `semver`，不需要已安装 Harness 包。
 SRI 记录检查与下载校验分开：后续候选 `npm ci` 才会实际校验 tarball 字节。
@@ -38,7 +38,7 @@ Cordis 的独立版本号不跟随 dsh 包族版本号。求解会审查 group�
 
 候选目录必须不存在。脚本把当前 Git 工作区的源码（包括正在审阅的修改）复制到持久目录，
 排除生产 profiles、环境变量文件、npm 认证配置、密钥、依赖目录和生成物，然后在那里一起
-修改根 manifest、platform-bundle peer、canonical metadata 和 lockfile。
+修改根 manifest、canonical metadata 和 lockfile。
 唯一的 npm 准备命令是 `install --package-lock-only --ignore-scripts`，不会向当前工作区安装依赖。
 候选自己的 HOME、临时目录、npm 缓存和空 npmrc 均位于 `.validation/`。
 不继承 API key、Harness HOME、Codex HOME、代理认证或发布签名环境。

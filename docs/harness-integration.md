@@ -1,6 +1,8 @@
 # Harness 对话适配与升级契约
 
-轻作不实现第二套 Agent 循环，也不复制 DeepSeek Harness UI 源码。当前统一固定 `0.2.2-alpha.2` 包族，通过公开 `agents.create/resume`、`agent.followup/cancel/whenIdle`、`agent.model.select`、`tools.register`、`llm.registerAdapter`、独立原生工具执行器与 JSONL 会话持久化服务运行。`desktop/ai-harness.mjs` 是唯一 Agent 适配层；插件不导入 Harness 类型。
+轻作不实现第二套 Agent 循环，也不复制 DeepSeek Harness UI 源码。当前统一固定 `0.2.2-alpha.2` 内核包族，只安装实际加载的 `@deepseek-ai/dsh-*` 包，不引入完整 `@deepseek-ai/dsh` CLI 元包（Office、CUA、终端、语音、多模型 SDK 与 Web 前端）。内核通过公开 `agents.create/resume`、`agent.followup/cancel/whenIdle`、`agent.model.select`、`tools.register`、`llm.registerAdapter`、独立原生工具执行器与 JSONL 会话持久化服务运行。`desktop/ai-harness.mjs` 是唯一 Agent 适配层，`desktop/kernel-boot.mjs` 只用 `@deepseek-ai/dsh-app-boot` 的公开 `boot` 组合 Profile；插件不导入 Harness 类型。
+
+内核启动不安装环境代理，也不提供 `cmdlineArgs`、`appExit` 与 `appReady`。轻作的模型请求统一由主进程 `secureRequest` 处理，当前装载的服务没有这些消费方；如果以后引入上游 Web、终端或命令行类插件，需要先补回对应契约并重新验证退出与代理行为。
 
 ## 对话界面的上游复用
 

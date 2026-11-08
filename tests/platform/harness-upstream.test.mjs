@@ -9,13 +9,13 @@ import { inspectHarnessState, inspectInstalledHarness, readHarnessState, resolve
 const integrity = 'sha512-' + Buffer.alloc(64).toString('base64');
 const record = (name, version, extra = {}) => ({ version, resolved: `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${version}.tgz`, integrity, ...extra });
 function state() {
-  const dependencies = { '@deepseek-ai/dsh': '1.0.0-alpha.1', '@deepseek-ai/dsh-client-ui-primitives': '1.0.0-alpha.1', '@deepseek-ai/cordis': '4.0.0', '@deepseek-ai/cordis-plugin-group': '1.0.0' };
+  const dependencies = { '@deepseek-ai/dsh-agent': '1.0.0-alpha.1', '@deepseek-ai/dsh-client-ui-primitives': '1.0.0-alpha.1', '@deepseek-ai/cordis': '4.0.0', '@deepseek-ai/cordis-plugin-group': '1.0.0' };
   return {
     metadata: { schemaVersion: 1, version: '1.0.0-alpha.1', packages: Object.keys(dependencies).filter(name => name.includes('/dsh')), cordisPackages: Object.keys(dependencies).filter(name => name.includes('/cordis')), nativeAdapter: { package: 'node-addon-require-builtin', version: '0.1.6', commit: 'a'.repeat(40), sha256: 'b'.repeat(64), electron: '44.0.0', nodeMajor: 24 } },
     pkg: { name: 'fixture-upstream', private: true, dependencies, devDependencies: { electron: '44.0.0' }, overrides: { 'node-addon-require-builtin': '0.1.6' } },
-    bundle: { name: '@commerce/platform-bundle', peerDependencies: { '@deepseek-ai/dsh': '1.0.0-alpha.1' } },
-    lock: { lockfileVersion: 3, packages: { '': { dependencies: { ...dependencies } }, 'packages/platform-bundle': { peerDependencies: { '@deepseek-ai/dsh': '1.0.0-alpha.1' } },
-      ...Object.fromEntries(Object.entries(dependencies).map(([name, version]) => ['node_modules/' + name, record(name, version, name === '@deepseek-ai/dsh' ? { peerDependencies: { '@deepseek-ai/cordis': '^4.0.0', 'node-addon-require-builtin': '^0.1.6' } } : {})])),
+    bundle: { name: '@commerce/platform-bundle' },
+    lock: { lockfileVersion: 3, packages: { '': { dependencies: { ...dependencies } }, 'packages/platform-bundle': {},
+      ...Object.fromEntries(Object.entries(dependencies).map(([name, version]) => ['node_modules/' + name, record(name, version, name === '@deepseek-ai/dsh-agent' ? { peerDependencies: { '@deepseek-ai/cordis': '^4.0.0', 'node-addon-require-builtin': '^0.1.6' } } : {})])),
       'node_modules/node-addon-require-builtin': record('node-addon-require-builtin', '0.1.6'), 'node_modules/electron': record('electron', '44.0.0') } },
   };
 }
@@ -28,19 +28,28 @@ test('offline audit checks the real exact family, workspace peer, Cordis graph a
 });
 
 test('offline audit rejects partial family upgrades, stale workspace lock and hidden nested Harness copies', () => {
-  const partial = state(); partial.pkg.dependencies['@deepseek-ai/dsh'] = '1.0.0-alpha.2'; assert.ok(failed(partial).includes('direct:@deepseek-ai/dsh'));
-  const floating = state(); floating.pkg.dependencies['@deepseek-ai/dsh'] = '^1.0.0-alpha.1'; assert.ok(failed(floating).includes('direct:@deepseek-ai/dsh'));
+  const partial = state(); partial.pkg.dependencies['@deepseek-ai/dsh-agent'] = '1.0.0-alpha.2'; assert.ok(failed(partial).includes('direct:@deepseek-ai/dsh-agent'));
+  const floating = state(); floating.pkg.dependencies['@deepseek-ai/dsh-agent'] = '^1.0.0-alpha.1'; assert.ok(failed(floating).includes('direct:@deepseek-ai/dsh-agent'));
   const unlisted = state(); unlisted.pkg.dependencies['@deepseek-ai/dsh-tools'] = '1.0.0-alpha.1'; assert.ok(failed(unlisted).includes('family-members'));
   const dev = state(); dev.pkg.devDependencies['@deepseek-ai/dsh-tools'] = '^1.0.0-alpha.2'; assert.ok(failed(dev).includes('family-production-dependencies'));
-  const peer = state(); peer.lock.packages['packages/platform-bundle'].peerDependencies['@deepseek-ai/dsh'] = '0.9.0'; assert.ok(failed(peer).includes('bundle-peer'));
+  const peer = state(); peer.bundle.peerDependencies = { '@deepseek-ai/dsh': '0.9.0' }; assert.ok(failed(peer).includes('bundle-peer'));
+  const peerLock = state(); peerLock.lock.packages['packages/platform-bundle'].peerDependencies = { '@deepseek-ai/dsh': '0.9.0' }; assert.ok(failed(peerLock).includes('bundle-peer'));
+  const missingBundle = state(); delete missingBundle.lock.packages['packages/platform-bundle']; assert.ok(failed(missingBundle).includes('bundle-peer'));
   const nested = state(); nested.lock.packages['node_modules/third-party/node_modules/@deepseek-ai/dsh-tools'] = record('@deepseek-ai/dsh-tools', '0.9.0'); assert.ok(failed(nested).includes('resolved-family:node_modules/third-party/node_modules/@deepseek-ai/dsh-tools'));
 });
 
+test('offline audit refuses the full dsh CLI meta package', () => {
+  const value = state();
+  value.metadata.packages.push('@deepseek-ai/dsh');
+  value.pkg.dependencies['@deepseek-ai/dsh'] = '1.0.0-alpha.1';
+  assert.ok(failed(value).includes('no-cli-meta'));
+});
+
 test('offline audit refuses missing SRI, unofficial tarballs and incompatible Cordis/native runtime changes', () => {
-  for (const mutate of [value => delete value.lock.packages['node_modules/@deepseek-ai/dsh'].integrity, value => { value.lock.packages['node_modules/@deepseek-ai/dsh'].resolved = 'https://example.com/dsh.tgz'; }]) {
-    const value = state(); mutate(value); assert.ok(failed(value).includes('integrity:node_modules/@deepseek-ai/dsh'));
+  for (const mutate of [value => delete value.lock.packages['node_modules/@deepseek-ai/dsh-agent'].integrity, value => { value.lock.packages['node_modules/@deepseek-ai/dsh-agent'].resolved = 'https://example.com/dsh.tgz'; }]) {
+    const value = state(); mutate(value); assert.ok(failed(value).includes('integrity:node_modules/@deepseek-ai/dsh-agent'));
   }
-  const cordis = state(); cordis.lock.packages['node_modules/@deepseek-ai/dsh'].peerDependencies['@deepseek-ai/cordis'] = '^5.0.0'; assert.ok(failed(cordis).some(id => id.endsWith(':@deepseek-ai/cordis')));
+  const cordis = state(); cordis.lock.packages['node_modules/@deepseek-ai/dsh-agent'].peerDependencies['@deepseek-ai/cordis'] = '^5.0.0'; assert.ok(failed(cordis).some(id => id.endsWith(':@deepseek-ai/cordis')));
   const native = state(); native.pkg.overrides['node-addon-require-builtin'] = '0.1.7'; assert.ok(failed(native).includes('native-pin'));
   const runtime = state(); runtime.pkg.devDependencies.electron = '45.0.0'; assert.ok(failed(runtime).includes('native-electron'));
   const source = state(); source.metadata.nativeAdapter.sha256 = 'unreviewed'; assert.ok(failed(source).includes('native-source'));
@@ -107,7 +116,7 @@ test('prepare stages the full exact family and lock in a persistent isolated can
   assert.equal(report.status, 'checked'); assert.equal(report.version, version); assert.equal(calls.length, 1);
   const staged = await readHarnessState(fixture.directory);
   assert.ok(staged.metadata.packages.every(name => staged.pkg.dependencies[name] === version));
-  assert.equal(staged.pkg.dependencies['@deepseek-ai/cordis'], '4.1.0'); assert.equal(staged.bundle.peerDependencies['@deepseek-ai/dsh'], version);
+  assert.equal(staged.pkg.dependencies['@deepseek-ai/cordis'], '4.1.0'); assert.equal(staged.bundle.peerDependencies, undefined);
   assert.deepEqual(await readFile(path.join(fixture.source, 'package.json')), before);
   assert.equal(await readFile(path.join(fixture.directory, 'desktop/credentials.mjs'), 'utf8'), 'export const fixture = true;');
   await assert.rejects(access(path.join(fixture.directory, '.env'))); await assert.rejects(access(path.join(fixture.directory, '.npmrc')));
@@ -148,10 +157,10 @@ test('report preflight rejects protected input aliases before an operation or it
 
 test('installed graph audit rejects stale Harness copies and modules resolving outside the candidate', async context => {
   const fixture = await sourceFixture(context), current = fixture.initial;
-  await mkdir(fixture.directory); await mkdir(path.join(fixture.directory, 'node_modules/@deepseek-ai/dsh'), { recursive: true });
-  await writeFile(path.join(fixture.directory, 'node_modules/@deepseek-ai/dsh/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.9.0' }));
+  await mkdir(fixture.directory); await mkdir(path.join(fixture.directory, 'node_modules/@deepseek-ai/dsh-agent'), { recursive: true });
+  await writeFile(path.join(fixture.directory, 'node_modules/@deepseek-ai/dsh-agent/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-agent', version: '0.9.0' }));
   let checks = await inspectInstalledHarness(fixture.directory, current);
-  assert.ok(checks.some(item => item.id === 'installed-version:node_modules/@deepseek-ai/dsh' && item.status === 'failed' && /installed=0.9.0/.test(item.detail)));
+  assert.ok(checks.some(item => item.id === 'installed-version:node_modules/@deepseek-ai/dsh-agent' && item.status === 'failed' && /installed=0.9.0/.test(item.detail)));
   current.metadata.nativeAdapter.nodeMajor = Number(process.versions.node.split('.')[0]);
   current.metadata.nativeAdapter.supportedTargets = [process.platform + '-' + process.arch];
   for (const [name, value] of [['desktop/upstream/harness.json', current.metadata], ['package.json', current.pkg], ['package-lock.json', current.lock], ['packages/platform-bundle/package.json', current.bundle], ['.harness-candidate.json', { schemaVersion: 1, source: fixture.source }]]) {
@@ -159,7 +168,7 @@ test('installed graph audit rejects stale Harness copies and modules resolving o
   }
   const report = await validateCandidate({ directory: fixture.directory, offline: true, runner: async () => assert.fail('Stale installed packages must block before running any contracts.') });
   assert.equal(report.status, 'failed');
-  assert.ok(report.checks.some(item => item.id === 'installed-version:node_modules/@deepseek-ai/dsh' && item.status === 'failed'));
+  assert.ok(report.checks.some(item => item.id === 'installed-version:node_modules/@deepseek-ai/dsh-agent' && item.status === 'failed'));
   await symlink(fixture.source, path.join(fixture.directory, 'node_modules/@deepseek-ai/cordis'));
   checks = await inspectInstalledHarness(fixture.directory, current);
   assert.ok(checks.some(item => item.id === 'installed-isolation:node_modules/@deepseek-ai/cordis' && item.status === 'failed'));

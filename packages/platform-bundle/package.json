@@ -11,8 +11,5 @@
   "exports": {
     "./system": "./system.mjs",
     "./package.json": "./package.json"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh": "0.2.2-alpha.2"
   }
 }
