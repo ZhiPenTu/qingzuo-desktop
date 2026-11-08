@@ -173,5 +173,5 @@ macOS 14 与 Windows 10 最低支持系统的沙箱、安装及 GitHub 手动更
 - 移除工作台对话 IPC、`firstParty.assistant.chat`、`ai.assistant.*`、插件工具审批卡与 assistant 事件。保留 `ai.complete()`、`ai.models()`、`ai.batch.*`、批次事件和 `firstParty.assistant.settings`。
 - 删除死代码 `AIChat`、`AISettings`、`HarnessPresentation`、`harness-client` 及对应测试与会话夹具；设置页保留「AI 服务」入口并指向 `official.ai-assistant` 的插件设置页，该页面仍通过第一方设置桥工作，对话入口不再提供。
 - 生产依赖闭包由 806 降至 167；`@deepseek-ai` 由 334 包 / 620MB 降至 12 包 / 1.5MB。
-- 本地验证：`npm run build` 通过；`npm test` 7 个文件 57 个测试通过；`npm run test:platform` 312 个测试通过；`npm run test:harness-contract` 42 个测试通过；`npm run test:kernel` 2 个通过；`npm run upstream:check` 63 项通过；Electron `platform`、`migration`、`tool-surface`、`first-party-settings`、`first-party-tier` 5/5 通过；macOS arm64 打包应用通过 `scripts/test-packaged-desktop.mjs` 验收并在本机安装启动。
+- 本地验证：`npm run build` 通过；`npm test` 7 个文件 57 个测试通过；`npm run test:platform` 314 个测试通过；`npm run test:harness-contract` 45 个测试通过；`npm run test:kernel` 4 个通过；`npm run upstream:check` 63 项通过；Electron `platform`、`migration`、`tool-surface`、`first-party-settings`、`first-party-tier` 5/5 通过；macOS arm64 打包应用通过 `scripts/test-packaged-desktop.mjs` 的源码目录外启动验收；同一制品已替换本机 `/Applications/Qingzuo.app` 并实际启动。
 - 尚未验证：Windows 实机；`official.ai-assistant` 的 settings-only 0.2.0 仍在本仓库外的 `codex/remove-chat-page` 分支，需审查合并并发布市场后才能替换线上 0.1.2。

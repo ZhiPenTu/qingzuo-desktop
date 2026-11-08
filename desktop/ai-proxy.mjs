@@ -70,7 +70,7 @@ function modelTestFailure(error) {
   if (error instanceof AIHttpError) {
     if (error.status === 401) return { ok: false, code: 'invalid_key', message: '访问密钥无效，请检查后重新配置。' };
     if (error.status === 403) return { ok: false, code: 'forbidden', message: '这个密钥没有调用该模型的权限。' };
-    if (error.status === 404) return { ok: false, code: 'model_unavailable', message: '模型不存在，或服务没有提供对话接口。' };
+    if (error.status === 404) return { ok: false, code: 'model_unavailable', message: '模型不存在，或服务没有提供文本补全接口。' };
     if (error.status === 408) return { ok: false, code: 'network_timeout', message: '模型测试超时，请稍后重试。' };
     if (error.status === 429) return { ok: false, code: 'rate_limited', message: '请求过于频繁或额度不足，请稍后再试。' };
     if (error.status === 400 || error.status === 422) return { ok: false, code: 'model_incompatible', message: '模型未通过文本补全测试，可能不支持当前补全接口。' };
