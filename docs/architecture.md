@@ -26,7 +26,7 @@ flowchart TB
       Main["Electron 主进程<br/>窗口管理 · IPC 校验 · 生命周期"]
       Brokers["能力 Broker<br/>文件 · 凭据 · 网络 · 浏览器 · 存储"]
       Installer["插件安装与更新<br/>下载 · 校验 · 暂存 · 回滚"]
-      Kernel["Harness 内核进程<br/>Profile / Bundle · Agent · Cordis"]
+      Kernel["Harness 内核进程<br/>Profile / Bundle · Cordis"]
       Launcher["Rust 原生沙箱入口"]
     end
 

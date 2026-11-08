@@ -58,7 +58,7 @@
 | 受保护的系统插件 | 工具中心、市场、插件管理、设置、更新、凭据及沙箱 |
 | 工具插件 | LabelEdit、AI 抠图及用户开发的电商工具 |
 
-通过公开 Profile 启动接口运行 commerce-desktop 组合，由自己的 Bundle 加入产品功能。首版仅启用平台需要的内核服务，保留上游 Agent、MCP 后续接入路径。首页、市场、设置、更新均按插件组织，关键组件只接受受信任系统实现。上游升级通过依赖更新、适配检查和回归后随底座发布；不承诺任意 Harness 插件即装即用。架构参考：https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md。
+通过公开 Profile 启动接口运行 commerce-desktop 组合，由自己的 Bundle 加入产品功能。首版仅启用平台需要的内核服务；上游 Agent 与对话运行时已于 2026-11-08 移除，MCP 保留后续接入路径。首页、市场、设置、更新均按插件组织，关键组件只接受受信任系统实现。上游升级通过依赖更新、适配检查和回归后随底座发布；不承诺任意 Harness 插件即装即用。架构参考：https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md。
 
 沿用 DSH/Cordis 服务、依赖和生命周期规范，在 package.json 增加 commerce 描述，声明界面入口、兼容版本、平台资源、权限和服务贡献。首版插件包为包含已构建界面、程序及依赖的 ZIP 制品，用户无需 Node、Python 或包管理器。SDK 提供工具注册、设置贡献、服务调用、文件选择保存、凭据配置、受控网络、任务取消和资源清理。插件独立安装、启停、卸载和更新；停用释放页面注册、事件和处理进程。安装进入暂存区，校验结构、平台、版本兼容再激活；升级失败保留并恢复上一版本。官方制品须签名验证，本地包显示来源并遵守同样隔离规则。生产不执行安装脚本，包管理不向界面暴露任意命令入口。
 

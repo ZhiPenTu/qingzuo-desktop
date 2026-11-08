@@ -273,7 +273,7 @@ test('model test checks the catalog and sends one bounded chat request', async c
   assert.match(requests[0].messages[0].content, /OK/);
 
   assert.deepEqual(await proxy.testModel({ model: 'not-listed' }), { ok: false, code: 'model_unavailable', message: '这个模型不在当前服务的可用列表中。', model: 'not-listed' });
-  assert.deepEqual(await proxy.testModel({ model: 'gpt-image-2.5' }), { ok: false, code: 'model_not_chat', message: '这个模型不能用于对话测试。', model: 'gpt-image-2.5' });
+  assert.deepEqual(await proxy.testModel({ model: 'gpt-image-2.5' }), { ok: false, code: 'model_not_chat', message: '这个模型不能用于文本补全测试。', model: 'gpt-image-2.5' });
   chatStatus = 400;
   const incompatible = await proxy.testModel({ model: 'fixture-chat-model' });
   assert.equal(incompatible.code, 'model_incompatible');

@@ -102,6 +102,13 @@ test('official AI assistant settings bridge uses market trust and native secrets
       { model: 'fixture-tool-model' },
     ))).toMatchObject({ ok: true, model: 'fixture-tool-model', response: 'OK' });
 
+    const catalog = await settings.evaluate(() => window.commercePlugin.invoke('ai.textModels'));
+    expect(catalog.models.map(model => model.id)).toContain('fixture-tool-model');
+    expect(await settings.evaluate(() => window.commercePlugin.invoke('ai.complete', {
+      model: 'fixture-tool-model',
+      messages: [{ role: 'user', content: 'ping' }],
+    }))).toMatchObject({ content: 'OK', model: 'fixture-tool-model' });
+
     const imagePrompt = app.waitForEvent('window', { timeout: 10000 });
     const imageSetup = settings.evaluate(() => window.commercePlugin.invoke(
       'firstParty.assistant.settings.beginImageKeySetup',

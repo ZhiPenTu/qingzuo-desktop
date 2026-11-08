@@ -4,13 +4,13 @@
 
 | 范围 | 当前证据 |
 | --- | --- |
-| 官方 Harness 内核 | 固定 0.2.2-alpha.2；真实 Profile 启动、7 个系统服务、独立工具执行器、工具服务调用和生命周期释放通过 Node 测试 |
+| 官方 Harness 内核 | 固定 0.2.2-alpha.2；真实 Profile 启动、7 个系统服务、插件工具描述符与沙箱服务路由、工具服务调用和生命周期释放通过 Node 测试 |
 | Electron 自有界面 | v0.2.2 使用 shadcn/ui + Base UI + Tailwind CSS 统一工具中心、市场、管理、设置、更新和编辑器；浅色/深色及 1440×1000、390×844 布局通过界面检查。macOS arm64 与 Windows x64 CI 中独立 WebContentsView 标签页及本地服务运行时的新工具页面通过真实应用和 Playwright Electron 测试；两平台完整打包应用的自有 UI、内核连接、沙箱 OCR 与 PDF 保存通过；未加载上游 UI |
 | 工具中心 | 已安装与全部合并为一个页面，页签在左、状态与操作在右，卡片按图标标题、说明、状态、操作重排；网格宽度自适应，1440/1920/2560/2957 窗口分别为 4/5/7/7 列，说明最多三行且不截断，浅色与深色布局通过界面检查；真实应用 Playwright Electron 流程 20/20 通过 |
 | 插件安装和恢复 | 本地安装/持久化/启停/卸载/升级恢复，损坏与恶意 ZIP、签名校验、版本和依赖拒绝通过测试；真实 Electron 的签名市场安装/更新、错误签名保留原版及内核崩溃恢复通过（使用测试目录与制品） |
 | 插件页面自动化与存储（API 1.3） | 平台契约测试覆盖页面来源白名单、快照脱敏、操作校验、资源转存与请求签名、存储隔离与配额；真实 Electron 测试完成打开页面、拍快照、点击、转存、重启后读取和宿主侧签名。真实第三方站点采集与线上店铺发品仍待人工验收 |
-| 插件文本 AI（API 1.4） | 平台契约测试覆盖完整模型目录、文本模型过滤、单模型对话测试、补全请求组装、输入上限与失败映射；底座连接服务时不指定模型，AI 设置展示服务返回的全部模型并可对文本模型发起最小对话测试，插件申请 `permissions.ai: ['text']` 后通过 `ai.textModels()` 读取目录并自行选择 `ai.complete({ model })`，密钥不出主进程。真实第三方模型服务联调待人工验收 |
-| 插件图像 AI 与共享图像服务 | AI 设置展示 Google、OpenAI 共享服务和兼容服务返回的图片模型目录，并标注来源；兼容目录支持常见图片类型及别名，不混入对话测试。平台契约与真实 Electron 流程覆盖官方密钥、兼容连接、目录刷新、模型展示及密钥不出主进程。真实第三方图片生成调用待人工验收 |
+| 插件文本 AI（API 1.4） | 平台契约测试覆盖完整模型目录、文本模型过滤、单模型文本补全测试、补全请求组装、输入上限与失败映射；底座连接服务时不指定模型，AI 设置展示服务返回的全部模型并可对文本模型发起最小补全测试，插件申请 `permissions.ai: ['text']` 后通过 `ai.textModels()` 读取目录并自行选择 `ai.complete({ model })`，密钥不出主进程。真实第三方模型服务联调待人工验收 |
+| 插件图像 AI 与共享图像服务 | AI 设置展示 Google、OpenAI 共享服务和兼容服务返回的图片模型目录，并标注来源；兼容目录支持常见图片类型及别名，不混入文本补全测试。平台契约与真实 Electron 流程覆盖官方密钥、兼容连接、目录刷新、模型展示及密钥不出主进程。真实第三方图片生成调用待人工验收 |
 | macOS 沙箱 | 当前 macOS 27.0.1 arm64 真实进程阻止目录外读写、符号链接、直接联网和启动其他程序；不可用时拒绝运行 |
 | Windows 沙箱 | Windows Server 2025 x64 CI 中真实 AppContainer 与 Job Object 进程阻止目录外读写、符号链接、直接联网和未授权程序；系统凭据直接读取被拒绝，低完整性工作目录及 SID ACL 清理回归通过；Windows 10 最低系统验收待进行 |
 | LabelEdit | 构建输出的内部库及 Python 框架别名转为普通文件/目录，逐层拒绝外部、循环及损坏链接，保持插件 ZIP 不含链接；独立 ZIP 打包/解包后在真实沙箱中完成 PDF 上传、RapidOCR、文字修改、预览、导出尺寸与源文件不变回归；桌面导出保存通过 |
@@ -173,5 +173,5 @@ macOS 14 与 Windows 10 最低支持系统的沙箱、安装及 GitHub 手动更
 - 移除工作台对话 IPC、`firstParty.assistant.chat`、`ai.assistant.*`、插件工具审批卡与 assistant 事件。保留 `ai.complete()`、`ai.models()`、`ai.batch.*`、批次事件和 `firstParty.assistant.settings`。
 - 删除死代码 `AIChat`、`AISettings`、`HarnessPresentation`、`harness-client` 及对应测试与会话夹具；设置页保留「AI 服务」入口并指向 `official.ai-assistant` 的插件设置页，该页面仍通过第一方设置桥工作，对话入口不再提供。
 - 生产依赖闭包由 806 降至 167；`@deepseek-ai` 由 334 包 / 620MB 降至 12 包 / 1.5MB。
-- 本地验证：`npm run build` 通过；`npm test` 7 个文件 56 个测试通过；`npm run test:platform` 310 个测试通过；`npm run test:harness-contract` 42 个测试通过；`npm run test:kernel` 1 个通过；`npm run upstream:check` 61 项通过；Electron `platform`、`migration`、`tool-surface` 3/3 通过。
-- 尚未验证：完整安装包与 Windows 实机；`official.ai-assistant` 插件仓库需移除聊天页面，`official.ai-image` 需改用 `ai.complete()` 完成提示词优化并删除 `assistant` 权限声明。
+- 本地验证：`npm run build` 通过；`npm test` 7 个文件 57 个测试通过；`npm run test:platform` 312 个测试通过；`npm run test:harness-contract` 42 个测试通过；`npm run test:kernel` 2 个通过；`npm run upstream:check` 63 项通过；Electron `platform`、`migration`、`tool-surface`、`first-party-settings`、`first-party-tier` 5/5 通过；macOS arm64 打包应用通过 `scripts/test-packaged-desktop.mjs` 验收并在本机安装启动。
+- 尚未验证：Windows 实机；`official.ai-assistant` 的 settings-only 0.2.0 仍在本仓库外的 `codex/remove-chat-page` 分支，需审查合并并发布市场后才能替换线上 0.1.2。

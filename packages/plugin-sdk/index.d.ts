@@ -37,11 +37,16 @@ export interface PluginBridge { invoke<T = unknown>(method: string, args?: unkno
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
   ui: string; category?: string; releaseNotes?: string; icon?: string;
-  permissions: { files?: boolean; storage?: boolean; credentials?: string[]; credentialVault?: 'use' | 'manage'; downloads?: DownloadPermission; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('image-edit' | 'text')[]; browser?: ('detect' | 'download' | 'automate')[]; workspace?: boolean; mcp?: 'read'[]; wechat?: ('draft' | 'publish' | 'list')[] };
+  /** `assistant` 自 API 1.13.0 起不再提供能力，仅保留解析以兼容已安装的旧清单。 */
+  permissions: { files?: boolean; storage?: boolean; credentials?: string[]; credentialVault?: 'use' | 'manage'; downloads?: DownloadPermission; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('assistant' | 'image-edit' | 'text')[]; browser?: ('detect' | 'download' | 'automate')[]; workspace?: boolean; mcp?: 'read'[]; wechat?: ('draft' | 'publish' | 'list')[] };
   services?: { provides?: string[]; requires?: string[] };
   backend?: { type: 'node' | 'executable'; entry: Record<string, string> };
   settings?: { title: string; entry: string };
+  /** @deprecated 旧清单兼容：宿主不再展示工具目录，也不会调用这些工具。 */
+  assistant?: { tools: AssistantToolDeclaration[] };
 }
+/** @deprecated 仅用于解析已安装插件的旧清单。 */
+export interface AssistantToolDeclaration { name: string; title: string; description: string; service: string; method: string; parameters: Record<string, unknown> }
 export function createPluginClient(bridge?: PluginBridge): {
   invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
   files: { pick(options?: { extensions?: string[] }): Promise<FileToken | null>; pickMany(options?: { extensions?: string[] }): Promise<FileToken[]>; pickDirectory(): Promise<DirectoryGrant | null>; read(token: string): Promise<{ data: string; mime: string }>; create(options: { data: string; filename: string; mime: string }): Promise<FileToken>; url(token: string): Promise<string>; release(token: string): Promise<void>; save(token: string, filename: string): Promise<boolean> };
