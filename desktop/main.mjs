@@ -59,7 +59,7 @@ const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let window, manager, workers, files, credentials, credentialVault, network, downloads, host, browserRuntime, storage, debugLog, quitting = false, quitReady = false, shutdownPromise, hostReady;
-const exitedHosts = new WeakSet();
+const hostExits = new WeakMap();
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, surfaceEpoch = 0, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -407,7 +407,11 @@ async function syncTools() {
 }
 async function startKernel() {
   debugLog?.record({ scope: 'app', source: 'harness', level: 'info', message: '正在启动工具服务。' });
-  kernelError = null; systems = []; const previousHost = host; host = null; previousHost?.kill();
+  kernelError = null; systems = []; const previousHost = host; host = null;
+  if (previousHost) {
+    previousHost.kill();
+    await Promise.race([hostExits.get(previousHost) ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
+  }
   for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('工具服务已重新启动。')); } kernelRequests.clear();
   host = utilityProcess.fork(path.join(root, 'desktop/kernel-host.mjs'), [], { serviceName: 'Commerce Harness Kernel', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(app.getPath('userData'), 'harness'), DSH_TELEMETRY_DISABLED: '1' } });
   host.stdout?.on('data', data => {
@@ -420,6 +424,7 @@ async function startKernel() {
     if (message) debugLog?.record({ scope: 'app', source: 'harness', level: 'warn', message });
   });
   const currentHost = host;
+  hostExits.set(currentHost, new Promise(resolve => currentHost.once('exit', resolve)));
   hostReady = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('工具服务启动超时。')), 30000);
     host.on('message', async message => {
@@ -430,7 +435,7 @@ async function startKernel() {
       else if (message.type === 'fatal') { clearTimeout(timer); kernelError = message.error; debugLog?.record({ scope: 'app', source: 'harness', level: 'error', message: message.error }); changed(); reject(new Error(message.error)); }
       else if (message.type === 'invoke') { try { const result = await systemInvoke(message.service, message.method, message.args); if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, result }); } catch (error) { if (currentHost === host) currentHost.postMessage({ type: 'result', id: message.id, error: error.message }); } }
     });
-    host.once('exit', code => { exitedHosts.add(currentHost); if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('工具服务已停止运行。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = '工具服务已停止运行（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
+    host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('工具服务已停止运行。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = '工具服务已停止运行（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
   });
   host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json') } });
   await hostReady; await syncTools();
@@ -1098,12 +1103,7 @@ async function shutdownRuntime() {
       activeHost.postMessage({ type: 'shutdown' });
       // The kernel owns a bounded dispose; wait for its exit instead of a fixed
       // delay so a slow teardown is not killed mid-way, then cap the wait.
-      if (!exitedHosts.has(activeHost)) {
-        await new Promise(resolve => {
-          const timer = setTimeout(resolve, 5000);
-          activeHost.once('exit', () => { clearTimeout(timer); resolve(); });
-        });
-      }
+      await Promise.race([hostExits.get(activeHost) ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
       activeHost.kill();
     }
     await debugLog?.flush();

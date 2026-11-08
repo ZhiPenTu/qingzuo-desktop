@@ -1,8 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadProfileDirectory } from '@deepseek-ai/dsh-app-boot';
+import { installFailLoud, loadProfileDirectory } from '@deepseek-ai/dsh-app-boot';
 import { bootCommerceProfile } from './kernel-boot.mjs';
-export async function bootCommerceKernel({ home, installAnchor, invoke = async () => null }) {
+export async function bootCommerceKernel({ home, installAnchor, invoke = async () => null, lifecycle }) {
+  const uninstallFailLoud = installFailLoud('commerce-desktop', process, async () => { await lifecycle?.dispose(); });
+  try {
   const dir = path.join(home, 'profiles', 'commerce-desktop'); await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'commerce-desktop-profile', private: true, dsh: { profile: { bundles: ['@commerce/platform-bundle'] } } }));
   await writeFile(path.join(dir, 'cordis.patch.yml'), '[]\n');
@@ -14,18 +16,11 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
   const patch = '- insert:\n    - id: commerce-bridge\n      name: ' + JSON.stringify(bridgeFile) + '\n';
   await writeFile(path.join(dir, 'cordis.patch.yml'), patch);
   const loaded = loadProfileDirectory('commerce-desktop', dir, installAnchor);
-  let booted;
-  try {
-    booted = await bootCommerceProfile({ name: 'commerce-desktop', home, profile: loaded, installAnchor });
-  } catch (error) {
-    delete globalThis.__commerceBridge;
-    throw error;
-  }
+  const booted = await bootCommerceProfile({ name: 'commerce-desktop', home, profile: loaded, installAnchor, lifecycle });
   const ctx = booted.ctx;
   const runtime = { ctx };
   if (systems.size !== 7) {
     await runtime.ctx.fiber.dispose();
-    delete globalThis.__commerceBridge;
     throw new Error('平台系统插件未能全部加载。');
   }
   async function reconcile(plugins) {
@@ -54,5 +49,15 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
     if (!entry || !fiber) throw new Error('工具服务不可用。');
     return entry.invoke(method, args, caller);
   }
-  return { ...runtime, systems, tools, reconcile, call, shutdown: booted.shutdown, dispose: async () => { await runtime.ctx.fiber.dispose(); delete globalThis.__commerceBridge; } };
+  async function dispose() {
+    try { await runtime.ctx.fiber.dispose(); }
+    finally { delete globalThis.__commerceBridge; uninstallFailLoud(); }
+  }
+  lifecycle?.setTeardown(dispose);
+  return { ...runtime, systems, tools, reconcile, call, shutdown: lifecycle, dispose };
+  } catch (error) {
+    delete globalThis.__commerceBridge;
+    uninstallFailLoud();
+    throw error;
+  }
 }

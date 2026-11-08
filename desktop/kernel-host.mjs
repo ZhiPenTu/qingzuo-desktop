@@ -1,13 +1,24 @@
+import { createKernelLifecycle } from './kernel-lifecycle.mjs';
+
 const channel = process.parentPort ?? process;
 const send = message => process.parentPort ? channel.postMessage(message) : process.send?.(message);
 const pending = new Map(); let counter = 0, runtime;
+// Installed before the first await: a signal or shutdown that arrives while the
+// profile is still being written must wait for the tree instead of killing the
+// process through the default handler.
+const lifecycle = createKernelLifecycle();
+lifecycle.install(process);
 function invoke(service, method, args) { return new Promise((resolve, reject) => { const id = ++counter; pending.set(id, { resolve, reject }); send({ type: 'invoke', id, service, method, args }); }); }
 channel.on('message', async event => {
   const message = process.parentPort ? event.data : event;
   if (message.type === 'init') {
-    try {
+    const booting = (async () => {
       const { bootCommerceKernel } = await import('./kernel.mjs');
-      runtime = await bootCommerceKernel({ ...message.options, invoke });
+      runtime = await bootCommerceKernel({ ...message.options, invoke, lifecycle });
+      return runtime;
+    })().finally(() => lifecycle.markBooted());
+    try {
+      await booting;
       const { Logger } = await import('@deepseek-ai/cordis');
       runtime.ctx.logger.exporter({
         levels: { default: 3 },
@@ -36,8 +47,5 @@ channel.on('message', async event => {
     try { const result = message.type === 'sync' ? await runtime.reconcile(message.plugins) : await runtime.call(message.kind, message.service, message.method, message.args, message.caller); send({ type: 'reply', id: message.id, result }); }
     catch(error) { send({ type: 'reply', id: message.id, error: error.message }); }
   }
-  else if (message.type === 'shutdown') {
-    if (runtime?.shutdown) await runtime.shutdown.shutdown(0);
-    else { await runtime?.dispose(); process.exit(0); }
-  }
+  else if (message.type === 'shutdown') { await lifecycle.shutdown(0); }
 });
