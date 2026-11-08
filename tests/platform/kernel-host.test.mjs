@@ -12,6 +12,7 @@ test('kernel host reports a missing startup module through IPC instead of exitin
   try {
     const entry = path.join(temporary, 'kernel-host.mjs');
     await cp(new URL('../../desktop/kernel-host.mjs', import.meta.url), entry);
+    await cp(new URL('../../desktop/kernel-lifecycle.mjs', import.meta.url), path.join(temporary, 'kernel-lifecycle.mjs'));
     child = fork(entry, [], { cwd: temporary, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     const reply = once(child, 'message', { signal: AbortSignal.timeout(10000) });
     child.send({ type: 'init', options: {} });

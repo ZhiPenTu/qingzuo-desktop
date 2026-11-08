@@ -18,7 +18,7 @@
 - **按需扩展**：插件独立安装、停用、卸载和更新，新增工具不需要重新发布底座。
 - **可信宿主**：工具中心、市场、设置、更新、凭据和沙箱由受保护的系统服务管理。
 - **隔离执行**：插件界面运行在独立会话中，本地程序进入原生系统沙箱；插件代码不会载入 Harness 内核。
-- **AI 协作**：AI 对话可以发现插件能力，但每次工具调用都展示冻结参数并由用户确认。
+- **AI 能力**：插件可调用宿主托管的文本补全与图像批次，密钥不出主进程。
 - **双平台**：支持 macOS 15+ Apple Silicon 和 Windows 10+ x64。
 
 ## 架构
@@ -26,13 +26,13 @@
 ```mermaid
 flowchart TB
   subgraph surfaces["主界面"]
-    Shell["React 主界面<br/>工具中心 · AI 对话 · 设置"]
+    Shell["React 主界面<br/>工具中心 · 插件市场 · 设置"]
   end
 
   subgraph trusted["受信任宿主"]
     direction LR
     Main["Electron 主进程<br/>IPC · Broker · 安装 · 更新 · 生命周期"]
-    Kernel["Harness 内核进程<br/>Profile / Bundle · Agent · Cordis 服务"]
+    Kernel["Harness 内核进程<br/>Profile / Bundle · Cordis 服务"]
     Sandbox["原生沙箱<br/>Seatbelt / AppContainer + Job Object"]
   end
 
@@ -125,7 +125,7 @@ npm run test:desktop
 
 - [架构说明](docs/architecture.md)
 - [插件开发](docs/plugin-development.md)
-- [Harness 对话适配](docs/harness-integration.md)
+- [Harness 内核与 AI 能力](docs/harness-integration.md)
 - [Harness 升级流程](docs/harness-upgrades.md)
 - [发布与版本流程](docs/release-guide.md)
 - [界面设计](docs/design/qingzuo.md)

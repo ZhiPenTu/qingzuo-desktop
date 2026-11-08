@@ -24,10 +24,9 @@ export async function proxyRequest(base, endpoint, options = {}) {
 }
 
 class AIHttpError extends Error {
-  constructor(status, phase) {
-    super(httpSetupError(status, phase).message);
+  constructor(status) {
+    super(httpSetupError(status).message);
     this.status = status;
-    this.phase = phase;
   }
 }
 
@@ -38,13 +37,12 @@ class AISetupError extends Error {
   }
 }
 
-function httpSetupError(status, phase) {
+function httpSetupError(status) {
   if (status === 401) return new AISetupError('invalid_key', '访问密钥无效，请检查后重新粘贴。');
   if (status === 403) return new AISetupError('forbidden', '这个密钥没有调用所选服务的权限，请在服务商后台检查权限。');
   if (status === 404) return new AISetupError('incompatible_address', '服务地址不兼容，请检查是否填写了 OpenAI 兼容接口地址。');
   if (status === 408) return new AISetupError('network_timeout', '连接超时，请检查网络后重试。');
   if (status === 429) return new AISetupError('rate_limited', '请求过于频繁或额度不足，请稍后再试，或检查服务商账户。');
-  if ((status === 400 || status === 422) && phase === 'verify') return new AISetupError('model_incompatible', '这个模型不支持 AI 助手所需的工具调用，请选择其他模型。');
   if (status === 400 || status === 422) return new AISetupError('incompatible_address', '服务地址不兼容，请检查是否填写了 OpenAI 兼容接口地址。');
   if (status >= 500) return new AISetupError('service_unavailable', '服务暂时不可用，请稍后重试。');
   return new AISetupError('request_failed', '连接服务失败，请检查服务地址后重试。');
@@ -55,7 +53,7 @@ function setupFailure(error, models = []) {
     return { ok: false, code: error.code, message: error.message, ...(error.models?.length ? { models: error.models } : models.length ? { models } : {}) };
   }
   if (error instanceof AIHttpError) {
-    const mapped = httpSetupError(error.status, error.phase);
+    const mapped = httpSetupError(error.status);
     return { ok: false, code: mapped.code, message: mapped.message, ...(models.length ? { models } : {}) };
   }
   if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
@@ -72,10 +70,10 @@ function modelTestFailure(error) {
   if (error instanceof AIHttpError) {
     if (error.status === 401) return { ok: false, code: 'invalid_key', message: '访问密钥无效，请检查后重新配置。' };
     if (error.status === 403) return { ok: false, code: 'forbidden', message: '这个密钥没有调用该模型的权限。' };
-    if (error.status === 404) return { ok: false, code: 'model_unavailable', message: '模型不存在，或服务没有提供对话接口。' };
+    if (error.status === 404) return { ok: false, code: 'model_unavailable', message: '模型不存在，或服务没有提供文本补全接口。' };
     if (error.status === 408) return { ok: false, code: 'network_timeout', message: '模型测试超时，请稍后重试。' };
     if (error.status === 429) return { ok: false, code: 'rate_limited', message: '请求过于频繁或额度不足，请稍后再试。' };
-    if (error.status === 400 || error.status === 422) return { ok: false, code: 'model_incompatible', message: '模型未通过对话测试，可能不支持当前聊天接口。' };
+    if (error.status === 400 || error.status === 422) return { ok: false, code: 'model_incompatible', message: '模型未通过文本补全测试，可能不支持当前补全接口。' };
     if (error.status >= 500) return { ok: false, code: 'service_unavailable', message: '模型服务暂时不可用，请稍后重试。' };
     return { ok: false, code: 'request_failed', message: '模型测试失败，请检查服务配置。' };
   }
@@ -137,7 +135,7 @@ export class ProxyRuntime {
   async catalog(connection = null) {
     const { base, key } = connection ?? await this.connection();
     const response = await this.request(base, '/v1/models', { headers: { Authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(15000) });
-    if (!response.ok) { await response.body?.cancel(); throw new AIHttpError(response.status, 'catalog'); }
+    if (!response.ok) { await response.body?.cancel(); throw new AIHttpError(response.status); }
     const value = await boundedJson(response, 1024 ** 2);
     if (!Array.isArray(value.data)) throw new AISetupError('catalog_invalid', '模型列表格式无效，请确认地址来自 OpenAI 兼容服务。');
     return [...new Map(value.data.filter(item => item && typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 160 && !/[\x00-\x1f\x7f]/.test(item.id)).map(item => [item.id, { id: item.id, title: typeof item.display_name === 'string' ? item.display_name.slice(0, 160) : item.id, type: typeof item.type === 'string' ? item.type : '', version: typeof item.version === 'string' ? item.version.slice(0, 160) : '' }])).values()];
@@ -201,7 +199,7 @@ export class ProxyRuntime {
     try {
       model = typeof options.model === 'string' ? options.model.trim() : '';
       if (!model || model.length > 160) throw new AISetupError('invalid_model', '模型标识无效。');
-      if (!isChatModel({ id: model })) throw new AISetupError('model_not_chat', '这个模型不能用于对话测试。');
+      if (!isChatModel({ id: model })) throw new AISetupError('model_not_chat', '这个模型不能用于文本补全测试。');
       const connection = await this.connection(true);
       const catalog = await this.catalog(connection);
       if (!catalog.some(item => item.id === model)) throw new AISetupError('model_unavailable', '这个模型不在当前服务的可用列表中。');
@@ -218,7 +216,7 @@ export class ProxyRuntime {
       });
       if (!response.ok) {
         await response.body?.cancel();
-        throw new AIHttpError(response.status, 'test');
+        throw new AIHttpError(response.status);
       }
       const value = await boundedJson(response, 1024 ** 2);
       const message = value?.choices?.[0]?.message;

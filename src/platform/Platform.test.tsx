@@ -9,8 +9,8 @@ const entry: ToolEntry = { id: 'official.labeledit', title: 'LabelEdit', descrip
 const communityEntry: ToolEntry = { id: 'community.tool', title: '社区工具', description: '社区开发的效率工具', category: '效率工具', version: '1.0.0', tier: 'community' };
 const bundled: Plugin = { id: 'builtin.tool', title: '内置工具', description: '随应用提供的基础工具', category: '效率工具', version: '1.0.0', tier: 'platform', enabled: true, source: 'bundled', local: false, missing: [] };
 const installed: Plugin = { ...entry, version: '0.1.0', enabled: true, source: 'market', local: false, missing: [] };
-const aiAssistant: Plugin = { id: 'official.ai-assistant', title: 'AI 助手', description: '对话与图像服务', category: 'AI 助手', version: '0.1.0', tier: 'platform', enabled: true, source: 'market', local: false, missing: [], settings: { title: 'AI 设置' } };
 const diagnostics: Plugin = { id: 'official.diagnostics', title: '日志调试', description: '查看运行日志', category: '开发工具', version: '0.1.0', tier: 'platform', enabled: true, source: 'market', local: false, missing: [] };
+const aiAssistant: Plugin = { id: 'official.ai-assistant', title: 'AI 助手', description: '文本与图像服务', category: 'AI', version: '0.1.0', tier: 'platform', enabled: true, source: 'market', local: false, missing: [], settings: { title: 'AI 设置' } };
 const job = (status: PluginInstallState['status'], extra: Partial<PluginInstallState> = {}): PluginInstallState => ({ id: entry.id, version: entry.version, status, progress: null, transferred: 0, total: 0, error: null, ...extra });
 
 function fixture(initialJob?: PluginInstallState, hasPlugin = true, migration = false, initialTabs: string[] = [], browser?: BrowserStatus, options: { marketItems?: ToolEntry[]; plugins?: Plugin[] } = {}) {
@@ -388,7 +388,7 @@ it('offers AI and diagnostics market installs without creating shell pages', asy
   await waitFor(() => expect(invoke.mock.calls.some(([method, args]) => method === 'market.install' && (args as { id?: string }).id === 'official.diagnostics')).toBe(true));
 });
 
-it('hides first-party entry points for local or disabled installations and opens installed AI settings', async () => {
+it('hides first-party entry points for local installations and opens installed AI settings', async () => {
   const localAI: Plugin = { ...aiAssistant, source: 'local', tier: 'community' };
   const disabledDiagnostics: Plugin = { ...diagnostics, enabled: false };
   fixture(undefined, true, false, [], undefined, { plugins: [installed, localAI, disabledDiagnostics] });
@@ -398,7 +398,7 @@ it('hides first-party entry points for local or disabled installations and opens
 
   expect(screen.queryByRole('button', { name: 'AI 对话' })).toBeNull();
   expect(screen.queryByRole('button', { name: '日志调试' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'AI 助手暂不可用' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: 'AI 服务暂不可用' }).hasAttribute('disabled')).toBe(true);
 
   cleanup();
   const second = fixture(undefined, true, false, [], undefined, { plugins: [installed, aiAssistant] });

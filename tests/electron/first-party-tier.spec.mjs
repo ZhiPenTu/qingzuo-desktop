@@ -12,11 +12,10 @@ const assistantPlugin = {
   tier: 'official',
   api: '^1.10.0',
   manifest: {
-    ui: 'ui/index.html',
+    ui: 'settings/index.html',
     settings: { title: 'AI 设置', entry: 'settings/index.html' },
   },
   files: {
-    'ui/index.html': '<!doctype html><meta charset="utf-8"><h1>AI 对话</h1>',
     'settings/index.html': '<!doctype html><meta charset="utf-8"><h1>AI 设置</h1>',
   },
 };

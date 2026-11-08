@@ -31,17 +31,11 @@ import { DownloadSourceService } from './download-sources.mjs';
 import { MarketCatalogCache } from './market-cache.mjs';
 import { MarketCatalogStore } from './market-store.mjs';
 import { HARNESS_VERSION } from './harness-version.mjs';
-import { HOST_CHAT_PREFIX, isHostChat, pluginToolCatalog, PluginApprovals } from './ai-plugin-tools.mjs';
 import {
-  FIRST_PARTY_ASSISTANT,
   FIRST_PARTY_DIAGNOSTICS,
   assertFirstPartyAccess,
   firstPartyRule,
   isFirstPartyBridgePlugin,
-  sanitizeAssistantEvent,
-  sanitizeAssistantSession,
-  sanitizeAssistantSummary,
-  sanitizeAssistantTools,
 } from './first-party.mjs';
 import { FirstPartyGrants } from './first-party-grants.mjs';
 import { SecretPrompt } from './secret-prompt.mjs';
@@ -65,6 +59,7 @@ const primary = app.requestSingleInstanceLock();
 const root = fileURLToPath(new URL('../', import.meta.url));
 protocol.registerSchemesAsPrivileged([{ scheme: 'commerce', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'commerce-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let window, manager, workers, files, credentials, credentialVault, network, downloads, host, browserRuntime, storage, debugLog, quitting = false, quitReady = false, shutdownPromise, hostReady;
+const hostExits = new WeakMap();
 const views = new Map(), owners = new Map(), kernelRequests = new Map(); let kernelCounter = 0; let visible = null, surfaceEpoch = 0, systems = [], kernelError = null;
 const pluginSessions = new Map();
 const viewQueues = new Map(), viewEpochs = new Map();
@@ -73,12 +68,11 @@ let updateService, pluginInstallService, updatePreferences;
 let automaticUpdateTimer = null, automaticUpdateInterval = null, automaticUpdateRunning = false;
 let localPreview = false;
 let migration;
-let batches, proxy, imageEditor, textRuntime, approvals, downloadSources, workspace, wechatStore, wechatRuntime, mcpRuntime, awsImporter;
+let batches, proxy, imageEditor, textRuntime, downloadSources, workspace, wechatStore, wechatRuntime, mcpRuntime, awsImporter;
 let marketCache, marketStore;
 let firstPartyGrants, secretPrompt;
 const pendingDebugLogs = [];
 let debugLogEventTimer = null;
-const approvalDialogs = new Set();
 const stoppingPlugins = new Map();
 const generated = app.isPackaged ? path.join(process.resourcesPath, 'commerce') : path.join(root, 'resources/generated');
 const launcher = path.join(generated, 'commerce-sandbox' + (process.platform === 'win32' ? '.exe' : ''));
@@ -193,22 +187,7 @@ function startBrowserResize(args = {}) {
   updateBrowserResize(args.startX);
 }
 function aiChanged(id, event) {
-  if (isHostChat(id)) {
-    const value = { ...event, chatId: id.slice(HOST_CHAT_PREFIX.length) };
-    if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', value);
-    if (value.type === 'approvals') void presentApprovals(id);
-    const safe = sanitizeAssistantEvent(value);
-    if (safe) void sendAssistantEvent(safe);
-    return;
-  }
   const view = views.get(id);
-  if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event);
-}
-async function sendAssistantEvent(event) {
-  if (!manager) return;
-  const plugin = await manager.get(FIRST_PARTY_ASSISTANT).catch(() => null);
-  if (!isFirstPartyBridgePlugin(plugin)) return;
-  const view = views.get(plugin.id);
   if (view && !view.webContents.isDestroyed()) view.webContents.send('commerce:ai', event);
 }
 async function broadcastFirstPartyDebugLogs(entries) {
@@ -226,49 +205,13 @@ async function broadcastFirstPartyDebugLogs(entries) {
     nextCursor: entries.at(-1)?.seq ?? debugLog.sequence,
   });
 }
-async function presentApprovals(owner) {
-  if (!window || window.isDestroyed() || !approvals) return;
-  for (const approval of approvals.list(owner)) {
-    if (approvalDialogs.has(approval.id)) continue;
-    approvalDialogs.add(approval.id);
-    const detail = JSON.stringify({
-      plugin: approval.pluginId,
-      version: approval.version,
-      tool: approval.tool,
-      arguments: approval.args,
-      ...(approval.detail ? { review: approval.detail } : {}),
-    }, null, 2);
-    const result = await dialog.showMessageBox(window, {
-      type: 'warning',
-      modal: true,
-      buttons: ['拒绝', '允许'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-      title: '确认 AI 插件调用',
-      message: '「' + approval.pluginTitle + '」请求执行：' + approval.title,
-      detail: detail.slice(0, 24000) + (detail.length > 24000 ? '\n…' : ''),
-    }).catch(() => ({ response: 0 }));
-    try {
-      if (approvals.list(owner).some(entry => entry.id === approval.id)) {
-        approvals.respond(owner, approval.id, result.response === 1);
-      }
-    } catch {
-      // The session or approval may have expired while the native dialog was open.
-    } finally {
-      approvalDialogs.delete(approval.id);
-    }
-  }
-}
 async function stopPlugin(id) {
   stoppingPlugins.set(id, (stoppingPlugins.get(id) ?? 0) + 1);
   try {
-    approvals?.cancelPlugin(id);
     mcpRuntime?.abortPlugin(id);
     const plugin = await manager.get(id).catch(() => null);
     if (plugin && batches) await batches.stopPlugin(plugin);
     await downloads?.stopOwner(id).catch(() => {});
-    if (host && systems.length === 7) await kernelRequest({ type: 'call', kind: 'ai', method: 'assistant.dispose', caller: id }).catch(() => {});
     for (const [token, directory] of files?.directories || []) if (directory.owner === id) files.directories.delete(token);
     await closeView(id);
   } finally {
@@ -463,9 +406,12 @@ async function syncTools() {
   finally { if (toolSyncPromise === current) toolSyncPromise = null; }
 }
 async function startKernel() {
-  approvals?.dispose();
   debugLog?.record({ scope: 'app', source: 'harness', level: 'info', message: '正在启动工具服务。' });
-  kernelError = null; systems = []; const previousHost = host; host = null; previousHost?.kill();
+  kernelError = null; systems = []; const previousHost = host; host = null;
+  if (previousHost) {
+    previousHost.kill();
+    await Promise.race([hostExits.get(previousHost) ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
+  }
   for (const p of kernelRequests.values()) { clearTimeout(p.timer); p.reject(new Error('工具服务已重新启动。')); } kernelRequests.clear();
   host = utilityProcess.fork(path.join(root, 'desktop/kernel-host.mjs'), [], { serviceName: 'Commerce Harness Kernel', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(app.getPath('userData'), 'harness'), DSH_TELEMETRY_DISABLED: '1' } });
   host.stdout?.on('data', data => {
@@ -478,6 +424,7 @@ async function startKernel() {
     if (message) debugLog?.record({ scope: 'app', source: 'harness', level: 'warn', message });
   });
   const currentHost = host;
+  hostExits.set(currentHost, new Promise(resolve => currentHost.once('exit', resolve)));
   hostReady = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('工具服务启动超时。')), 30000);
     host.on('message', async message => {
@@ -490,7 +437,7 @@ async function startKernel() {
     });
     host.once('exit', code => { if (currentHost !== host) return; for(const p of kernelRequests.values()) {clearTimeout(p.timer);p.reject(new Error('工具服务已停止运行。'));} kernelRequests.clear(); clearTimeout(timer); if (!quitting) { kernelError = '工具服务已停止运行（' + code + '）。'; systems = []; void Promise.all([...views.keys()].map(closeView)).then(() => workers.stopAll()).finally(changed); changed(); reject(new Error(kernelError)); } });
   });
-  host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json'), enableAI: true } });
+  host.postMessage({ type: 'init', options: { home: path.join(app.getPath('userData'), 'harness'), installAnchor: path.join(root, 'package.json') } });
   await hostReady; await syncTools();
 }
 async function catalog(signal, id) {
@@ -726,10 +673,6 @@ function bridgeArgs(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('第一方调用参数无效。');
   return value;
 }
-function chatIdArg(value) {
-  if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/i.test(value)) throw new Error('对话标识无效。');
-  return value;
-}
 function imageProviderArg(value) {
   if (!['google', 'openai'].includes(value)) throw new Error('图像服务无效。');
   return value;
@@ -777,40 +720,6 @@ function diagnosticsStatus(plugin, authorized) {
 async function firstPartyInvoke(plugin, method, rawArgs) {
   const rule = await firstPartyRuleFor(plugin, method);
   const args = bridgeArgs(rawArgs);
-  if (rule.namespace === 'firstParty.assistant.chat') {
-    if (rule.operation === 'list') {
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.list', args: {} });
-      return Array.isArray(value) ? value.map(sanitizeAssistantSummary).filter(Boolean) : [];
-    }
-    if (rule.operation === 'tools') {
-      return sanitizeAssistantTools(pluginToolCatalog(await manager.list()));
-    }
-    if (rule.operation === 'create') {
-      const model = args.model === undefined ? undefined : String(args.model).slice(0, 160);
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.create', args: { model } });
-      return sanitizeAssistantSession(value);
-    }
-    const id = chatIdArg(args.id);
-    if (rule.operation === 'status') {
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.status', args: { id } });
-      return sanitizeAssistantSession({ ...value, waitingForApproval: approvals.list(HOST_CHAT_PREFIX + id).length > 0 });
-    }
-    if (rule.operation === 'send') {
-      if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 16000) throw new Error('助手消息无效。');
-      if (args.model !== undefined && (typeof args.model !== 'string' || args.model.length > 160)) throw new Error('模型标识无效。');
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.send', args: { id, text: args.text, ...(args.model ? { model: args.model } : {}) } }, 0);
-      return sanitizeAssistantSession(value);
-    }
-    if (rule.operation === 'cancel') {
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.cancel', args: { id } }, 0);
-      return sanitizeAssistantSession(value);
-    }
-    if (rule.operation === 'delete') {
-      approvals.cancelOwner(HOST_CHAT_PREFIX + id);
-      await kernelRequest({ type: 'call', kind: 'ai', method: 'chat.delete', args: { id } });
-      return { deleted: true };
-    }
-  }
   if (rule.namespace === 'firstParty.assistant.settings') {
     if (rule.operation === 'status') return proxy.status();
     if (rule.operation === 'models') return proxy.models();
@@ -868,24 +777,6 @@ async function firstPartyInvoke(plugin, method, rawArgs) {
   throw new Error('第一方能力未授权。');
 }
 async function systemInvoke(service, method, args = {}) {
-  if (service === 'ai') {
-    if (method === 'models') return proxy.models();
-    if (isHostChat(args.owner)) {
-      if (method === 'connection') return proxy.connection(true);
-      if (method === 'event') { aiChanged(args.owner, args.event); return; }
-      if (method === 'tools.list') return { plugins: pluginToolCatalog(await manager.list()) };
-      if (method === 'tools.call') return approvals.request(args.owner, args);
-      throw new Error('对话工具接口未授权。');
-    }
-    const plugin = await manager.get(args.owner);
-    if (!plugin.enabled || plugin.missing.length || !plugin.permissions.ai?.includes(method.startsWith('batch.') ? 'image-edit' : 'assistant')) throw new Error('助手调用未授权。');
-    if (method === 'connection') return proxy.connection(true);
-    if (method === 'event') { aiChanged(plugin.id, args.event); return; }
-    if (method === 'batch.get') return batches.snapshot(batches.get(plugin, args.id));
-    if (method === 'batch.revise') return batches.revise(plugin, args);
-    if (method === 'batch.cancel') return batches.cancel(plugin, args.id);
-    throw new Error('助手调用无效。');
-  }
   if (service === 'home' && method === 'list') return (await manager.list()).map(sanitizePlugin);
   if (service === 'sandbox' && method === 'call') {
     const caller = await manager.get(args.caller), provider = await manager.get(args.provider);
@@ -948,16 +839,6 @@ async function performPlatform(method, args) {
 ipcMain.handle('commerce:platform', async (event, method, args = {}) => {
   assertFrame(event, true); validateCall(method, args);
   if (method.startsWith('ai.')) {
-    if (method.startsWith('ai.chat.')) {
-      const operation = method.slice(3);
-      if (operation === 'chat.tools') return pluginToolCatalog(await manager.list());
-      if (operation === 'chat.approve') { approvals.respond(HOST_CHAT_PREFIX + args.id, args.approvalId, args.approve); return { accepted: true }; }
-      if (operation === 'chat.cancel' || operation === 'chat.delete') approvals.cancelOwner(HOST_CHAT_PREFIX + args.id);
-      if (!['chat.list', 'chat.create', 'chat.status', 'chat.send', 'chat.cancel', 'chat.delete'].includes(operation)) throw new Error('对话接口无效。');
-      const value = await kernelRequest({ type: 'call', kind: 'ai', method: operation, args });
-      if (operation === 'chat.status') return { ...value, approvals: approvals.list(HOST_CHAT_PREFIX + args.id) };
-      return value;
-    }
     const operations = { 'ai.status': () => proxy.status(), 'ai.setup': () => proxy.setup(args), 'ai.configure': () => proxy.configure(args), 'ai.start': () => proxy.start(), 'ai.stop': () => proxy.stop(), 'ai.models': () => proxy.models(), 'ai.textModels': () => textRuntime.models(), 'ai.testModel': () => proxy.testModel(args), 'ai.verify': () => proxy.verify(), 'ai.imageStatus': () => imageEditor.sharedStatus(), 'ai.imageModels': () => imageEditor.catalog(), 'ai.configureImage': () => imageEditor.configureShared(args) };
     if (!operations[method]) throw new Error('AI 设置接口无效。');
     return operations[method]();
@@ -1141,18 +1022,16 @@ ipcMain.handle('commerce:plugin', async (event, method, args = {}) => {
     return browserRuntime.saveResource(plugin, args);
   }
   if (method.startsWith('ai.')) {
-    const assistant = method.startsWith('ai.assistant.');
     const text = method === 'ai.textModels' || method === 'ai.complete';
-    if (!plugin.permissions.ai?.includes(assistant ? 'assistant' : text ? 'text' : 'image-edit')) throw new Error('AI 能力未授权。');
+    if (!plugin.permissions.ai?.includes(text ? 'text' : 'image-edit')) throw new Error('AI 能力未授权。');
     if (method === 'ai.textModels') return textRuntime.models();
     if (method === 'ai.complete') return textRuntime.complete(args);
     if (method === 'ai.models') return imageEditor.models(plugin, args);
-    if (assistant) return kernelRequest({ type: 'call', kind: 'ai', method: method.slice(3), args, caller: id });
     if (method === 'ai.batch.list') return batches.list(plugin);
     if (method === 'ai.batch.get') return batches.snapshot(batches.get(plugin, args.id));
     if (method === 'ai.batch.create') return batches.create(plugin, args);
     if (method === 'ai.batch.revise') return batches.revise(plugin, args);
-    if (method === 'ai.batch.start') { const value = await batches.start(plugin, args); void kernelRequest({ type: 'call', kind: 'ai', method: 'batch.track', caller: id, args: { id: args.id } }).catch(() => {}); return value; }
+    if (method === 'ai.batch.start') return batches.start(plugin, args);
     if (method === 'ai.batch.cancel') return batches.cancel(plugin, args.id);
     if (method === 'ai.batch.preview') return batches.preview(plugin, args);
     throw new Error('AI 插件接口无效。');
@@ -1212,7 +1091,6 @@ async function shutdownRuntime() {
     }
     debugLog?.record({ scope: 'app', source: 'app', level: 'info', message: '轻作正在退出。' });
     await pluginInstallService?.shutdown();
-    approvals?.dispose();
     await batches?.shutdown();
     await mcpRuntime?.shutdown();
     await downloads?.shutdown();
@@ -1220,9 +1098,14 @@ async function shutdownRuntime() {
     await browserRuntime?.shutdown();
     await Promise.all([...views.keys()].map(closeView));
     await workers.stopAll();
-    host?.postMessage({ type: 'shutdown' });
-    await new Promise(resolve => setTimeout(resolve, 300));
-    host?.kill();
+    const activeHost = host;
+    if (activeHost) {
+      activeHost.postMessage({ type: 'shutdown' });
+      // The kernel owns a bounded dispose; wait for its exit instead of a fixed
+      // delay so a slow teardown is not killed mid-way, then cap the wait.
+      await Promise.race([hostExits.get(activeHost) ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
+      activeHost.kill();
+    }
     await debugLog?.flush();
   })().finally(() => {
     // Both the updater and the normal before-quit path call app.quit() after
@@ -1316,30 +1199,6 @@ proxy = new ProxyRuntime({ root: proxyRoot, credentials }); await proxy.initiali
 imageEditor = new ImageEditor(credentials, undefined, proxy);
 textRuntime = new TextRuntime({ proxy });
 batches = new BatchRuntime(path.join(app.getPath('userData'), 'ai-batches'), files, imageEditor, aiChanged, workspace, confirmWorkspaceBatch); await batches.initialize();
-approvals = new PluginApprovals({ plugins: () => manager.list(), changed: owner => aiChanged(owner, { type: 'approvals', approvals: approvals.list(owner) }), describe: async (plugin, tool, args) => {
-  if (trustedOfficialTool(plugin, 'official.ai-image') && tool === 'start_batch') { const batch = batches.snapshot(batches.get(plugin, args.id)); if (batch.revision !== args.revision) throw new Error('批次方案已改变。'); return { imageCount: batch.items.length, source: batch.source === 'proxy' ? '外部代理' : '官方图像 API', model: batch.modelId, parameters: batch.parameters, prompts: batch.items.map(item => ({ name: item.name, prompt: item.prompt })), notice: '将逐图请求' + (batch.source === 'proxy' ? '已配置的代理图像服务' : '官方图像 API') + '，可能产生费用或消耗账户额度。确认后还需选择输出目录；不会自动重试失败或未知结果。' }; }
-  return null;
-}, execute: async (plugin, tool, args, owner, signal) => {
-  signal.throwIfAborted();
-  if (tool === 'open' || tool === 'settings') { await openView(plugin.id, tool === 'settings'); if (window && !window.isDestroyed()) window.webContents.send('commerce:ai', { type: 'navigate', pluginId: plugin.id, chatId: owner.slice(HOST_CHAT_PREFIX.length) }); changed(); return { opened: plugin.id, settings: tool === 'settings' }; }
-  if (trustedOfficialTool(plugin, 'official.ai-image') && plugin.permissions.ai?.includes('image-edit')) {
-    if (tool === 'list_batches') return { batches: batches.list(plugin) };
-    if (tool === 'get_batch') return batches.snapshot(batches.get(plugin, args.id));
-    if (tool === 'prepare_plan') return batches.revise(plugin, args);
-    if (tool === 'cancel_batch') return batches.cancel(plugin, args.id);
-    if (tool === 'start_batch') { const directory = await files.pickDirectory(plugin); signal.throwIfAborted(); const current = await manager.get(plugin.id); if (!current.enabled || current.missing.length || current.version !== plugin.version) throw new Error('插件已改变，批图未启动。'); if (!directory) return { canceled: true, started: false }; const batch = await batches.start(current, { ...args, directoryToken: directory.token }); void kernelRequest({ type: 'call', kind: 'ai', method: 'batch.track', caller: plugin.id, args: { id: args.id } }).catch(() => {}); return batch; }
-  }
-  const definition = plugin.assistant?.tools.find(value => value.name === tool);
-  if (!definition || !plugin.backend || !(plugin.services?.provides || []).includes(definition.service)) throw new Error('插件工具未授权。');
-  const worker = await workers.start(plugin, owner);
-  const cancel = () => { void workers.stopCaller(plugin.id, owner).catch(() => {}); };
-  signal.addEventListener('abort', cancel, { once: true });
-  try {
-    signal.throwIfAborted(); const result = await worker.call(definition.method, args);
-    if ((JSON.stringify(result) || '').length > 1000000) throw new Error('插件结果过大。');
-    return { result };
-  } finally { signal.removeEventListener('abort', cancel); if (signal.aborted) await workers.stopCaller(plugin.id, owner); }
-} });
 workers = new Workers(path.join(app.getPath('userData'), 'jobs'), launcher, process.execPath, { log: runtimeLog('plugin') });
 await workers.recover().catch(error => { workers.recoveryError = error.message; console.error('沙箱任务恢复失败：',error.message); });
 const marketConfig = JSON.parse(await readFile(path.join(generated, 'market.json'), 'utf8'));

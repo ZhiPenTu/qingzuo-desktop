@@ -8,9 +8,6 @@ import {
   FIRST_PARTY_DIAGNOSTICS,
   assertFirstPartyAccess,
   firstPartyRule,
-  sanitizeAssistantEvent,
-  sanitizeAssistantSession,
-  sanitizeAssistantTools,
 } from '../../desktop/first-party.mjs';
 import { FirstPartyGrants } from '../../desktop/first-party-grants.mjs';
 
@@ -29,12 +26,14 @@ const trusted = (id = FIRST_PARTY_ASSISTANT) => ({
 
 test('first-party access requires the exact plugin, market source, platform tier, and host allowlist', () => {
   const plugin = trusted();
-  assert.deepEqual(firstPartyRule(plugin.id, 'firstParty.assistant.chat.send'), {
-    namespace: 'firstParty.assistant.chat',
-    operation: 'send',
+  assert.deepEqual(firstPartyRule(plugin.id, 'firstParty.assistant.settings.beginTextSetup'), {
+    namespace: 'firstParty.assistant.settings',
+    operation: 'beginTextSetup',
   });
-  assert.equal(firstPartyRule(plugin.id, 'firstParty.assistant.chat.approve'), null);
-  assert.doesNotThrow(() => assertFirstPartyAccess(plugin, 'firstParty.assistant.chat.send'));
+  assert.equal(firstPartyRule(plugin.id, 'firstParty.assistant.settings.approve'), null);
+  assert.equal(firstPartyRule(plugin.id, 'firstParty.assistant.chat.send'), null);
+  assert.doesNotThrow(() => assertFirstPartyAccess(plugin, 'firstParty.assistant.settings.status'));
+  assert.throws(() => assertFirstPartyAccess(plugin, 'firstParty.assistant.chat.send'), /未授权/);
   for (const changed of [
     { source: 'local' },
     { tier: 'official' },
@@ -43,39 +42,10 @@ test('first-party access requires the exact plugin, market source, platform tier
     { missing: ['workspace'] },
     { id: 'community.ai-assistant' },
   ]) {
-    assert.throws(() => assertFirstPartyAccess({ ...plugin, ...changed }, 'firstParty.assistant.chat.send'), /未授权|不可用/);
+    assert.throws(() => assertFirstPartyAccess({ ...plugin, ...changed }, 'firstParty.assistant.settings.status'), /未授权|不可用/);
   }
   assert.doesNotThrow(() => assertFirstPartyAccess(trusted(FIRST_PARTY_DIAGNOSTICS), 'firstParty.diagnostics.recent'));
   assert.throws(() => assertFirstPartyAccess(trusted(FIRST_PARTY_DIAGNOSTICS), 'firstParty.diagnostics.clear'), /未授权/);
-});
-
-test('assistant DTOs remove approvals, tool arguments, and raw tool results', () => {
-  const session = sanitizeAssistantSession({
-    id: 'session',
-    title: 'Title',
-    state: 'running',
-    partial: 'partial',
-    approvals: [{ id: 'approval', args: { secret: 'value' } }],
-    history: [
-      { role: 'user', text: 'hello' },
-      { role: 'tool', id: 'call', tool: 'call_plugin', pluginId: 'official.demo', args: { password: 'one' }, text: '{"token":"two"}', state: 'succeeded' },
-      { role: 'assistant', text: 'done' },
-      { role: 'system', text: 'hidden' },
-    ],
-  });
-  assert.deepEqual(session.history, [
-    { role: 'user', text: 'hello' },
-    { role: 'tool', id: 'call', tool: 'call_plugin', pluginId: 'official.demo', state: 'succeeded' },
-    { role: 'assistant', text: 'done' },
-  ]);
-  assert.equal('approvals' in session, false);
-  assert.equal(sanitizeAssistantEvent({ type: 'approvals', approvals: [] }), null);
-  assert.deepEqual(sanitizeAssistantTools([{
-    id: 'official.demo',
-    title: 'Demo',
-    description: 'Demo',
-    tools: [{ name: 'open', title: 'Open', parameters: { secret: true } }],
-  }]), [{ id: 'official.demo', title: 'Demo', description: 'Demo', tools: [{ name: 'open', title: 'Open' }] }]);
 });
 
 test('diagnostic grants bind plugin version, artifact digest, API range, and capability', async () => {

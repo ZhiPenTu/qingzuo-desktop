@@ -40,6 +40,7 @@ export async function readHarnessState(directory) {
 export function inspectHarnessState({ metadata, pkg, lock, bundle }) {
   const checks = [], expected = metadata.version;
   checks.push(check('metadata', metadata.schemaVersion === 1 && exact(expected), 'Canonical Harness version must be an exact semver.'));
+  checks.push(check('no-cli-meta', !(metadata.packages ?? []).includes('@deepseek-ai/dsh'), 'The full dsh CLI meta package must stay out of the kernel dependency family.'));
   const declared = Object.keys(pkg.dependencies ?? {}).filter(family).sort();
   checks.push(check('family-members', JSON.stringify(declared) === JSON.stringify([...metadata.packages].sort()), 'Every direct dsh/dsh-* dependency must be listed in the canonical package family.'));
   checks.push(check('family-production-dependencies', ![...Object.keys(pkg.devDependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {})].some(family), 'The runtime Harness family must be declared only as exact production dependencies.'));
@@ -50,8 +51,9 @@ export function inspectHarnessState({ metadata, pkg, lock, bundle }) {
     checks.push(check('direct:' + name, exact(wanted) && wanted === expected && lock.packages?.['']?.dependencies?.[name] === expected && record?.version === expected,
       `${name}: manifest=${wanted}, lock=${record?.version}, required=${expected}`));
   }
-  checks.push(check('bundle-peer', bundle.peerDependencies?.['@deepseek-ai/dsh'] === expected && lock.packages?.['packages/platform-bundle']?.peerDependencies?.['@deepseek-ai/dsh'] === expected,
-    'The platform bundle peer and its lock workspace record must follow the whole family.'));
+  const lockBundle = lock.packages?.['packages/platform-bundle'];
+  checks.push(check('bundle-peer', !!lockBundle && !('@deepseek-ai/dsh' in (bundle.peerDependencies ?? {})) && !('@deepseek-ai/dsh' in (lockBundle.peerDependencies ?? {})),
+    'The platform bundle and its workspace lock record must exist and must not pin the dsh CLI meta package.'));
   for (const name of metadata.cordisPackages) {
     const wanted = pkg.dependencies?.[name], record = lock.packages?.['node_modules/' + name];
     checks.push(check('cordis-pin:' + name, exact(wanted) && record?.version === wanted && lock.packages?.['']?.dependencies?.[name] === wanted,
@@ -80,7 +82,7 @@ export function inspectHarnessState({ metadata, pkg, lock, bundle }) {
   checks.push(check('native-electron', pkg.devDependencies?.electron === native.electron && lock.packages?.['node_modules/electron']?.version === native.electron,
     `Electron must remain at the reviewed ${native.electron} until native runtime validation is updated.`));
   return { schemaVersion: 1, component: 'harness', version: expected, status: checks.every(item => item.status === 'passed') ? 'checked' : 'failed', checks,
-    pending: ['Installed public exports and UI build', 'Old JSONL restore, tool approval and cancel contracts', 'Node and Electron native loader runtime probes', 'Packaged desktop acceptance on macOS 15 / Windows 10'] };
+    pending: ['Installed public exports and renderer build', 'Kernel and AI contracts in the installed tree', 'Node and Electron native loader runtime probes', 'Packaged desktop acceptance on macOS 15 / Windows 10'] };
 }
 
 function resolveLockPackage(lock, location, name) {
@@ -254,7 +256,7 @@ export async function prepareCandidate({ source, directory, version, getPackumen
   const pkg = structuredClone(original.pkg), bundle = structuredClone(original.bundle), metadata = structuredClone(original.metadata);
   for (const name of metadata.packages) pkg.dependencies[name] = version;
   for (const [name, pin] of Object.entries(resolved.versions)) pkg.dependencies[name] = pin;
-  metadata.version = version; bundle.peerDependencies['@deepseek-ai/dsh'] = version;
+  metadata.version = version;
   await save(path.join(directory, 'package.json'), pkg);
   await save(path.join(directory, 'packages/platform-bundle/package.json'), bundle);
   await save(path.join(directory, metadataFile), metadata);
@@ -302,7 +304,7 @@ export async function validateCandidate({ directory, offline = false, runner = r
   if (report.checks.at(-1).status === 'failed') { report.status = 'failed'; return report; }
   if (!offline && !await step('npm-ci', 'npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'])) return report;
   if (offline) {
-    const available = await access(path.join(directory, 'node_modules/@deepseek-ai/dsh/package.json')).then(() => true, () => false);
+    const available = await access(path.join(directory, 'node_modules/' + state.metadata.packages[0] + '/package.json')).then(() => true, () => false);
     report.checks.push(check('offline-prerequisites', available, 'Offline validation requires this candidate’s installed node_modules.'));
     if (!available) { report.status = 'failed'; return report; }
   }
@@ -324,14 +326,12 @@ export async function validateCandidate({ directory, offline = false, runner = r
     try { electron = require('electron'); await access(electron); } catch (error) { report.checks.push(check('native-electron-runtime', false, error.message)); report.status = 'failed'; return report; }
   }
   if (!await step('native-electron-runtime', electron, ['-e', nativeProbe], { ELECTRON_RUN_AS_NODE: '1' })) return report;
-  const exportsProbe = `const meta=JSON.parse(await (await import('node:fs/promises')).readFile('desktop/upstream/harness.json','utf8'));for(const item of meta.publicExports){const root=await import(item.module);for(const name of item.names)if(typeof root[name]!=='function')throw new Error(item.module+' missing public export '+name);}for(const name of meta.serviceModules)await import(name);`;
+  const exportsProbe = `const meta=JSON.parse(await (await import('node:fs/promises')).readFile('desktop/upstream/harness.json','utf8'));for(const item of meta.publicExports){const root=await import(item.module);for(const name of item.names)if(!(name in root)||root[name]===undefined)throw new Error(item.module+' missing public export '+name);}for(const name of meta.serviceModules)await import(name);`;
   if (!await step('public-service-exports', process.execPath, ['--input-type=module', '-e', exportsProbe])) return report;
-  // tsc/Vite exercise UI root exports and their implicit runtime dependencies;
-  // Node cannot import the package's public root because it legitimately has CSS.
+  // tsc/Vite exercise the renderer build; the kernel and AI contracts run in Node.
   if (!await step('ui-and-build', 'npm', ['run', 'build'])) return report;
-  if (!await step('kernel-and-session-contracts', process.execPath, ['--test', 'tests/platform/kernel.test.mjs', 'tests/platform/ai-chat.test.mjs', 'tests/platform/ai-harness-adapter.test.mjs', 'tests/platform/harness-session-compatibility.test.mjs', 'tests/platform/harness-pending-session.test.mjs'])) return report;
-  if (!await step('planning-contracts', process.execPath, ['--test', '--test-name-pattern=Harness', 'tests/platform/ai.test.mjs'])) return report;
-  if (!await step('ui-contracts', 'npm', ['exec', '--', 'vitest', 'run', 'src/platform/AIChat.test.tsx'])) return report;
+  if (!await step('kernel-contracts', process.execPath, ['--test', 'tests/platform/kernel.test.mjs', 'tests/platform/harness-upstream.test.mjs'])) return report;
+  if (!await step('ai-contracts', process.execPath, ['--test', 'tests/platform/ai.test.mjs', 'tests/platform/ai-text.test.mjs', 'tests/platform/ai-proxy-images.test.mjs', 'tests/platform/ai-workspace-batch.test.mjs', 'tests/platform/first-party.test.mjs'])) return report;
   report.status = 'validated';
   return report;
 }
@@ -358,7 +358,7 @@ export async function main(args = process.argv.slice(2)) {
   if (operation === 'check') report = inspectHarnessState(await readHarnessState(directory));
   else if (operation === 'check-upstream') {
     const state = await readHarnessState(directory); report = inspectHarnessState(state);
-    report.release = harnessRelease(state.metadata, await npmPackument('@deepseek-ai/dsh')); report.operation = operation;
+    report.release = harnessRelease(state.metadata, await npmPackument(state.metadata.packages[0])); report.operation = operation;
   } else if (operation === 'prepare') {
     report = await prepareCandidate({ source, directory, version: options.version });
   } else if (operation === 'validate') {

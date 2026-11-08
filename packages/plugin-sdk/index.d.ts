@@ -37,13 +37,16 @@ export interface PluginBridge { invoke<T = unknown>(method: string, args?: unkno
 export interface PluginManifest {
   manifestVersion: 1; id: string; title: string; description: string; api: string;
   ui: string; category?: string; releaseNotes?: string; icon?: string;
+  /** `assistant` 自 API 1.13.0 起不再提供能力，仅保留解析以兼容已安装的旧清单。 */
   permissions: { files?: boolean; storage?: boolean; credentials?: string[]; credentialVault?: 'use' | 'manage'; downloads?: DownloadPermission; network?: string[]; networkHeaders?: string[]; browserOrigins?: string[]; ai?: ('assistant' | 'image-edit' | 'text')[]; browser?: ('detect' | 'download' | 'automate')[]; workspace?: boolean; mcp?: 'read'[]; wechat?: ('draft' | 'publish' | 'list')[] };
   services?: { provides?: string[]; requires?: string[] };
-  assistant?: { tools: { name: string; title: string; description: string; service: string; method: string; parameters: AssistantToolSchema }[] };
   backend?: { type: 'node' | 'executable'; entry: Record<string, string> };
   settings?: { title: string; entry: string };
+  /** @deprecated 旧清单兼容：宿主不再展示工具目录，也不会调用这些工具。 */
+  assistant?: { tools: AssistantToolDeclaration[] };
 }
-export interface AssistantToolSchema { type: 'object' | 'array' | 'string' | 'integer' | 'number' | 'boolean'; description?: string; properties?: Record<string, AssistantToolSchema>; required?: string[]; additionalProperties?: false; items?: AssistantToolSchema; enum?: (string | number | boolean)[]; maxLength?: number; maxItems?: number; minimum?: number; maximum?: number }
+/** @deprecated 仅用于解析已安装插件的旧清单。 */
+export interface AssistantToolDeclaration { name: string; title: string; description: string; service: string; method: string; parameters: Record<string, unknown> }
 export function createPluginClient(bridge?: PluginBridge): {
   invoke<T = unknown>(method: string, args?: unknown): Promise<T>;
   files: { pick(options?: { extensions?: string[] }): Promise<FileToken | null>; pickMany(options?: { extensions?: string[] }): Promise<FileToken[]>; pickDirectory(): Promise<DirectoryGrant | null>; read(token: string): Promise<{ data: string; mime: string }>; create(options: { data: string; filename: string; mime: string }): Promise<FileToken>; url(token: string): Promise<string>; release(token: string): Promise<void>; save(token: string, filename: string): Promise<boolean> };
@@ -112,7 +115,7 @@ export function createPluginClient(bridge?: PluginBridge): {
   storage: { get<T = unknown>(key: string): Promise<T | null>; set(key: string, value: unknown): Promise<boolean>; keys(): Promise<string[]>; remove(key: string): Promise<boolean>; saveFile(options: { data: string; filename: string; mime: string }): Promise<StorageFile>; readFile(token: string): Promise<{ data: string; mime: string }>; removeFile(token: string): Promise<boolean> };
   services: { call<T = unknown>(service: string, method: string, args?: unknown): Promise<T> };
   tasks: { cancel(id: string): Promise<void> };
-  ai: { models(options?: { source?: ImageSource }): Promise<ImageModel[]>; textModels(): Promise<TextModelCatalog>; complete(options: CompleteOptions): Promise<CompleteResult>; batch: { create(options: BatchInput): Promise<ImageBatch>; list(): Promise<ImageBatch[]>; get(options: { id: string }): Promise<ImageBatch>; revise(options: { id: string; revision: number; prompts: string[] }): Promise<ImageBatch>; start(options: { id: string; revision: number; directoryToken?: string; workspacePath?: string; retryFailed?: boolean }): Promise<ImageBatch>; cancel(options: { id: string }): Promise<ImageBatch>; preview(options: { id: string; itemId: string; original?: boolean }): Promise<FileToken> }; assistant: { send(options: { text: string; batchId?: string; model?: string }): Promise<AssistantStatus>; status(): Promise<AssistantStatus>; cancel(): Promise<AssistantStatus> }; onEvent(callback: (event: AIEvent) => void): () => void };
+  ai: { models(options?: { source?: ImageSource }): Promise<ImageModel[]>; textModels(): Promise<TextModelCatalog>; complete(options: CompleteOptions): Promise<CompleteResult>; batch: { create(options: BatchInput): Promise<ImageBatch>; list(): Promise<ImageBatch[]>; get(options: { id: string }): Promise<ImageBatch>; revise(options: { id: string; revision: number; prompts: string[] }): Promise<ImageBatch>; start(options: { id: string; revision: number; directoryToken?: string; workspacePath?: string; retryFailed?: boolean }): Promise<ImageBatch>; cancel(options: { id: string }): Promise<ImageBatch>; preview(options: { id: string; itemId: string; original?: boolean }): Promise<FileToken> }; onEvent(callback: (event: AIEvent) => void): () => void };
   registerTool(value: { title: string }): Promise<void>; registerSettings(value: { title: string }): Promise<void>;
   onDispose(callback: () => void): () => void;
 };
@@ -168,5 +171,4 @@ export type MessagePart = { type: 'text'; text: string } | { type: 'image_url'; 
 export interface CompleteOptions { model?: string; messages: { role: 'system' | 'user' | 'assistant'; content: string | MessagePart[] }[]; temperature?: number; maxTokens?: number; responseFormat?: { type: 'text' | 'json_object' } }
 export interface CompleteResult { content: string; model: string; finishReason?: string | null }
 export interface ImageBatch { schemaVersion: 1; id: string; owner: string; revision: number; created: number; state: 'draft' | 'running' | 'canceling' | 'interrupted' | 'finished' | 'canceled'; mode: 'edit' | 'generate'; source?: ImageSource; modelId: string; parameters: Record<string, string>; concurrency: number; workspacePath?: string | null; items: { id: string; name: string; mime: string | null; prompt: string; state: 'pending' | 'running' | 'unknown' | 'failed' | 'save-failed' | 'succeeded'; error: string | null; output: string | null; outputMime?: string }[] }
-export interface AssistantStatus { id?: string; model?: string; state: 'idle' | 'running'; history: { role: 'user' | 'assistant'; text: string }[]; error?: string | null }
-export type AIEvent = { type: 'batch'; batch: ImageBatch } | { type: 'assistant'; session: AssistantStatus } | { type: 'assistant-delta'; text: string };
+export type AIEvent = { type: 'batch'; batch: ImageBatch };

@@ -1,6 +1,6 @@
 # 插件开发
 
-底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.12.0，兼容更早 API 范围声明的旧插件，插件版本和底座版本独立。
+底座运行官方 Harness Profile/Bundle。第三方的界面和处理代码始终位于隔离进程；内核只加载本项目受信任的声明式 Cordis 适配器。当前插件 API / SDK 为 1.13.0。1.13.0 移除工作台对话、共享助手与 `ai.assistant.*`；声明更早 API 范围的旧插件仍可安装，但只兼容清单解析，旧对话调用会失败。文本能力统一使用 `ai.complete()`，插件版本和底座版本独立。
 
 ## 快速创建
 
@@ -144,13 +144,12 @@ SDK 1.10.0 增加三档信任层与第一方插件的受控宿主桥。市场注
 `firstParty.*` 是宿主内部命名空间，不加入公开 `createPluginClient()`。插件清单不能自行声明平台身份。调用同时要求精确插件 ID、市场来源、`platform` 信任层、已启用状态、无缺失依赖，并且方法在宿主白名单内。当前仅允许：
 
 ```text
-firstParty.assistant.chat.{list,status,tools,create,send,cancel,delete}
 firstParty.assistant.settings.{status,models,testModel,beginTextSetup,beginImageKeySetup,clearImageKey,imageStatus,imageModels}
 firstParty.diagnostics.status
 firstParty.diagnostics.recent
 ```
 
-AI 助手桥只操作宿主工作台会话，不接受 owner、审批 ID 或任意内核方法。返回给插件的会话摘要会移除审批记录、工具参数和原始结果。审批仍由宿主独占，插件不能查询或批准；原生阻塞确认框由主进程显示。文本与图像密钥通过原生安全输入框直接交给宿主，插件只收到脱敏配置状态。
+AI 设置桥只代理宿主 AI 配置，不接受 owner、审批 ID 或任意内核方法。文本与图像密钥通过原生安全输入框直接交给宿主，插件只收到脱敏配置状态。工作台会话、工具目录和审批桥已移除。
 
 诊断桥首次读取前会显示原生授权框，说明日志可能包含本地路径和 URL。授权记录绑定 `pluginId + version + artifactSha256 + apiVersion + capability`，版本、制品摘要或 API 范围变化后失效，卸载时清除。日志在写入和事件广播前统一脱敏常见密钥、Bearer/Basic 令牌、JWT、API key、password/token/secret/signature 字段、URL 用户信息和敏感查询参数，替换为 `[REDACTED]`；普通本地路径、URL、行号和条目顺序保持不变。`onDebugLog` 批次同时提供 `sessionId` 与单调递增游标，插件按 `seq` 去重并检测缺口。
 
@@ -374,7 +373,6 @@ SDK 1.4.0 为「使用底座 AI 配置完成文本任务」补齐插件接口。
 
 - **模型目录**：`ai.textModels()` 返回 `{ models, defaultModel }`，其中 `models` 是服务 `/v1/models` 全部返回中过滤出的可用文本模型（`id`、`title`）；底座不再保存指定模型，`defaultModel` 只是目录中的首个文本模型，方便旧插件兼容。新插件应展示目录并由用户或插件逻辑自行选择。
 - **文本补全**：`ai.complete({ model?, messages, temperature?, maxTokens?, responseFormat? })` 通过主进程调用配置的代理 `/v1/chat/completions`，返回 `{ content, model, finishReason? }`。`messages` 为 1 到 100 条 `system / user / assistant` 消息，单条不超过 10 万字符；`maxTokens` 为 1 到 65536；`responseFormat` 仅接受 `text` 或 `json_object`。密钥不出主进程，请求与响应大小受主进程限制。
-- **共享助手**：`ai.assistant.send({ text, model? })` 也可显式传入目录中的模型；省略时沿用该插件会话已选模型，首次会话回退到目录中的首个文本模型。
 - **清单权限**：`permissions.ai` 新增 `text` 值；`api: '^1.4.0'` 声明本能力。旧插件不受影响。
 
 示例：
@@ -401,9 +399,9 @@ COMMERCE_TEST_NETWORK_ROUTES='{"https://openapi-test01.sheincorp.cn":"http://127
 
 ### API 1.2 本地预览
 
-SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回不透明令牌和名称，不返回路径。`ai.batch.create/get/list/revise/start/cancel/preview` 用于宿主持有的批图任务，`ai.assistant.send/status/cancel` 与 `ai.onEvent()` 用于共享文本助手。类型定义见 SDK `index.d.ts`。
+SDK 1.2.0 新增 `files.pickMany()`、`files.pickDirectory()`；目录仅返回不透明令牌和名称，不返回路径。`ai.batch.create/get/list/revise/start/cancel/preview` 用于宿主持有的批图任务，`ai.onEvent()` 推送批次变化。类型定义见 SDK `index.d.ts`。
 
-清单声明 `permissions.ai: ['assistant', 'image-edit']`，批次还需文件权限。官方图像编辑需声明服务 network origin 和插件隔离凭据 `google-image` / `openai-image`。`ai.models({ source: 'proxy' })` 读取共享代理图片目录，`ai.batch.create({ source: 'proxy', ... })` 固定图片来源、型号与参数；无 source 的旧调用仍使用官方 API。代理图片支持 GPT Image 的 `/v1/images/edits`、Gemini 的 `/v1beta/models/{id}:generateContent` 和目录中 `type: openai-image` 的兼容别名。未知能力不展示推测参数，目录缺失型号不会回退；外部代理兼容模型需配置 `image: true`。切换代理地址后旧批次禁止改投新来源，但已生成结果仍可重新保存。凭据不会返回插件；上传和大响应由可信适配器处理，不放宽通用网络接口限制。模型发现只是读取目录，不验证账户图像权限，也不发送付费生成请求。外部代理的上游重试策略由其管理端配置，轻作本身不重发图片请求。
+清单声明 `permissions.ai: ['image-edit']`，批次还需文件权限。官方图像编辑需声明服务 network origin 和插件隔离凭据 `google-image` / `openai-image`。`ai.models({ source: 'proxy' })` 读取共享代理图片目录，`ai.batch.create({ source: 'proxy', ... })` 固定图片来源、型号与参数；无 source 的旧调用仍使用官方 API。代理图片支持 GPT Image 的 `/v1/images/edits`、Gemini 的 `/v1beta/models/{id}:generateContent` 和目录中 `type: openai-image` 的兼容别名。未知能力不展示推测参数，目录缺失型号不会回退；外部代理兼容模型需配置 `image: true`。切换代理地址后旧批次禁止改投新来源，但已生成结果仍可重新保存。凭据不会返回插件；上传和大响应由可信适配器处理，不放宽通用网络接口限制。模型发现只是读取目录，不验证账户图像权限，也不发送付费生成请求。外部代理的上游重试策略由其管理端配置，轻作本身不重发图片请求。
 
 `batch.create` 固定输入副本和有效提示词，创建草稿而非提交请求。`revise` 使用 revision 检查；`start` 必须携带用户选定的 directoryToken 和当前 revision。重复 start 不重复生成；恢复不重发 unknown 项。`retryFailed: true` 仅显式重试 failed 项，对 save-failed 项只重新保存。关闭工具视图不取消批次，停用和卸载才取消所属任务。
 
@@ -447,10 +445,8 @@ API 1.1 增加 files.url(token) 与 files.release(token)。URL 只在插件自�
 
 停用/卸载时 Cordis 服务注销、视图关闭、文件令牌失效、任务取消并清理进程。不同调用方访问同一服务时使用各自的进程实例，避免共享另一工具的文档状态。
 
-## AI 对话调用插件（API 1.2 本地预览）
+## AI 对话调用插件（已移除）
 
-宿主「AI 对话」通过 Harness 发现已启用插件。所有插件支持确认后打开工具或设置；AI 批图还有可信宿主提供的批次工具。其他本地插件可在清单新增 `assistant.tools`，每个工具包含 `name`、`title`、`description`、`service`、`method` 和 `parameters`。`service` 必须已列入 `services.provides`，且有 backend。参数采用受限 JSON Schema：object/array/string/integer/number/boolean、properties/required、enum 与长度/数值范围；对象必须 `additionalProperties: false`，不接收密钥、密码、令牌或文件路径。最多 16 个工具；保留名称不能覆盖。
-
-例如服务 `local.echo` 可声明 `echo` 方法，参数 `{ "type": "object", "properties": { "text": { "type": "string", "maxLength": 100 } }, "required": ["text"], "additionalProperties": false }`。只有用户确认该插件与参数后，宿主才在独立 OS 沙箱调用 backend。返回值也会发给文本模型，不应包含凭据或其他插件的私有数据。不要用工具描述请求 AI 绕过确认。调用取消或超时不表示所有外部副作用都已回滚。
+API 1.13.0 起移除宿主「AI 对话」、Agent 工具调用与审批卡，`ai.assistant.*` 不再提供。旧清单中的 `permissions.ai: ['assistant']` 和 `assistant.tools` 仍会被解析以兼容已安装插件，但宿主不再展示工具目录或提供调用入口。插件需要模型能力时使用 `ai.complete()`，并在自己的界面内管理消息与确认流程。
 
 上游 UI 复用范围、安全边界和版本升级契约见 [Harness 适配文档](harness-integration.md)。当前只打包本地预览，不发布 SDK 或插件市场更新。

@@ -86,7 +86,6 @@ export function createPluginClient(bridge = globalThis.commercePlugin) {
       textModels: () => invoke('ai.textModels'),
       complete: options => invoke('ai.complete', options),
       batch: Object.fromEntries(['create', 'get', 'list', 'revise', 'start', 'cancel', 'preview'].map(method => [method, args => invoke('ai.batch.' + method, args)])),
-      assistant: Object.fromEntries(['send', 'status', 'cancel'].map(method => [method, args => invoke('ai.assistant.' + method, args)])),
       onEvent: callback => bridge.onAI?.(callback) || (() => {}),
     },
     registerTool: value => invoke('contributions.tool', value),

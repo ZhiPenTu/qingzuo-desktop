@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, Sparkles, MessageCircle, FileText, Image, Globe, Bug, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
+import { Boxes, Store, Puzzle, Settings, RefreshCw, ArrowRight, X, Search, AlertCircle, Monitor, Moon, Sun, LoaderCircle, Upload, FileText, Image, Globe, Bug, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -18,13 +18,14 @@ import { useTheme } from '../theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 import { version } from '../../package.json';
 import { UpdateCard, type UpdateState } from './UpdateCard';
-import { HARNESS_UI_VERSION } from './harness-client';
+import harness from '../../desktop/upstream/harness.json';
 import { resolvePluginIcon } from './plugin-icons';
 import { CapabilitySettings } from './CapabilitySettings';
 type Page = 'home' | 'settings';
 type ToolTab = 'installed' | 'all';
-const FIRST_PARTY_AI_ASSISTANT = 'official.ai-assistant';
 const FIRST_PARTY_DIAGNOSTICS = 'official.diagnostics';
+const FIRST_PARTY_AI_ASSISTANT = 'official.ai-assistant';
+const HARNESS_UI_VERSION = harness.version;
 interface ComponentUpdateState {
   status: string;
   currentVersion?: string;
@@ -109,11 +110,10 @@ export default function Platform() {
   const aiReady = firstPartyReady(aiPlugin);
   const diagnosticsReady = firstPartyReady(diagnosticsPlugin);
   const navigation = useMemo<NavigationItem[]>(() => [
-    ...(aiReady ? [{ id: FIRST_PARTY_AI_ASSISTANT, title: 'AI 对话', icon: MessageCircle }] : []),
     homeNavigation,
     ...(diagnosticsReady ? [{ id: FIRST_PARTY_DIAGNOSTICS, title: '日志调试', icon: ScrollText }] : []),
     settingsNavigation,
-  ], [aiReady, diagnosticsReady]);
+  ], [diagnosticsReady]);
   const shellIconFor = (id: string) => navigation.find(item => item.id === id)?.icon ?? Boxes;
   const [page, setPage] = useState<Page | string>('home');
   const [toolTab, setToolTab] = useState<ToolTab>('installed');
@@ -690,15 +690,15 @@ export default function Platform() {
           <CapabilitySettings desktop={desktop} />
           <Card>
             <CardHeader>
-              <CardTitle role="heading" aria-level={2}>AI 助手</CardTitle>
-              <CardDescription>{aiPlugin ? '对话与图像服务由 AI 助手插件提供。' : '从市场安装后，即可使用对话与图像服务。'}</CardDescription>
+              <CardTitle role="heading" aria-level={2}>AI 服务</CardTitle>
+              <CardDescription>{aiPlugin ? '文本补全与图像服务由 AI 助手插件提供，密钥只保存在本机。' : '从市场安装 AI 助手插件后，即可配置文本补全与图像服务。'}</CardDescription>
               <CardAction className="self-center">
                 {aiPlugin ? (
                   aiReady
-                    ? <Button variant="outline" disabled={busy} onClick={() => void navigate(FIRST_PARTY_AI_ASSISTANT, true)}><Sparkles data-icon="inline-start" />打开 AI 设置<ArrowRight data-icon="inline-end" /></Button>
+                    ? <Button variant="outline" disabled={busy} onClick={() => void navigate(FIRST_PARTY_AI_ASSISTANT, true)}><ArrowRight data-icon="inline-end" />打开 AI 设置</Button>
                     : !aiPlugin.enabled
-                      ? <Button variant="outline" disabled={busy} onClick={() => act('plugins.enable', { id: FIRST_PARTY_AI_ASSISTANT, enabled: true })}>启用 AI 助手</Button>
-                      : <Button variant="outline" disabled>AI 助手暂不可用</Button>
+                      ? <Button variant="outline" disabled={busy} onClick={() => act('plugins.enable', { id: FIRST_PARTY_AI_ASSISTANT, enabled: true })}>启用 AI 服务</Button>
+                      : <Button variant="outline" disabled>AI 服务暂不可用</Button>
                 ) : <Button variant="outline" disabled={!desktop || busy || aiInstalling} onClick={() => act('market.install', { id: FIRST_PARTY_AI_ASSISTANT })}>{aiInstalling ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Store data-icon="inline-start" />}{aiInstalling ? '安装中…' : '从市场安装'}</Button>}
               </CardAction>
             </CardHeader>

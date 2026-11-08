@@ -1,6 +1,6 @@
 # 第三方声明
 
-本项目使用 MIT 许可。DeepSeek Harness 由 DeepSeek 提供，使用 MIT 许可；底座直接依赖官方发布的 `@deepseek-ai/dsh@0.2.2-alpha.2` 及其完整锁定依赖树。分发包包含 `DeepSeek-Harness-LICENSE` 原文和 `THIRD_PARTY_NOTICES.json` 中的生产 Node 依赖及随包许可文本。
+本项目使用 MIT 许可。DeepSeek Harness 由 DeepSeek 提供，使用 MIT 许可；底座只依赖运行内核所需的官方 `@deepseek-ai/dsh-*` 包族，不安装完整 `@deepseek-ai/dsh` CLI 元包。分发包包含 `DeepSeek-Harness-LICENSE` 原文和 `THIRD_PARTY_NOTICES.json` 中的生产 Node 依赖及随包许可文本。
 
 Electron / Chromium / Node 的许可随 Electron 框架分发。LabelEdit 的 PDFium、pypdf、ReportLab、RapidOCR、ONNX Runtime、OpenCV、Python、模型和字体不随底座分发，由独立插件仓库维护第三方许可与资源来源。remove.bg 是第三方在线服务，由独立抠图插件和用户账户按其服务条款使用。
 
