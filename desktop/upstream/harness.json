@@ -4,7 +4,9 @@
   "registry": "https://registry.npmjs.org",
   "channel": "alpha",
   "packages": [
-    "@deepseek-ai/dsh-app-boot"
+    "@deepseek-ai/dsh-app-boot",
+    "@deepseek-ai/dsh-home-paths",
+    "@deepseek-ai/dsh-launch-environment"
   ],
   "cordisPackages": [
     "@deepseek-ai/cordis",
