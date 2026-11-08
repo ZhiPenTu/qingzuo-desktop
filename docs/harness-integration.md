@@ -1,30 +1,21 @@
-# Harness 对话适配与升级契约
+# Harness 内核与 AI 能力边界
 
-轻作不实现第二套 Agent 循环，也不复制 DeepSeek Harness UI 源码。当前统一固定 `0.2.2-alpha.2` 内核包族，只安装实际加载的 `@deepseek-ai/dsh-*` 包，不引入完整 `@deepseek-ai/dsh` CLI 元包（Office、CUA、终端、语音、多模型 SDK 与 Web 前端）。内核通过公开 `agents.create/resume`、`agent.followup/cancel/whenIdle`、`agent.model.select`、`tools.register`、`llm.registerAdapter`、独立原生工具执行器与 JSONL 会话持久化服务运行。`desktop/ai-harness.mjs` 是唯一 Agent 适配层，`desktop/kernel-boot.mjs` 只用 `@deepseek-ai/dsh-app-boot` 的公开 `boot` 组合 Profile；插件不导入 Harness 类型。
+轻作只使用 DeepSeek Harness 的 Profile/Bundle 启动能力，不加载 Agent 循环、对话会话、工具执行器或上游界面。当前固定 `@deepseek-ai/dsh-app-boot@0.2.2-alpha.2`，Cordis 兄弟包按各自版本固定；完整 `@deepseek-ai/dsh` CLI 元包不会进入依赖树。
 
-内核启动不安装环境代理，也不提供 `cmdlineArgs`、`appExit` 与 `appReady`。轻作的模型请求统一由主进程 `secureRequest` 处理，当前装载的服务没有这些消费方；如果以后引入上游 Web、终端或命令行类插件，需要先补回对应契约并重新验证退出与代理行为。
+`desktop/kernel.mjs` 通过 `desktop/kernel-boot.mjs` 调用公开的 `boot`、`createRuntimeResolution`、`readProfilePatches`、`PluginPackages` 与 `installFailLoud` 组合 commerce-desktop Profile。根配置始终重写为空入口列表，patch 由 Profile bundle、profile `cordis.patch.yml` 与 home patch 组合；`profileContext`、插件包解析、fail-loud 和 SIGTERM=0 / SIGINT=130 / 5 秒强退语义与上游启动器一致。
 
-## 对话界面的上游复用
+内核不提供 `cmdlineArgs`、`appExit`、`appReady` 或环境代理。当前装载的七个系统服务没有这些消费方；如果以后引入上游 Web、终端或命令行类插件，需要先补回对应契约并重新验证退出与代理行为。
 
-`src/platform/HarnessPresentation.tsx` 直接导入官方 `@deepseek-ai/dsh-client-ui-primitives` 根导出的 `MarkdownText`、`TextShimmer` 和 `JsonTree`。流式 Markdown 增量解析、代码块、GFM、数学公式、安全 HTML/协议处理、工具参数树与活动动画由上游维护。轻作只通过 CSS 变量映射主题与传入中文标签，不修改 `node_modules`、不导入 `lib/`、`src/` 等内部路径。
+## AI 能力
 
-上游完整 Chat/Conversation 是 Cordis 客户端插件，需要其远程会话控制器、工作区和完整 Web 服务，不是一个可直接嵌入现有 shell 的 React 组件。本版没有打开它们的任意文件、终端、动态插件或 Web 管理接口。会话列表、输入区、插件确认卡是轻作薄壳；这不是完整上游 Chat UI，后续可在公开客户端契约通过权限审计后替换薄壳。前端懒加载，不影响普通工具页启动。
+- 文本：插件申请 `permissions.ai: ['text']` 后，通过 `ai.textModels()` 读取目录，并用 `ai.complete({ model?, messages })` 调用主进程托管的 OpenAI 兼容 `/v1/chat/completions`。密钥不出主进程，请求与响应大小受限。
+- 图像：`ai.models()`、`ai.batch.*` 由主进程图像运行时与批图运行时管理；批次启动仍需用户确认、费用提示和输出目录授权，失败或未知结果不会自动重试。
+- 不提供工作台对话、共享助手、`ai.assistant.*`、Agent 工具调用、审批卡或会话 JSONL。插件如需多轮交互，自行维护消息历史并通过 `ai.complete()` 发送。
+- `official.ai-assistant` 插件的设置页仍可通过第一方 `firstParty.assistant.settings` 桥管理代理与共享图像服务；`firstParty.assistant.chat` 已移除。
 
-薄壳采用单栏对话工作区：历史和插件能力按需打开抽屉，正文独立滚动，输入区固定在底部。布局变化不改变 Harness 消息、会话持久化与工具审批契约，候选升级仍执行同一组兼容测试。
+## 升级与验证
 
-## 插件调用边界
-
-- 工作台对话与每插件批图助手分开，宿主 ID 不可由插件 IPC 获取；工作台会话可新建、切换和恢复。
-- `list_plugins` 只返回已启用且依赖齐全的插件与声明工具。描述和输出是非可信数据，不是指令。
-- `call_plugin` 的插件、参数和版本在确认前冻结；每次调用都需用户确认。拒绝、取消、停用、卸载、版本变化和重复确认不会触发调用。等待最长十分钟；重启不恢复旧授权。
-- 所有插件可打开主界面或配置页；AI 批图另提供批次查询、逐图提示词修改、启动与停止。启动卡展示图片数、型号、参数和逐图提示词，再由原生对话框授予输出目录。不自动导入用户文件、重试图像请求或覆盖原图。
-- 其他插件通过 SDK `assistant.tools` 声明 backend 方法、已提供的 service 和严格 JSON Schema；没有声明的服务方法、密钥、文件路径和令牌不可作为工具参数。宿主复查身份后，使用现有 OS 沙箱为对话单独创建调用方进程，不把第三方代码载入 Harness。
-- 停止对话只撤销未执行的调用并停止正在调用的专属 worker；已确认启动的批图由宿主管理，需通过停止批次工具或插件按钮另外取消。已产生的外部副作用无法回滚；未知结果不能自动重发。
-- 原始 Harness JSONL 是引擎恢复日志；`sessions.json` 只保存薄壳展示和会话索引。界面删除列表记录不清除 JSONL 审计日志。
-
-## 跟随上游升级
-
-不要使用浮动 `latest`、运行时下载 UI 或自动迁移会话。一起更新直接依赖包族和 lockfile，检查公共 UI 导出及依赖，生成第三方声明，然后执行：
+版本来源集中在 `desktop/upstream/harness.json`。升级候选仍按 [整组升级流程](harness-upgrades.md) 准备和验证，重点检查 app-boot 的公开导出、Profile 组合与插件包解析；真实 Electron 应用流程另跑 `npm run test:desktop`：
 
 ```sh
 npm run build
@@ -34,10 +25,4 @@ npm run test:platform
 npm run test:desktop
 ```
 
-候选版本还需用旧 JSONL 会话验证继续对话、取消、工具调用、未确认请求中断恢复和跨插件隔离；先备份 `harness/ai`、`harness/ai-session-logs`、`ai-batches` 与代理配置，再做迁移和安装包验收。升级失败保留旧固定版本及备份。绝不让候选测试访问生产凭据或发起付费生成。
-
-版本来源集中在 `desktop/upstream/harness.json`。`npm run upstream:check` 检查整个直接包族、嵌套包版本、Cordis 依赖范围、平台 Bundle peer、lockfile SRI，以及已审阅的原生加载器与 Electron 组合。`check-upstream` 根据当前 `alpha` 通道查询候选版本，不能用较旧的 `latest` 标签替代当前版本。
-
-`npm run upstream:harness -- prepare --version VERSION --directory output/upstream/harness-candidate` 在独立目录生成包族、Bundle、版本元数据和 lockfile；`validate --directory ...` 安装候选依赖，检查公开接口、Node/Electron 原生加载器、UI 构建与真实 Harness 会话和工具契约。验证使用本地 HTTP 模型响应及已脱敏的旧 JSONL，会话和凭据与实际用户环境分开。完整命令及安装包验收边界见 [整组升级流程](harness-upgrades.md)。
-
-代理适配层现支持按事件解析分片 SSE、推理内容回传、Token 用量、停止词与生成参数，以及区分正常结束、长度上限、过滤、请求失败和取消。长度上限不会执行截断工具调用。图像消息需要接入 Harness 的公开附件服务后才能支持，当前输入仍为文字。
+候选目录只使用本地 HTTP fixture 与合成数据，不访问生产凭据，也不发起付费生成。`npm run upstream:check` 同时阻止完整 CLI 元包被重新加入依赖或 platform-bundle。

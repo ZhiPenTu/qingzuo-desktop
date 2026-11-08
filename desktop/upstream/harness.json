@@ -4,26 +4,7 @@
   "registry": "https://registry.npmjs.org",
   "channel": "alpha",
   "packages": [
-    "@deepseek-ai/dsh-agent",
-    "@deepseek-ai/dsh-agent-loop",
-    "@deepseek-ai/dsh-app-boot",
-    "@deepseek-ai/dsh-client-store",
-    "@deepseek-ai/dsh-client-ui-primitives",
-    "@deepseek-ai/dsh-home-paths",
-    "@deepseek-ai/dsh-jobs",
-    "@deepseek-ai/dsh-jobs-local",
-    "@deepseek-ai/dsh-launch-environment",
-    "@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-scope",
-    "@deepseek-ai/dsh-session",
-    "@deepseek-ai/dsh-session-persistence",
-    "@deepseek-ai/dsh-session-persistence-jsonl",
-    "@deepseek-ai/dsh-session-projection",
-    "@deepseek-ai/dsh-system-prompt",
-    "@deepseek-ai/dsh-tool-executor-native",
-    "@deepseek-ai/dsh-tools",
-    "@deepseek-ai/dsh-util-code-language",
-    "@deepseek-ai/dsh-util-workspace-path"
+    "@deepseek-ai/dsh-app-boot"
   ],
   "cordisPackages": [
     "@deepseek-ai/cordis",
@@ -42,43 +23,9 @@
         "PluginPackages",
         "readProfilePatches"
       ]
-    },
-    {
-      "module": "@deepseek-ai/dsh-launch-environment",
-      "names": [
-        "createLaunchEnvironmentSnapshot",
-        "DSH_LAUNCH_ENVIRONMENT_KEY"
-      ]
-    },
-    {
-      "module": "@deepseek-ai/dsh-llm",
-      "names": [
-        "LlmAdapter",
-        "attributionHeaders",
-        "createUserMessage"
-      ]
     }
   ],
-  "uiExports": {
-    "module": "@deepseek-ai/dsh-client-ui-primitives",
-    "names": [
-      "MarkdownText",
-      "TextShimmer",
-      "JsonTree"
-    ]
-  },
-  "serviceModules": [
-    "@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-session",
-    "@deepseek-ai/dsh-session-projection",
-    "@deepseek-ai/dsh-system-prompt",
-    "@deepseek-ai/dsh-tool-executor-native",
-    "@deepseek-ai/dsh-tools",
-    "@deepseek-ai/dsh-agent",
-    "@deepseek-ai/dsh-jobs-local",
-    "@deepseek-ai/dsh-session-persistence-jsonl",
-    "@deepseek-ai/dsh-agent-loop"
-  ],
+  "serviceModules": [],
   "nativeAdapter": {
     "package": "node-addon-require-builtin",
     "version": "0.1.9",
@@ -95,9 +42,5 @@
     "napi": 9,
     "nodeMajor": 24,
     "electron": "44.0.0"
-  },
-  "sessionFixture": {
-    "version": "0.2.1-alpha.1",
-    "directory": "tests/fixtures/harness/0.2.1-alpha.1"
   }
 }

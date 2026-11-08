@@ -80,7 +80,7 @@ export interface DebugLogState {
 }
 declare global {
   interface Window {
-    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onMarket?(callback: (value: MarketCatalogResult) => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowserPane?(callback: (value: { tabId: string; pluginId: string }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onAI?(callback: (event: import('./harness-client').ChatEvent) => void): () => void; onDebugLog?(callback: (entries: DebugLogEntry[]) => void): () => void };
+    commerceDesktop?: { invoke<T = unknown>(method: string, args?: unknown): Promise<T>; onChanged(callback: () => void): () => void; onMarket?(callback: (value: MarketCatalogResult) => void): () => void; onBrowserResize?(callback: (value: { width: number }) => void): () => void; onBrowserPane?(callback: (value: { tabId: string; pluginId: string }) => void): () => void; onBrowser?(callback: (event: { type: 'status' | 'loading' | 'candidates' | 'download'; tabId?: string; downloadId?: string }) => void): () => void; onDebugLog?(callback: (entries: DebugLogEntry[]) => void): () => void };
     commercePlugin?: PluginBridge & { id: string };
   }
 }

@@ -1,6 +1,6 @@
 # 轻作发布与独立插件
 
-底座版本 0.8.2，插件 API / SDK 1.12.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
+底座版本 0.8.2，插件 API / SDK 1.13.0。底座发布仓库、应用标识、用户目录和 CommerceTools 制品名称保持兼容。macOS 最低版本为 15（Apple Silicon），Windows 为 10+ x64。
 
 ## 分支与合入流程
 
@@ -47,6 +47,8 @@ sdk-v1.10.0 增加三档信任层和第一方插件受控桥。市场注册表�
 sdk-v1.11.0 将 MCP 调用从只读工具扩展为通用工具逐项授权，支持会执行外部操作或产生费用的工具。`readOnlyHint` 只作为服务声明展示，不再作为安全边界；授权、撤销、停用和卸载会取消在途调用。`mcp.call` 新增可选 `inlineImages`，由宿主安全下载图片并转为 MCP image 内容，同时返回 `structuredContent`。SDK 设置 latest=false。
 
 sdk-v1.12.0 为 `wechat.createDraft` 增加原生图片消息草稿。显式传入 `type: 'image'` 时，宿主按顺序上传 1–20 张 PNG/JPEG 为永久素材，再以 `newspic` 请求创建草稿；普通图文在省略 `type` 时保持原有请求与上传方式。SDK 设置 latest=false。
+
+sdk-v1.13.0 移除工作台对话与共享助手：`ai.assistant.send/status/cancel`、`AssistantStatus` 和 `AIEvent` 的 assistant 变体不再提供；`ai.complete()`、`ai.models()` 与 `ai.batch.*` 保持不变。旧清单中的 `permissions.ai: ['assistant']` 与 `assistant.tools` 仍会被解析以兼容已安装插件，但宿主不再暴露调用入口。SDK 设置 latest=false。
 
 市场验证器先升级 SDK 并注册发布者；新版本由客户端从插件 Release 读取，市场只验证来源和兼容快照。
 

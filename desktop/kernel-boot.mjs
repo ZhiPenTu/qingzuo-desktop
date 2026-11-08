@@ -1,7 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { boot, createRuntimeResolution, installFailLoud, PluginPackages, readProfilePatches } from '@deepseek-ai/dsh-app-boot';
-import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment';
 
 const ROOT_CONFIG = '# qingzuo kernel root — an empty entry list.\n[]\n';
 const SHUTDOWN_TIMEOUT_MS = 5000;
@@ -26,7 +25,7 @@ function shutdownController(dispose, exit = code => process.exit(code), timeoutM
 
 // Boot the commerce profile with the same public app-boot contract the upstream
 // launcher uses, without depending on the full dsh CLI meta package.
-export async function bootCommerceProfile({ name, home, profile, installAnchor, environment }) {
+export async function bootCommerceProfile({ name, home, profile, installAnchor }) {
   const rootConfig = path.join(profile.dir, 'cordis.yml');
   await writeFile(rootConfig, ROOT_CONFIG);
   const context = {
@@ -50,7 +49,6 @@ export async function bootCommerceProfile({ name, home, profile, installAnchor, 
   installFailLoud(name, process, async () => dispose());
   const ctx = await boot(name, rootConfig, readProfilePatches(name, context, profile), async hostCtx => {
     hostCtx.provide('profileContext', context);
-    hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment);
     await hostCtx.plugin(PluginPackages, { resolution });
   });
   current = ctx;

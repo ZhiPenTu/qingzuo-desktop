@@ -18,7 +18,7 @@ flowchart TB
 
   subgraph app["轻作桌面端"]
     direction TB
-    Shell["主窗口 React 渲染进程<br/>工具中心 · 插件市场 · AI 对话 · 设置"]
+    Shell["主窗口 React 渲染进程<br/>工具中心 · 插件市场 · 设置"]
     PluginUI["插件页面<br/>WebContentsView + 独立 Session"]
 
     subgraph host["受信任宿主"]
@@ -54,10 +54,10 @@ flowchart TB
 
 | 组件 | 运行位置 | 职责 |
 | --- | --- | --- |
-| React 主界面 | Electron 渲染进程 | 工具中心、市场、插件管理、设置、更新和 AI 对话 |
+| React 主界面 | Electron 渲染进程 | 工具中心、市场、插件管理、设置和更新 |
 | 插件页面 | 独立 `WebContentsView` | 加载插件自带的已构建前端，通过 Plugin SDK 访问宿主 |
 | Electron 主进程 | 主进程 | 校验 IPC、限制页面导航、管理窗口、Broker、安装任务和应用更新 |
-| Harness 内核 | `utilityProcess` | 运行固定版本 Profile/Bundle、Agent 循环、Cordis 服务和工具注册 |
+| Harness 内核 | `utilityProcess` | 运行固定版本 Profile/Bundle、Cordis 服务和工具注册 |
 | 平台系统服务 | Harness 内核中的受信任插件 | 注册工具中心、市场、插件管理、设置、更新、凭据和沙箱服务 |
 | 原生沙箱 | Rust 启动器 | 在 macOS Seatbelt 或 Windows AppContainer + Job Object 中启动本地程序 |
 | 插件 Worker | 第三方进程 | 执行插件声明的本地服务，通过标准输入输出逐行交换 JSON-RPC |
@@ -90,9 +90,9 @@ flowchart TB
 ### Harness 内核
 
 - 内核由 `desktop/kernel-host.mjs` 在独立 utility process 中启动。
-- Profile 只装载 `@commerce/platform-bundle` 和固定的 `@deepseek-ai/dsh-*` 服务。
+- Profile 只装载 `@commerce/platform-bundle` 和固定的 `@deepseek-ai/dsh-app-boot` 启动依赖。
 - 插件同步给内核的是描述符，不是 JavaScript 代码；工具服务最终通过沙箱服务路由到插件 Worker。
-- 工作台 AI 的插件调用先经过冻结参数和用户确认。插件不能访问工作台对话，也不能把说明文字当作系统指令。
+- 内核不加载 Agent 循环、对话会话、工具审批或上游界面。
 
 ### 本地程序
 
@@ -153,13 +153,11 @@ sequenceDiagram
   Main-->>UI: 返回结果或明确错误
 ```
 
-### AI 调用插件
+### AI 能力
 
-1. Harness Agent 通过 `list_plugins` 读取已启用插件和声明工具。
-2. 模型请求 `call_plugin` 时，宿主校验工具参数并生成确认记录。
-3. 用户在界面确认后，宿主再次检查插件版本、工具定义和启用状态。
-4. 调用在独立 Worker 中执行；拒绝、取消、停用、卸载或版本变化都不会触发调用。
-5. 未知结果不会自动重试，避免重复产生外部副作用或费用。
+1. 文本：插件通过 `ai.complete()` 把消息交给主进程托管的 OpenAI 兼容代理，密钥不出主进程。
+2. 图像：插件通过 `ai.batch.*` 创建、修改、启动和停止批次；启动仍需用户确认费用与输出目录。
+3. 宿主不提供工作台对话、Agent 工具调用或审批卡；多轮消息由插件自行维护。
 
 ## 仓库映射
 
@@ -177,7 +175,7 @@ tests/electron/            真实 Electron 流程
 ## 相关文档
 
 - [插件开发](plugin-development.md)
-- [Harness 对话适配](harness-integration.md)
+- [Harness 内核与 AI 能力](harness-integration.md)
 - [Harness 整组升级](harness-upgrades.md)
 - [发布与独立插件](release-guide.md)
 - [第三方许可与声明](third-party-notices.md)

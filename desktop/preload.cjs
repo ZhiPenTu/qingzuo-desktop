@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld('commerceDesktop', Object.freeze({
   onMarket: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:market', listener); return () => ipcRenderer.removeListener('commerce:market', listener); },
   onBrowserResize: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser-resize', listener); return () => ipcRenderer.removeListener('commerce:browser-resize', listener); },
   onBrowserPane: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser-pane', listener); return () => ipcRenderer.removeListener('commerce:browser-pane', listener); },
-  onAI: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:ai', listener); return () => ipcRenderer.removeListener('commerce:ai', listener); },
   onBrowser: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:browser', listener); return () => ipcRenderer.removeListener('commerce:browser', listener); },
   onDebugLog: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('commerce:debug-log', listener); return () => ipcRenderer.removeListener('commerce:debug-log', listener); },
 }));

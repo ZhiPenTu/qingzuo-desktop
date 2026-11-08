@@ -3,15 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, readFile, writeFile, readdir, rename, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createServer } from 'node:http';
 import { ImageEditor, imageOptions, isImageModel } from '../../desktop/ai-images.mjs';
 import { BatchRuntime } from '../../desktop/ai-batches.mjs';
 import { FileBroker } from '../../desktop/brokers.mjs';
 import { ProxyRuntime, proxyAddress } from '../../desktop/ai-proxy.mjs';
-import { bootCommerceKernel } from '../../desktop/kernel.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jAdkAAAAASUVORK5CYII=', 'base64');
-const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit', 'assistant'] } };
+const plugin = { id: 'official.ai-image', title: 'AI 批图', permissions: { files: true, ai: ['image-edit'] } };
 const foreign = { ...plugin, id: 'local.foreign' };
 const credentials = { get: async () => 'fixture-key', set: async () => {} };
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -404,51 +402,4 @@ test('setup keeps image and other catalog entries but rejects an empty catalog',
   assert.equal(custom.ok, true);
   assert.deepEqual(custom.models.map(item => item.id), ['text-embedding-3-large', 'gpt-image-2.5']);
   assert.equal(custom.status.ready, true);
-});
-
-test('real Harness executes only planning tools, streams errors, rejects concurrent sends and resumes sessions', { timeout: 30000 }, async context => {
-  const { root, runtime, token } = await fixture(context);
-  const batch = await runtime.create(plugin, input(token, 2)); let round = 0, fail = false; const calls = [];
-  const server = createServer(async (request, response) => {
-    let bytes = ''; for await (const chunk of request) bytes += chunk;
-    const body = JSON.parse(bytes); calls.push(body); round++;
-    if (fail) { response.writeHead(401); response.end(); return; }
-    response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    const send = delta => response.write('data: ' + JSON.stringify({ choices: [{ delta, finish_reason: null }] }) + '\n\n');
-    if (round === 1) {
-      send({ tool_calls: [{ index: 0, id: 'plan-call', function: { name: 'prepare_plan', arguments: JSON.stringify({ id: batch.id, revision: 1, prompts: ['白底保留文字', '白底柔和阴影'] }) } }] });
-      response.write('data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }) + '\n\n');
-    } else {
-      send({ content: '方案已准备，请确认后执行。' }); response.write('data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }) + '\n\n');
-    }
-    response.end('data: [DONE]\n\n');
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); context.after(() => {
-    server.closeAllConnections();
-    return new Promise(resolve => server.close(resolve));
-  });
-  const invoke = async (_service, method, args) => {
-    if (method === 'connection') return { base: 'http://127.0.0.1:' + server.address().port, key: 'fixture' };
-    if (method === 'models') return [{ id: 'fixture-tool-model' }];
-    if (method === 'batch.revise') { assert.equal(args.owner, plugin.id); return runtime.revise(plugin, args); }
-    if (method === 'batch.get') return runtime.snapshot(runtime.get(plugin, args.id));
-    if (method === 'event') return;
-    return [];
-  };
-  const home = await mkdtemp(path.join(os.tmpdir(), 'qingzuo-harness-ai-')); let kernel = await bootCommerceKernel({ home, enableAI: true, installAnchor: path.resolve('package.json'), invoke });
-  context.after(async () => { await kernel.dispose(); await rm(home, { recursive: true, force: true }); });
-  const pending = kernel.assistant.send(plugin.id, { text: '两张统一白底', batchId: batch.id });
-  await assert.rejects(kernel.assistant.send(plugin.id, { text: 'duplicate' }), /上一条/); await pending;
-  await kernel.assistant.handles.get(plugin.id).agent.whenIdle();
-  assert.equal(kernel.assistant.status(plugin.id).error, null);
-  assert.equal(runtime.get(plugin, batch.id).revision, 2); assert.equal(runtime.get(plugin, batch.id).state, 'draft'); assert.equal(round, 2);
-  assert.ok(calls[0].tools.every(tool => ['prepare_plan', 'get_batch'].includes(tool.function.name)));
-  assert.ok(calls[1].messages.some(message => message.role === 'tool' && message.tool_call_id === 'plan-call'));
-  const id = kernel.assistant.status(plugin.id).id; await kernel.dispose();
-  kernel = await bootCommerceKernel({ home, enableAI: true, installAnchor: path.resolve('package.json'), invoke });
-  await kernel.assistant.send(plugin.id, { text: '继续这个方案' }); await kernel.assistant.handles.get(plugin.id).agent.whenIdle();
-  assert.equal(kernel.assistant.status(plugin.id).id, id); assert.equal(kernel.assistant.status(plugin.id).error, null);
-  assert.ok(calls.at(-1).messages.some(message => message.content?.includes('两张统一白底')));
-  fail = true; await kernel.assistant.send(plugin.id, { text: 'fixture failure' }); await kernel.assistant.handles.get(plugin.id).agent.whenIdle();
-  assert.match(kernel.assistant.status(plugin.id).error, /401/);
 });

@@ -1,4 +1,3 @@
-import aiChatIcon from '@/assets/ai-chat.svg';
 import aiAssistantIcon from '@/assets/plugin-icons/official.ai-assistant.svg';
 import aiImageIcon from '@/assets/plugin-icons/official.ai-image.svg';
 import diagnosticsIcon from '@/assets/plugin-icons/official.diagnostics.svg';
@@ -9,8 +8,6 @@ import seedanceIcon from '@/assets/plugin-icons/official.seedance.svg';
 import seedreamIcon from '@/assets/plugin-icons/official.seedream.svg';
 import sheinFullIcon from '@/assets/plugin-icons/official.shein-full.svg';
 import videoDownloaderIcon from '@/assets/plugin-icons/official.video-downloader.svg';
-
-export { aiChatIcon };
 
 type PluginTier = 'platform' | 'official' | 'community';
 

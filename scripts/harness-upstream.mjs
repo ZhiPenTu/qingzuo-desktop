@@ -82,7 +82,7 @@ export function inspectHarnessState({ metadata, pkg, lock, bundle }) {
   checks.push(check('native-electron', pkg.devDependencies?.electron === native.electron && lock.packages?.['node_modules/electron']?.version === native.electron,
     `Electron must remain at the reviewed ${native.electron} until native runtime validation is updated.`));
   return { schemaVersion: 1, component: 'harness', version: expected, status: checks.every(item => item.status === 'passed') ? 'checked' : 'failed', checks,
-    pending: ['Installed public exports and UI build', 'Old JSONL restore, tool approval and cancel contracts', 'Node and Electron native loader runtime probes', 'Packaged desktop acceptance on macOS 15 / Windows 10'] };
+    pending: ['Installed public exports and renderer build', 'Kernel and AI contracts in the installed tree', 'Node and Electron native loader runtime probes', 'Packaged desktop acceptance on macOS 15 / Windows 10'] };
 }
 
 function resolveLockPackage(lock, location, name) {
@@ -328,12 +328,10 @@ export async function validateCandidate({ directory, offline = false, runner = r
   if (!await step('native-electron-runtime', electron, ['-e', nativeProbe], { ELECTRON_RUN_AS_NODE: '1' })) return report;
   const exportsProbe = `const meta=JSON.parse(await (await import('node:fs/promises')).readFile('desktop/upstream/harness.json','utf8'));for(const item of meta.publicExports){const root=await import(item.module);for(const name of item.names)if(!(name in root)||root[name]===undefined)throw new Error(item.module+' missing public export '+name);}for(const name of meta.serviceModules)await import(name);`;
   if (!await step('public-service-exports', process.execPath, ['--input-type=module', '-e', exportsProbe])) return report;
-  // tsc/Vite exercise UI root exports and their implicit runtime dependencies;
-  // Node cannot import the package's public root because it legitimately has CSS.
+  // tsc/Vite exercise the renderer build; the kernel and AI contracts run in Node.
   if (!await step('ui-and-build', 'npm', ['run', 'build'])) return report;
-  if (!await step('kernel-and-session-contracts', process.execPath, ['--test', 'tests/platform/kernel.test.mjs', 'tests/platform/ai-chat.test.mjs', 'tests/platform/ai-harness-adapter.test.mjs', 'tests/platform/harness-session-compatibility.test.mjs', 'tests/platform/harness-pending-session.test.mjs'])) return report;
-  if (!await step('planning-contracts', process.execPath, ['--test', '--test-name-pattern=Harness', 'tests/platform/ai.test.mjs'])) return report;
-  if (!await step('ui-contracts', 'npm', ['exec', '--', 'vitest', 'run', 'src/platform/AIChat.test.tsx'])) return report;
+  if (!await step('kernel-contracts', process.execPath, ['--test', 'tests/platform/kernel.test.mjs', 'tests/platform/harness-upstream.test.mjs'])) return report;
+  if (!await step('ai-contracts', process.execPath, ['--test', 'tests/platform/ai.test.mjs', 'tests/platform/ai-text.test.mjs', 'tests/platform/ai-proxy-images.test.mjs', 'tests/platform/ai-workspace-batch.test.mjs', 'tests/platform/first-party.test.mjs'])) return report;
   report.status = 'validated';
   return report;
 }
