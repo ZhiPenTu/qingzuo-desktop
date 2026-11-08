@@ -13,12 +13,11 @@ const assistantPlugin = {
   tier: 'platform',
   api: '^1.10.0',
   manifest: {
-    ui: 'ui/index.html',
+    ui: 'settings/index.html',
     settings: { title: 'AI 设置', entry: 'settings/index.html' },
-    permissions: { ai: ['assistant', 'image-edit', 'text'] },
+    permissions: { ai: ['image-edit', 'text'] },
   },
   files: {
-    'ui/index.html': '<!doctype html><meta charset="utf-8"><h1>AI 助手</h1>',
     'settings/index.html': '<!doctype html><meta charset="utf-8"><h1>AI 设置</h1>',
   },
 };
