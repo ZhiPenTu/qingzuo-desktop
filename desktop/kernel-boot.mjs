@@ -42,18 +42,33 @@ export async function bootCommerceProfile({ name, home, profile, installAnchor }
   const resolution = await createRuntimeResolution({ installAnchor, profile, home });
   let current;
   let closing;
-  const dispose = () => {
-    if (!current) return Promise.resolve();
-    return closing ??= Promise.resolve().then(() => current.fiber.dispose());
-  };
-  installFailLoud(name, process, async () => dispose());
-  const ctx = await boot(name, rootConfig, readProfilePatches(name, context, profile), async hostCtx => {
-    hostCtx.provide('profileContext', context);
-    await hostCtx.plugin(PluginPackages, { resolution });
-  });
-  current = ctx;
+  let settled;
+  const booted = new Promise(resolve => { settled = resolve; });
+  // Teardown waits for boot to settle so a signal that arrives mid-boot does
+  // not race the loader: the partial tree handed to the prepare callback is
+  // already disposable, and the root context replaces it once boot returns.
+  const dispose = () => closing ??= booted.then(() => current ? current.fiber.dispose() : undefined);
   const shutdown = shutdownController(dispose);
-  process.on('SIGTERM', () => void shutdown.shutdown(0));
-  process.on('SIGINT', () => void shutdown.interrupt(130));
-  return ctx;
+  const onTerminate = () => void shutdown.shutdown(0);
+  const onInterrupt = () => void shutdown.interrupt(130);
+  process.on('SIGTERM', onTerminate);
+  process.on('SIGINT', onInterrupt);
+  const uninstallFailLoud = installFailLoud(name, process, async () => { await dispose().catch(() => {}); });
+  try {
+    const ctx = await boot(name, rootConfig, readProfilePatches(name, context, profile), async hostCtx => {
+      current = hostCtx;
+      hostCtx.provide('profileContext', context);
+      await hostCtx.plugin(PluginPackages, { resolution });
+    });
+    current = ctx;
+    settled();
+    return { ctx, shutdown };
+  } catch (error) {
+    settled();
+    process.off('SIGTERM', onTerminate);
+    process.off('SIGINT', onInterrupt);
+    uninstallFailLoud();
+    await dispose().catch(() => {});
+    throw error;
+  }
 }

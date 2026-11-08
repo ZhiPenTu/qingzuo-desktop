@@ -14,9 +14,20 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
   const patch = '- insert:\n    - id: commerce-bridge\n      name: ' + JSON.stringify(bridgeFile) + '\n';
   await writeFile(path.join(dir, 'cordis.patch.yml'), patch);
   const loaded = loadProfileDirectory('commerce-desktop', dir, installAnchor);
-  const ctx = await bootCommerceProfile({ name: 'commerce-desktop', home, profile: loaded, installAnchor });
+  let booted;
+  try {
+    booted = await bootCommerceProfile({ name: 'commerce-desktop', home, profile: loaded, installAnchor });
+  } catch (error) {
+    delete globalThis.__commerceBridge;
+    throw error;
+  }
+  const ctx = booted.ctx;
   const runtime = { ctx };
-  if (systems.size !== 7) { await runtime.ctx.fiber.dispose(); throw new Error('平台系统插件未能全部加载。'); }
+  if (systems.size !== 7) {
+    await runtime.ctx.fiber.dispose();
+    delete globalThis.__commerceBridge;
+    throw new Error('平台系统插件未能全部加载。');
+  }
   async function reconcile(plugins) {
     // Descriptors only. Third-party JS never enters this process.
     for (const fiber of adapters.values()) await fiber.dispose();
@@ -43,5 +54,5 @@ export async function bootCommerceKernel({ home, installAnchor, invoke = async (
     if (!entry || !fiber) throw new Error('工具服务不可用。');
     return entry.invoke(method, args, caller);
   }
-  return { ...runtime, systems, tools, reconcile, call, dispose: async () => { await runtime.ctx.fiber.dispose(); delete globalThis.__commerceBridge; } };
+  return { ...runtime, systems, tools, reconcile, call, shutdown: booted.shutdown, dispose: async () => { await runtime.ctx.fiber.dispose(); delete globalThis.__commerceBridge; } };
 }

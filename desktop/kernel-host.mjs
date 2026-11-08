@@ -36,5 +36,8 @@ channel.on('message', async event => {
     try { const result = message.type === 'sync' ? await runtime.reconcile(message.plugins) : await runtime.call(message.kind, message.service, message.method, message.args, message.caller); send({ type: 'reply', id: message.id, result }); }
     catch(error) { send({ type: 'reply', id: message.id, error: error.message }); }
   }
-  else if (message.type === 'shutdown') { await runtime?.dispose(); process.exit(0); }
+  else if (message.type === 'shutdown') {
+    if (runtime?.shutdown) await runtime.shutdown.shutdown(0);
+    else { await runtime?.dispose(); process.exit(0); }
+  }
 });
