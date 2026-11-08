@@ -47,7 +47,9 @@ test('the kernel host disposes its tree before exiting on a shutdown message', a
   }
 });
 
-test('a signal during profile boot still exits with the documented code', async () => {
+test('a signal during profile boot still exits with the documented code', {
+  skip: process.platform === 'win32' ? 'Windows has no POSIX signal exit contract; shutdown uses IPC there.' : false,
+}, async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'commerce-kernel-signal-'));
   const child = fork(path.resolve('desktop/kernel-host.mjs'), [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   try {
