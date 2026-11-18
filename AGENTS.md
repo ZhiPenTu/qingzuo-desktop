@@ -61,6 +61,14 @@ npm run upstream:check                # 固定上游包与 lockfile 一致性
 
 仓库没有配置独立 lint 脚本；以 TypeScript 严格检查、构建和对应测试作为静态验证。不要为了通过检查而放宽 `tsconfig.json` 的 `strict`、`noUnusedLocals` 或 `noUnusedParameters`。
 
+## 构建缓存清理
+
+- 先用 `npm run clean:cache -- --dry-run` 确认范围，再执行 `npm run clean:cache`；默认只清 `native/sandbox/target` 的 `debug/incremental`。
+- 安装包历史版本用 `npm run clean:releases` 清理：每个平台/架构保留最近 2 个版本，`latest-mac.yml`、`builder-*.yml` 和签名相关文件必须保留。
+- `npm run clean:cache:deep` 会删除整个 native debug 目录；配合 `--releases` 时只保留 1 个版本并删除解包目录。深度清理只在磁盘紧张时手动执行，不得接入 CI 或发布流程。
+- 始终保留 `node_modules`、`.venv`、`.models`、`dist`、`build` 和最新安装包；清理前确认没有 Electron 打包或沙箱构建在运行。
+- 历史版本清理只删除已发布且不再用于回滚验证的旧安装包；删除前至少确认最新版本已通过打包验收。
+
 ## 实现约定
 
 - 优先使用现有模块、类型和公开接口；不要直接修改 `node_modules`，也不要从 Harness 的内部 `lib/`、`src/` 路径导入。
